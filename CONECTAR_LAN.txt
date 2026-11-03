@@ -1,0 +1,20 @@
+=====================================================
+      DOODLE DISTRICT - COMO JOGAR COM COLEGAS (LAN) 
+=====================================================
+
+1. Link principal para seus colegas abrirem no navegador:
+   http://10.63.30.10:8910
+
+2. Outros enderecos de rede disponíveis (se necessario):
+   http://172.29.128.1:8910
+
+COMO JOGAR JUNTOS:
+- Você joga diretamente no aplicativo aberto no seu PC.
+- Seus colegas abrem o link acima no navegador deles (Chrome/Edge/Firefox).
+- No menu do jogo, vá em 'JOGAR ONLINE' e crie uma sala ('Criar Sala').
+- Passe o código de 5 letras da sala para seus colegas digitarem em 'Tem o código da sala?'.
+
+DICA DE REDE:
+- Todos devem estar conectados na mesma rede Wi-Fi ou no mesmo cabo de rede.
+- Se o Windows exibir um aviso de Firewall, clique em 'Permitir acesso em redes privadas'.
+=====================================================

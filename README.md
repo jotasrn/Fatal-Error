@@ -9,13 +9,28 @@ files: the paper, the ink outlines, the hatching, the enemies and the music are 
 
 ## Running it
 
-It is a static site, so any web server works. Locally:
+### Opção 1: Executável Nativo Windows (.exe)
+Dê um duplo clique em `DoodleShooter.exe` na pasta raiz.
+- Abre o jogo diretamente em uma **janela nativa de desktop** (não abre o navegador).
+- Inicia automaticamente o servidor de rede local seguro em segundo plano.
+- Gera o arquivo `CONECTAR_LAN.txt` com o link direto para seus colegas entrarem na mesma rede Wi-Fi / cabo.
 
+### Opção 2: Launcher Python & Servidor LAN
 ```bash
-python3 serve.py 8910
+python launcher.py
+```
+ou no modo servidor dedicado sem janela:
+```bash
+python launcher.py --server-only
 ```
 
-then open http://127.0.0.1:8910. On Vercel (or any static host) just deploy the folder as is.
+### Segurança na Rede Local (LAN / Wi-Fi compartilhado)
+- **Janela de Jogo Nativa**: Roda com Edge Chromium / WebView2 isolado.
+- **Proteção contra Path Traversal**: Impede estritamente navegação para fora da pasta do jogo (`..`).
+- **Bloqueio de Arquivos Confidenciais**: Impede acesso a arquivos ocultos (`.git`, `.env`, `.claude`) e scripts do sistema (`.py`, `.exe`).
+- **Listagem de Pastas Desativada**: Retorna 404/403 evitando varredura e enumeração de arquivos.
+- **Cabeçalhos de Segurança (CSP Rigoroso)**: Permite apenas assets locais e WebRTC seguro via PeerJS/STUN.
+- **Rate Limiting Anti-Scan / Anti-DDoS**: Limite por IP para barrar scripts e ferramentas de ataque na rede local.
 
 ## Modes
 
@@ -28,50 +43,48 @@ server. Under PLAY ONLINE you can Quick Play (joins an open public lobby, or ope
 create a public or private lobby, or join a friend's lobby with their five letter code. People can
 join a match already in progress. The host's browser keeps score; each player runs their own body.
 
-## Controls
+## Controles & Mecânicas
 
-| Action | Mouse + keyboard | PS5 controller |
+| Ação | Teclado + Mouse | Controle PS5 |
 | --- | --- | --- |
-| Move / look / sprint | WASD, mouse, Shift | L stick, R stick, L3 |
-| Fire / slash | LMB | R2 |
-| Aim / block (katana) | RMB | L2 |
-| Jump, wall jump, double jump | Space | ✕ |
-| Slide, air dash | C / Ctrl (X, Alt) | ○ |
-| Grapple (hold to reel) | Q / E | L1 |
-| Quick katana slash | F | R1 |
-| Reload | R | □ |
-| Grenade (hold to throw further) | G | R3 or d-pad up |
-| Katana dash (gauge lit) | both mouse buttons or X | L2 + R2 |
-| Weapons | 1-4 / wheel | △, d-pad |
-| Scoreboard (online) | Tab | Create |
-| Menu | Esc | Options |
+| Mover / Olhar / Correr | WASD, mouse, Shift | Analógico L, Analógico R, L3 |
+| Atirar / Cortar | LMB | R2 |
+| Mirar / Bloquear (katana) | RMB | L2 |
+| Pular, Pulo na Parede, Pulo Duplo | Espaço | ✕ |
+| Deslizar no chão, Investida no ar | C / Ctrl (X, Alt) | ○ |
+| Gancho (segure para puxar) | Q / E | L1 |
+| Golpe rápido de Katana | F | R1 |
+| Recarregar | R | □ |
+| Granada (segure para arremessar longe) | G | R3 ou D-Pad Cima |
+| Loja / Comprar Armas & Coletes | **B** | **D-Pad Baixo** |
+| Corte Foco Katana (barra cheia) | Ambos os botões ou X | L2 + R2 |
+| Selecionar Armas | 1-6 / Scroll | △, D-Pad |
+| Placar (Online) | Tab | Create |
+| Menu / Pausa | Esc | Options |
 
-On-screen hints follow whichever device you touched last.
+## Sistema de Economia & Roguelite ("Ao morrer perde tudo")
+- **Início com Pistola**: Você inicia apenas com o Revólver (Slot 1) e a Katana (Slot 6).
+- **Ganhando Dinheiro ($)**:
+  - Abate comum: `+$75`
+  - Tiro na Cabeça (Headshot): `+$150`
+  - Abate na Katana / Parada Perfeita: `+$175`
+  - Concluir Onda: `+$300` + bônus
+  - Destruir Piñatas e Objetos: `+$25`
+- **Loja do Caderno (Tecla B)**:
+  - **Escopeta (Slot 2)**: $600
+  - **Rifle de Assalto (Slot 3)**: $900
+  - **Sniper (Slot 4)**: $1200
+  - **Bazuca (Slot 5)**: $1800
+  - **Colete Leve (+50 Armadura)**: $300 (absorve 70% do dano)
+  - **Colete Reforçado (100 Armadura)**: $600
+  - **Recarga Total de Munição**: $150
+  - **+2 Granadas**: $200
+- **Ao Morrer Perde Tudo**: Se você morrer, seu saldo de dinheiro zera, sua armadura é destruída e todas as armas compradas voltam a ficar bloqueadas.
 
-## Weapons and gear
-
-Rifle, shotgun, sniper (with scope) and a katana. Holding block with the katana parries
-some incoming bullets and returns a share of them. Katana kills charge a gauge; when it is lit you
-can dash to a marked enemy and execute it (solo only). Grenades bounce, then go off in a thick orange blast that scorches the paper; holding the
-button winds up a longer throw and shows the arc. The grapple runs on breath: hanging drains it,
-landing refills it, and a slash through someone's rope cuts it. Against other players a raised katana parries
-slashes and turns some bullets aside, and the guns use their own damage table; the sniper still erases in one shot.
-
-## Maps
-
-- **Doodle District**: streets, rooftops and fire escapes, with grapple rings on the high spots. Solo
-  plays the tight original block. A match opens it up: a ring of empty street, walls, a ribbed dome
-  that cannot be hooked, an open field in the middle crossed by a ruler bridge, a few pads hung from
-  the dome, and slow paper planes you can hook and ride (the solo planes too).
-- **Doodle Mexico**: a sun-baked pueblo. A plaza with a fountain and a giant sombrero floating over it,
-  a bandstand where three mariachis never stop playing, a church with a bell tower you can climb and
-  a domed second tower, adobe houses with roof stairs, papel picado strung across the square, a
-  market of striped stalls and hanging piñatas, a taco cart, cacti and mesas all around. Pots, crates,
-  barrels, cacti and piñatas all break under bullets, blades and blasts; piñatas drop tacos, which are
-  the health pickups here. The map plays its own mariachi waltz.
-
-Pick the map on the main menu for solo; the host picks it in the lobby for a match, and everyone
-starts in a different spot.
+## Mapas
+- **Distrito Doodle**: Ruas, becos, escadas de incêndio e telhados.
+- **Doodle México**: Praça ensolarada, fonte, mariachis, piñatas com tacos e cactos.
+- **Mesa de Estudos**: Mesa de estudos escolar gigante com pilhas de livros formando torres, pontes de réguas, borrachas como trincheiras, apontadores e aviões de papel voando.
 
 ## Enemies
 

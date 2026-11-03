@@ -36,7 +36,7 @@ class ViewModel {
     this.aimAmt = 0; this.sprintAmt = 0; this.equipT = 0;
   }
   setSight(x, y, z, dist) { this.aimPos.set(-x * this.scale, -y * this.scale, -z * this.scale - dist); }
-  equip() { this.equipT = 0; this.root.visible = true; }
+  equip() { this.equipT = 0; this.root.visible = true; if (this.loadedRocket) this.loadedRocket.visible = this.mag > 0; }
   unequip() { this.root.visible = false; }
   animate(dt, st) {
     const lx = clamp(st.lookDelta.x, -0.12, 0.12), ly = clamp(st.lookDelta.y, -0.12, 0.12);
@@ -63,10 +63,11 @@ class ViewModel {
 }
 
 const GUNS = {
-  rifle: { name: '步枪', hint: '全自动 · 让红点对准他们', kind: 'rifle', magSize: 35, reserve: 175, maxReserve: 350, interval: 1 / 11, damage: 24, headMul: 2.6, pellets: 1, spread: 0.016, adsSpread: 0.0034, spreadKick: 0.009, spreadMax: 0.075, adsFov: 58, sight: [0, 0.12, -0.05, 0.3], camKick: [0.009, 0.0034], modelKick: [0.25, 0.3, 2.4, -3.2, 0.9, 1.2], fovKick: 1.2, reloadDur: 1.45, reloadType: 'mag', auto: true, falloff: null, tracer: 0.02, flashScale: 1, sound: 'shot', shell: [0.02, INK.ORANGE], moveSpread: 0.0012, pvp: [19, 1.8, null] },
-  shotgun: { name: '霰弹枪', hint: '泵动 · 近距离威力惊人', kind: 'shotgun', magSize: 6, reserve: 36, maxReserve: 72, interval: 0.78, damage: 19, headMul: 1.8, pellets: 10, spread: 0.062, adsSpread: 0.034, spreadKick: 0, spreadMax: 0.1, adsFov: 68, sight: [0, 0.095, -1.0, 0.52], camKick: [0.05, 0.012], modelKick: [0.4, 0.6, 5, -9, 2, 3], fovKick: 4, reloadDur: 0.45, reloadType: 'shells', auto: false, falloff: [11, 32, 0.22], tracer: 0.014, flashScale: 1.9, sound: 'shotgunFire', shell: [0.035, INK.RED], moveSpread: 0.0006, cycleDur: 0.45, pvp: [16, 1.6, [9, 26, 0.15]] },
-  sniper: { name: '狙击枪', hint: '栓动狙击 · 一枪一个擦除', kind: 'sniper', scope: true, magSize: 5, reserve: 25, maxReserve: 50, interval: 0.2, damage: 150, headMul: 3, pellets: 1, spread: 0.075, adsSpread: 0.0004, spreadKick: 0.05, spreadMax: 0.14, adsFov: 20, sight: [0, 0.135, 0, 0.42], camKick: [0.055, 0.008], modelKick: [0.25, 0.8, 4.5, -11, 1.2, 2], fovKick: 4.5, reloadDur: 2.1, reloadType: 'mag', auto: false, falloff: null, tracer: 0.03, flashScale: 1.7, sound: 'sniperFire', shell: [0.03, INK.ORANGE], moveSpread: 0.004, cycleDur: 0.85, pvp: [150, 1.5, null] },
-  revolver: { name: '左轮手枪', hint: '手炮 · 爆头即擦除', kind: 'revolver', magSize: 6, reserve: 36, maxReserve: 72, interval: 0.3, damage: 62, headMul: 3, pellets: 1, spread: 0.006, adsSpread: 0.002, spreadKick: 0.02, spreadMax: 0.06, adsFov: 52, sight: [0, 0.08, -0.34, 0.42], camKick: [0.038, 0.007], modelKick: [0.3, 0.9, 3.2, -10, 1.5, 2.5], fovKick: 2.5, reloadDur: 1.9, reloadType: 'cylinder', auto: false, falloff: null, tracer: 0.026, flashScale: 1.35, sound: 'revolver', shell: null, moveSpread: 0.0015, pvp: [52, 2.9, [9, 34, 0.42]] },
+  rifle: { name: 'Rifle', hint: 'Automático · Alinhe a mira neles', kind: 'rifle', magSize: 35, reserve: 175, maxReserve: 350, interval: 1 / 11, damage: 24, headMul: 2.6, pellets: 1, spread: 0.016, adsSpread: 0.0034, spreadKick: 0.009, spreadMax: 0.075, adsFov: 58, sight: [0, 0.12, -0.05, 0.3], camKick: [0.009, 0.0034], modelKick: [0.25, 0.3, 2.4, -3.2, 0.9, 1.2], fovKick: 1.2, reloadDur: 1.45, reloadType: 'mag', auto: true, falloff: null, tracer: 0.02, flashScale: 1, sound: 'shot', shell: [0.02, INK.ORANGE], moveSpread: 0.0012, pvp: [19, 1.8, null] },
+  shotgun: { name: 'Escopeta', hint: 'Ação por bombeamento · Devastadora a curta distância', kind: 'shotgun', magSize: 6, reserve: 36, maxReserve: 72, interval: 0.78, damage: 19, headMul: 1.8, pellets: 10, spread: 0.062, adsSpread: 0.034, spreadKick: 0, spreadMax: 0.1, adsFov: 68, sight: [0, 0.095, -1.0, 0.52], camKick: [0.05, 0.012], modelKick: [0.4, 0.6, 5, -9, 2, 3], fovKick: 4, reloadDur: 0.45, reloadType: 'shells', auto: false, falloff: [11, 32, 0.22], tracer: 0.014, flashScale: 1.9, sound: 'shotgunFire', shell: [0.035, INK.RED], moveSpread: 0.0006, cycleDur: 0.45, pvp: [16, 1.6, [9, 26, 0.15]] },
+  sniper: { name: 'Sniper', hint: 'Ação por ferrolho · Um tiro, uma eliminação', kind: 'sniper', scope: true, magSize: 5, reserve: 25, maxReserve: 50, interval: 0.2, damage: 150, headMul: 3, pellets: 1, spread: 0.075, adsSpread: 0.0004, spreadKick: 0.05, spreadMax: 0.14, adsFov: 20, sight: [0, 0.135, 0, 0.42], camKick: [0.055, 0.008], modelKick: [0.25, 0.8, 4.5, -11, 1.2, 2], fovKick: 4.5, reloadDur: 2.1, reloadType: 'mag', auto: false, falloff: null, tracer: 0.03, flashScale: 1.7, sound: 'sniperFire', shell: [0.03, INK.ORANGE], moveSpread: 0.004, cycleDur: 0.85, pvp: [150, 1.5, null] },
+  revolver: { name: 'Revólver', hint: 'Canhão de mão · Tiro na cabeça elimina na hora', kind: 'revolver', magSize: 6, reserve: 36, maxReserve: 72, interval: 0.3, damage: 62, headMul: 3, pellets: 1, spread: 0.006, adsSpread: 0.002, spreadKick: 0.02, spreadMax: 0.06, adsFov: 52, sight: [0, 0.08, -0.34, 0.42], camKick: [0.038, 0.007], modelKick: [0.3, 0.9, 3.2, -10, 1.5, 2.5], fovKick: 2.5, reloadDur: 1.9, reloadType: 'cylinder', auto: false, falloff: null, tracer: 0.026, flashScale: 1.35, sound: 'revolver', shell: null, moveSpread: 0.0015, pvp: [52, 2.9, [9, 34, 0.42]] },
+  bazooka: { name: 'Bazuca', hint: 'Lança-foguetes · Dano massivo e explosão em área', kind: 'bazooka', magSize: 1, reserve: 20, maxReserve: 40, interval: 0.85, damage: 200, headMul: 1.0, pellets: 1, spread: 0.006, adsSpread: 0.001, spreadKick: 0.03, spreadMax: 0.07, adsFov: 56, sight: [0, 0.12, -0.15, 0.35], camKick: [0.08, 0.015], modelKick: [0.45, 1.2, 6.5, -13, 2.0, 3.2], fovKick: 5.5, reloadDur: 1.5, reloadType: 'rocket', auto: false, falloff: null, tracer: 0.0, flashScale: 2.2, sound: 'bazookaFire', shell: null, moveSpread: 0.002, pvp: [170, 1.0, null] },
 };
 
 export class Gun extends ViewModel {
@@ -81,7 +82,7 @@ export class Gun extends ViewModel {
   startReload() {
     if (this.reloading || this.mag >= this.magSize || this.reserve <= 0) return;
     this.reloading = true; this.reloadT = 0; this.racked = false;
-    if (this.reloadType === 'shells') audio.shell(); else if (this.reloadType === 'cylinder') audio.cylinder(); else audio.reload();
+    if (this.reloadType === 'shells') audio.shell(); else if (this.reloadType === 'cylinder') audio.cylinder(); else if (this.reloadType === 'rocket') audio.pump(); else audio.reload();
   }
   update(dt, st) {
     this.fireT -= dt; if (this.flashT > 0) { this.flashT -= dt; if (this.flashT <= 0) this.flash.visible = false; }
@@ -116,6 +117,32 @@ export class Gun extends ViewModel {
         if (this.reloadT >= this.reloadDur) { const take = Math.min(this.magSize - this.mag, this.reserve); this.mag += take; this.reserve -= take; this.reloading = false; this.cylGroup.rotation.z = 0; }
         return;
       }
+      if (this.reloadType === 'rocket') {
+        const t = this.reloadT / this.reloadDur;
+        const s = Math.sin(Math.min(1, t) * Math.PI);
+        r.x += -0.22 * s; r.z += 0.18 * s; p.y -= 0.07 * s;
+        if (this.loadedRocket) {
+          if (t < 0.2) { this.loadedRocket.visible = false; }
+          else if (t < 0.85) {
+            this.loadedRocket.visible = true;
+            const progress = (t - 0.2) / 0.65;
+            this.loadedRocket.position.z = -0.45 + (1 - progress) * 0.45;
+          } else {
+            this.loadedRocket.visible = true;
+            this.loadedRocket.position.z = 0;
+          }
+        }
+        if (t > 0.82 && !this.racked) {
+          this.racked = true; audio.pump();
+          this.recoilRot.kick(-2.2, 0, 0); this.recoil.kick(0, 0, 0.4);
+        }
+        if (this.reloadT >= this.reloadDur) {
+          const take = Math.min(this.magSize - this.mag, this.reserve);
+          this.mag += take; this.reserve -= take; this.reloading = false;
+          if (this.loadedRocket) { this.loadedRocket.visible = true; this.loadedRocket.position.z = 0; }
+        }
+        return;
+      }
       // shells: one at a time, can be interrupted by firing
       const s = Math.sin(Math.min(1, this.reloadT / this.reloadDur) * Math.PI);
       r.z += 0.35 * s; r.x += 0.15 * s; p.y -= 0.04 * s; if (this.handL) this.handL.position.set(this.handLPos.x + 0.1 * s, this.handLPos.y - 0.12 * s, this.handLPos.z + 0.55 * s);
@@ -130,6 +157,21 @@ export class Gun extends ViewModel {
   }
   fire(st) {
     const ctx = this.ctx, P = ctx.player; this.fireT = this.interval; this.mag--;
+    if (this.kind === 'bazooka') {
+      if (this.loadedRocket) this.loadedRocket.visible = false;
+      this.flash.visible = true; this.flashT = 0.06; this.flash.rotation.z = rand(0, TAU); this.flash.scale.setScalar(this.flashScale * rand(0.9, 1.4));
+      this.muzzle.getWorldPosition(_v); _v2.copy(P.forward);
+      ctx.effects.strokeBurst(_v, INK.ORANGE, 14, 12, { life: 0.16, size: 0.045, gravity: 0, drag: 6 });
+      ctx.effects.smoke(_v, _v2, 6);
+      _v3.copy(P.eye).addScaledVector(P.forward, -0.6);
+      ctx.effects.smoke(_v3, _v2.clone().negate(), 5);
+      const k = this.modelKick; this.recoil.kick(rand(-k[0], k[0]), rand(k[1] * 0.4, k[1]), k[2]); this.recoilRot.kick(k[3], rand(-k[4], k[4]), rand(-k[5], k[5]));
+      P.recoil(this.camKick[0] * (st.aim ? 0.7 : 1) + rand(0, this.camKick[0] * 0.3), rand(-this.camKick[1], this.camKick[1])); P.kickFov(this.fovKick);
+      audio[this.sound](); ctx.input.rumble(0.65, 0.8, 140); ctx.effects.shakeAmt += 0.25;
+      P.fireRocket();
+      if (this.mag === 0) setTimeout(() => { if (this.mag === 0 && !this.reloading) this.startReload(); }, 250);
+      return;
+    }
     const spreadNow = this.spreadCur; this.spreadCur = Math.min(this.spreadCur + this.spreadKick, this.spreadMax);
     let hits = 0;
     for (let i = 0; i < this.pellets; i++) if (this.fireRay(P.eye, P.aimDir(spreadNow))) hits++;
@@ -249,9 +291,49 @@ export class Sniper extends Gun {
   }
 }
 
+export class Bazooka extends Gun {
+  constructor(ctx) {
+    super(ctx, 'bazooka');
+    this.basePos.set(0.22, -0.21, -0.32);
+  }
+  build() {
+    const g = this.root, mat = this.mat, dark = this.dark, red = this.red;
+    // Launcher main tube
+    cyl(0.08, 1.35, 0, 0.04, -0.22, mat, g);
+    // Rear exhaust cone / bell
+    cyl(0.12, 0.24, 0, 0.04, 0.52, dark, g);
+    // Front muzzle ring
+    cyl(0.092, 0.08, 0, 0.04, -0.85, dark, g);
+    // Reinforcement rings along tube
+    cyl(0.088, 0.04, 0, 0.04, -0.45, dark, g);
+    cyl(0.088, 0.04, 0, 0.04, 0.12, dark, g);
+    // Shoulder recoil rest
+    bx(0.09, 0.11, 0.32, 0, -0.06, 0.32, dark, g);
+    // Trigger grip and angled foregrip
+    const gripR = bx(0.048, 0.16, 0.06, 0, -0.14, 0.08, mat, g); gripR.rotation.x = 0.32;
+    const gripL = bx(0.045, 0.14, 0.055, -0.08, -0.09, -0.32, mat, g); gripL.rotation.z = -0.2;
+    // Raised sights on top left of launcher tube
+    bx(0.02, 0.08, 0.12, -0.07, 0.12, -0.15, dark, g);
+    sph(0.003, -0.07, 0.15, -0.15, red, g, 5);
+    // Doodle hands holding the launcher
+    hand(mat, 0.01, -0.16, 0.1, g, [0.45, -0.6, 1]);
+    this.handL = hand(mat, -0.09, -0.12, -0.32, g, [-0.4, -0.7, 0.9]);
+    this.handLPos = this.handL.position.clone();
+    // Rocket loaded in muzzle
+    this.loadedRocket = new THREE.Group();
+    const warhead = new THREE.Mesh(new THREE.ConeGeometry(0.068, 0.22, 7), makeInkMaterial({ ink: INK.ORANGE, fill: true }));
+    warhead.rotation.x = -Math.PI / 2; warhead.position.set(0, 0.04, -0.92);
+    this.loadedRocket.add(warhead);
+    g.add(this.loadedRocket);
+    // Muzzle & Flash
+    this.muzzle = new THREE.Object3D(); this.muzzle.position.set(0, 0.04, -0.95); g.add(this.muzzle);
+    this.flash = makeFlash(g, 0, 0.04, -0.95, 2.0);
+  }
+}
+
 export class Katana extends ViewModel {
   constructor(ctx) {
-    super(ctx); this.name = '太刀'; this.hint = '挥砍 · 按住瞄准格挡并反弹子弹'; this.kind = 'katana';
+    super(ctx); this.name = 'Katana'; this.hint = 'Golpeie · Segure mira para bloquear e rebater tiros'; this.kind = 'katana';
     this.basePos.set(0.27, -0.25, -0.4); this.baseRot.set(0.75, 0.15, -0.35); this.aimPos.copy(this.basePos);
     this.slashT = 0; this.slashDur = 0.27; this.combo = 0; this.comboT = 0; this.blocking = false; this.blockT = 0; this.blockAmt = 0; this.hitDone = false; this.cooldown = 0; this.damage = 75;
     // guard pose: the sword simply comes in close to the face, held upright

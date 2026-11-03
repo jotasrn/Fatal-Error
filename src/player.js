@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { makeBody } from './physics.js';
 import { makeInkMaterial, INK } from './render.js';
-import { Rifle, Shotgun, Sniper, Katana } from './weapons.js';
+import { Revolver, Shotgun, Rifle, Sniper, Bazooka, Katana } from './weapons.js';
 // the dome shell and anything else flagged this way cannot be hooked
 const NO_GRAPPLE = (b) => !!b.data.noGrapple;
 const STAM_FIRE = 0.09, STAM_DRAIN = 0.08, STAM_GROUND = 0.4, STAM_AIR = 0.2, STAM_MIN = 0.18, STAM_PAUSE = 0.5, PARRY_WINDOW = 0.55;
@@ -21,8 +21,15 @@ export class Player {
     this.eye = new THREE.Vector3(); this.center = new THREE.Vector3(); this.forward = new THREE.Vector3(0, 0, -1); this.right = new THREE.Vector3(1, 0, 0);
     this.speed = 0; this.hurtFx = 0; this.flashFx = 0; this.lastDamageT = 10;
     this.rig = new THREE.Group(); this.camera.add(this.rig); ctx.scene.add(this.camera);
-    this.weapons = [new Rifle(ctx), new Shotgun(ctx), new Sniper(ctx), new Katana(ctx)]; this.katanaIndex = 3;
+    this.weapons = [new Revolver(ctx), new Shotgun(ctx), new Rifle(ctx), new Sniper(ctx), new Bazooka(ctx), new Katana(ctx)]; this.katanaIndex = 5;
     for (const w of this.weapons) { this.rig.add(w.root); if (w.isGun) w.startReserve = w.reserve; }
+    this.weapons[0].owned = true;  // Revolver (pistola inicial)
+    this.weapons[1].owned = false; // Escopeta ($600)
+    this.weapons[2].owned = false; // Rifle ($900)
+    this.weapons[3].owned = false; // Sniper ($1200)
+    this.weapons[4].owned = false; // Bazuca ($1800)
+    this.weapons[5].owned = true;  // Katana (faca corpo a corpo)
+    this.money = 300; this.armor = 0; this.maxArmor = 100;
     this.weaponIndex = 0; this.weapon = this.weapons[0]; this.weapon.equip(); this.returnT = 0; this.prevWeaponIndex = 0;
     this.recoilPitch = new Spring(190, 17); this.recoilYaw = new Spring(190, 17); this.fovKick = new Spring(220, 14); this.landDip = new Spring(170, 15);
     this.roll = 0; this.fov = 82; this.bobPhase = 0; this.bobAmt = 0; this.stepDist = 0; this.eyeH = EYE_STAND;
@@ -31,6 +38,7 @@ export class Player {
     this.grapple = { state: 'idle', anchor: new THREE.Vector3(), hook: new THREE.Vector3(), from: new THREE.Vector3(), flyT: 0, flyDur: 0, len: 0, cd: 0, enemy: null, mover: null, blockedT: 0, t: 0, swingT: 0, hopT: 0 };
     this.deathT = 0; this.gravityScale = 1; this.dashLock = false;
     this.isLocal = true; this.team = 0; this.name = 'you'; this.grenades = 3; this.maxGrenades = 5; this.nades = []; this.nadeCd = 0; this.firing = false; this.onThrow = null;
+    this.rockets = []; this.onRocket = null;
     const rm = makeInkMaterial({ ink: INK.BLUE, fill: false, shadeBias: -0.3 });
     this.rope = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 6), rm); this.rope.visible = false; ctx.scene.add(this.rope);
     const hm = makeInkMaterial({ ink: INK.BLUE }); this.hookMesh = new THREE.Group();
@@ -43,9 +51,15 @@ export class Player {
     this.hp = this.maxHp; this.alive = true; this.yaw = 0; this.pitch = 0; this.roll = 0; this.hurtFx = 0; this.flashFx = 0; this.crouching = false; this.sliding = false; this.deathT = 0; this.lastDamageT = 10; this.dashCd = 0; this.airJumps = 1; this.gravityScale = 1; this.dashLock = false;
     this.detachGrapple(false);
     for (const w of this.weapons) if (w.isGun) { w.mag = w.magSize; w.reserve = w.startReserve; w.reloading = false; w.pumpT = 0; }
-    this.switchTo(0, true); this.rig.visible = true; this.eyeH = EYE_STAND; this.grenades = 3; this.clearNades();
+    this.money = 300; this.armor = 0;
+    this.weapons[0].owned = true;
+    for (let i = 1; i <= 4; i++) this.weapons[i].owned = false;
+    this.weapons[5].owned = true;
+    this.switchTo(0, true); this.rig.visible = true; this.eyeH = EYE_STAND; this.grenades = 3; this.clearNades(); this.clearRockets();
+    if (this.ctx.hud) { this.ctx.hud.setMoney(this.money); this.ctx.hud.setArmor(0, this.maxArmor); }
   }
   clearNades() { for (const n of this.nades) this.ctx.scene.remove(n.mesh); this.nades.length = 0; }
+  clearRockets() { for (const r of this.rockets) this.ctx.scene.remove(r.mesh); this.rockets.length = 0; }
   get isBlocking() { return this.weapon.kind === 'katana' && this.weapon.blocking; }
   aimDir(spread = 0) { const d = this.forward.clone(); if (spread > 0) { d.addScaledVector(this.right, rand(-spread, spread)); d.y += rand(-spread, spread); d.normalize(); } return d; }
   recoil(p, y) { this.pitch = clamp(this.pitch + p * 0.55, -1.5, 1.5); this.recoilPitch.kick(p * 22); this.recoilYaw.kick(y * 30); }
@@ -55,17 +69,146 @@ export class Player {
     b.vel.addScaledVector(d, speed); if (b.onGround) { b.vel.y = Math.max(b.vel.y, 2.5); b.onGround = false; }
     audio.dash(); this.kickFov(3);
   }
+  cycleWeapon(dir) {
+    let next = this.weaponIndex;
+    for (let k = 0; k < this.weapons.length; k++) {
+      next = (next + dir + this.weapons.length) % this.weapons.length;
+      if (this.weapons[next] && this.weapons[next].owned) {
+        this.switchTo(next);
+        break;
+      }
+    }
+  }
+  addCash(amount, reason = '') {
+    this.money += amount;
+    if (this.ctx.hud) {
+      this.ctx.hud.setMoney(this.money);
+      this.ctx.hud.flashMoney(amount, reason);
+    }
+  }
+  spendCash(amount, reason = '') {
+    if (this.money < amount) return false;
+    this.money -= amount;
+    if (this.ctx.hud) {
+      this.ctx.hud.setMoney(this.money);
+      this.ctx.hud.flashMoney(-amount, reason);
+    }
+    return true;
+  }
+  buyItem(key) {
+    const PRICES = {
+      shotgun: 600,
+      rifle: 900,
+      sniper: 1200,
+      bazooka: 1800,
+      armor_light: 300,
+      armor_heavy: 600,
+      ammo: 150,
+      grenades: 200,
+    };
+    const cost = PRICES[key];
+    if (cost == null) return false;
+    if (this.money < cost) {
+      audio.empty();
+      if (this.ctx.hud) this.ctx.hud.message('Saldo Insuficiente!', `Necessário $${cost}`, 1.2);
+      return false;
+    }
+    if (key === 'shotgun') {
+      if (this.weapons[1].owned) {
+        this.weapons[1].addAmmo(this.weapons[1].maxReserve);
+        this.spendCash(cost, 'Munição Escopeta');
+      } else {
+        this.spendCash(cost, 'Escopeta Adquirida');
+        this.weapons[1].owned = true;
+        this.switchTo(1);
+      }
+    } else if (key === 'rifle') {
+      if (this.weapons[2].owned) {
+        this.weapons[2].addAmmo(this.weapons[2].maxReserve);
+        this.spendCash(cost, 'Munição Rifle');
+      } else {
+        this.spendCash(cost, 'Rifle Adquirido');
+        this.weapons[2].owned = true;
+        this.switchTo(2);
+      }
+    } else if (key === 'sniper') {
+      if (this.weapons[3].owned) {
+        this.weapons[3].addAmmo(this.weapons[3].maxReserve);
+        this.spendCash(cost, 'Munição Sniper');
+      } else {
+        this.spendCash(cost, 'Sniper Adquirida');
+        this.weapons[3].owned = true;
+        this.switchTo(3);
+      }
+    } else if (key === 'bazooka') {
+      if (this.weapons[4].owned) {
+        this.weapons[4].addAmmo(this.weapons[4].maxReserve);
+        this.spendCash(cost, 'Foguetes Bazuca');
+      } else {
+        this.spendCash(cost, 'Bazuca Adquirida');
+        this.weapons[4].owned = true;
+        this.switchTo(4);
+      }
+    } else if (key === 'armor_light') {
+      if (this.armor >= this.maxArmor) {
+        if (this.ctx.hud) this.ctx.hud.message('Colete Cheio!', 'Sua blindagem já está no máximo', 1.2);
+        audio.empty();
+        return false;
+      }
+      this.spendCash(cost, 'Colete Leve (+50)');
+      this.armor = Math.min(this.maxArmor, this.armor + 50);
+      if (this.ctx.hud) this.ctx.hud.setArmor(this.armor, this.maxArmor);
+    } else if (key === 'armor_heavy') {
+      if (this.armor >= this.maxArmor) {
+        if (this.ctx.hud) this.ctx.hud.message('Colete Cheio!', 'Sua blindagem já está no máximo', 1.2);
+        audio.empty();
+        return false;
+      }
+      this.spendCash(cost, 'Colete Pesado (100)');
+      this.armor = this.maxArmor;
+      if (this.ctx.hud) this.ctx.hud.setArmor(this.armor, this.maxArmor);
+    } else if (key === 'ammo') {
+      this.spendCash(cost, 'Munição Completa');
+      this.addAmmoAll(1.0);
+      this.grenades = Math.min(this.maxGrenades, this.grenades + 1);
+    } else if (key === 'grenades') {
+      if (this.grenades >= this.maxGrenades) {
+        if (this.ctx.hud) this.ctx.hud.message('Mochila Cheia!', 'Você já tem o máximo de granadas', 1.2);
+        audio.empty();
+        return false;
+      }
+      this.spendCash(cost, '+2 Granadas');
+      this.grenades = Math.min(this.maxGrenades, this.grenades + 2);
+    }
+    audio.buy();
+    return true;
+  }
   switchTo(i, silent = false) {
-    if (i < 0 || i >= this.weapons.length) return; if (i === this.weaponIndex && !silent) return;
+    if (i < 0 || i >= this.weapons.length) return;
+    const target = this.weapons[i];
+    if (target && !target.owned) {
+      if (this.ctx.hud) this.ctx.hud.message('Arma Bloqueada!', 'Pressione B para comprar na Loja', 1.2);
+      audio.empty();
+      return;
+    }
+    if (i === this.weaponIndex && !silent) return;
     if (this.weapon.kind !== 'katana') this.prevWeaponIndex = this.weaponIndex;
     this.weapon.unequip(); this.weaponIndex = i; this.weapon = this.weapons[i]; this.weapon.equip(); if (!silent) audio.switchWeapon();
     this.ctx.hud.setWeapon(this.weapon.name, this.weapon.hint); this.ctx.hud.setCrosshairMode(this.weapon.kind === 'katana' ? 'katana' : '');
   }
-  addAmmoAll(frac = 0.5) { for (const w of this.weapons) if (w.isGun) w.addAmmo(Math.round(w.maxReserve * frac)); }
+  addAmmoAll(frac = 0.5) { for (const w of this.weapons) if (w.isGun && w.owned) w.addAmmo(Math.round(w.maxReserve * frac)); }
   takeDamage(amount, fromPos) {
     if (!this.alive) return;
-    this.hp -= amount; this.lastDamageT = 0; this.hurtFx = Math.min(1, this.hurtFx + amount / 40);
-    this.ctx.effects.shakeAmt += 0.2 + amount / 80; audio.hurt(); this.ctx.input.rumble(0.8, 0.5, 160);
+    let finalAmount = amount;
+    if (this.armor > 0) {
+      const absorb = Math.min(this.armor, amount * 0.7);
+      this.armor -= absorb;
+      finalAmount = amount - absorb;
+      audio.parry();
+      if (this.ctx.hud) this.ctx.hud.setArmor(this.armor, this.maxArmor);
+    }
+    this.hp -= finalAmount; this.lastDamageT = 0; this.hurtFx = Math.min(1, this.hurtFx + finalAmount / 40);
+    this.ctx.effects.shakeAmt += 0.2 + finalAmount / 80; audio.hurt(); this.ctx.input.rumble(0.8, 0.5, 160);
     if (fromPos) { _v.subVectors(fromPos, this.eye); const x = _v.dot(this.right), f = _v.dot(this.forward); this.ctx.hud.damageFrom(Math.atan2(x, f)); }
     if (this.hp <= 0) { this.hp = 0; this.die(); }
   }
@@ -89,7 +232,7 @@ export class Player {
     ctx.effects.strokeBurst(proj.pos, INK.BLUE, perfect ? 8 : 5, 4.5, { life: 0.2, size: 0.028 });
     ctx.input.rumble(0.4, 0.6, 70); ctx.game.hitstop(perfect ? 0.07 : 0.025, 0.18);
     ctx.effects.shakeAmt += 0.06; this.flashFx = perfect ? 0.35 : 0.1;
-    ctx.game.addScore(perfect ? 60 : 15, perfect ? '完美招架' : '格挡成功');
+    ctx.game.addScore(perfect ? 60 : 15, perfect ? 'Aparada Perfeita' : 'Bloqueio Efetuado');
     return { perfect, ret };
   }
   get parryWindow() { return this.isBlocking && this.blockHeld < PARRY_WINDOW; }
@@ -98,9 +241,16 @@ export class Player {
     _v.subVectors(e.center, this.eye).normalize(); if (_v.dot(this.forward) < 0.35) return false;
     this.weapon.onDeflect(true); audio.parry(); this.ctx.game.hitstop(0.06, 0.15);
     this.ctx.effects.sparks(_v2.copy(this.eye).addScaledVector(this.forward, 0.8), this.forward.clone().negate(), INK.ORANGE, 12, 8);
-    this.ctx.game.addScore(40, '格挡成功'); this.ctx.input.rumble(0.6, 0.6, 100); return true;
+    this.ctx.game.addScore(40, 'Bloqueio Efetuado'); this.ctx.input.rumble(0.6, 0.6, 100); return true;
   }
-  die() { this.alive = false; this.deathT = 0; audio.death(); this.detachGrapple(false); this.ctx.game.onPlayerDeath(); }
+  die() {
+    this.alive = false; this.deathT = 0; audio.death(); this.detachGrapple(false);
+    // Ao morrer perde tudo: saldo zerado, colete perdido e armas trancadas
+    this.money = 0; this.armor = 0;
+    for (let i = 1; i <= 4; i++) this.weapons[i].owned = false;
+    if (this.ctx.hud) { this.ctx.hud.setMoney(0); this.ctx.hud.setArmor(0, this.maxArmor); }
+    this.ctx.game.onPlayerDeath();
+  }
   idleCam(t) {
     const c = this.camera; c.position.set(Math.sin(t * 0.08) * 70, 30 + Math.sin(t * 0.23) * 4, Math.cos(t * 0.08) * 70); c.lookAt(0, 10, 0); this.rig.visible = false;
     this.eye.copy(c.position); this.center.copy(c.position); c.getWorldDirection(this.forward); this.right.set(this.forward.z, 0, -this.forward.x).normalize();
@@ -114,7 +264,7 @@ export class Player {
       this.deathT += dt; this.eyeH = damp(this.eyeH, 0.35, 3, dt); this.roll = damp(this.roll, 0.9, 3, dt); this.pitch = damp(this.pitch, -0.35, 3, dt);
       b.vel.x = damp(b.vel.x, 0, 4, dt); b.vel.z = damp(b.vel.z, 0, 4, dt); b.vel.y -= G * dt; ctx.world.moveBody(b, dt);
       this.forward.set(-Math.sin(this.yaw) * Math.cos(this.pitch), Math.sin(this.pitch), -Math.cos(this.yaw) * Math.cos(this.pitch)); this.right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
-      this.updateNades(dt); this._updateCamera(dt); this.weapon.animate(dt, this._weaponState(false, false, 0)); return;
+      this.updateNades(dt); this.updateRockets(dt); this._updateCamera(dt); this.weapon.animate(dt, this._weaponState(false, false, 0)); return;
     }
     this.rig.visible = true;
     // ---- look ----
@@ -193,7 +343,7 @@ export class Player {
     ctx.world.moveBody(b, dt);
     if (b.pos.y < -12 || Math.abs(b.pos.x) > 95 || Math.abs(b.pos.z) > 95) {
       this.detachGrapple(false); b.pos.copy(ctx.level.playerStart); b.vel.set(0, 0, 0); this.takeDamage(20, null); if (this.onFall) this.onFall();
-      ctx.hud.message('掉出纸面', '已在起点重新绘制', 1.8);
+      ctx.hud.message('Caiu do Caderno', 'Redesenhado no ponto inicial', 1.8);
     }
     if (b.onGround && !this.lastGround) {
       const impact = clamp(-b.landVel / 14, 0, 1.5); this.landDip.kick(-impact * 6 - 0.5); audio.land(impact);
@@ -208,7 +358,7 @@ export class Player {
     this.stamPause -= dt;
     if (this.grapple.state !== 'idle') this.grapStam -= STAM_DRAIN * dt; else if (this.stamPause <= 0) this.grapStam += (b.onGround ? STAM_GROUND : STAM_AIR) * dt;
     this.grapStam = clamp(this.grapStam, 0, 1);
-    if (this.grapple.state === 'on' && this.grapStam <= 0) { this.detachGrapple(false); ctx.hud.tip('喘不过气了 · 落地恢复体力', 1.4); }
+    if (this.grapple.state === 'on' && this.grapStam <= 0) { this.detachGrapple(false); ctx.hud.tip('Sem fôlego · Pouse para recuperar o fôlego', 1.4); }
     const hs2 = Math.hypot(b.vel.x, b.vel.z); const moving = b.onGround && hs2 > 0.6 && !this.sliding;
     this.bobAmt = damp(this.bobAmt, moving ? clamp(hs2 / 7, 0.3, 1.4) : 0, 8, dt);
     if (moving) { this.bobPhase += dt * (7 + hs2 * 0.5); this.stepDist += hs2 * dt; if (this.stepDist > (sprinting ? 2.5 : 2.0)) { this.stepDist = 0; audio.footstep(clamp(hs2 / 8, 0.3, 1)); } }
@@ -219,10 +369,12 @@ export class Player {
     else if (this._nadeHeld) { this._nadeHeld = false; if (this.grenades > 0 && this.nadeCd <= 0 && this.alive) this.throwGrenade(null, this.nadeCharge); this.nadeCharge = 0; }
     this.updateNadeArc(this._nadeHeld ? this.nadeCharge : -1);
     this.updateNades(dt);
+    this.updateRockets(dt);
     // ---- weapons ----
-    for (let i = 0; i < 5; i++) if (inp.pressed('slot' + (i + 1))) this.switchTo(Math.min(i, this.weapons.length - 1));
-    if (inp.pressed('nextWeapon')) this.switchTo((this.weaponIndex + 1) % this.weapons.length);
-    if (inp.pressed('prevWeapon')) this.switchTo((this.weaponIndex + this.weapons.length - 1) % this.weapons.length);
+    for (let i = 0; i < 6; i++) if (inp.pressed('slot' + (i + 1))) this.switchTo(i);
+    if (inp.pressed('nextWeapon')) this.cycleWeapon(1);
+    if (inp.pressed('prevWeapon')) this.cycleWeapon(-1);
+    if (inp.wheel !== 0) { this.cycleWeapon(inp.wheel > 0 ? 1 : -1); inp.wheel = 0; }
     const st = this._weaponState(sprinting, aiming, hs2);
     if (inp.pressed('melee') && this.weapon.kind !== 'katana') { this.switchTo(this.katanaIndex); this.returnT = 0.85; this.weapons[this.katanaIndex].startSlash(st); st.meleePressed = false; }
     if (this.returnT > 0) { if (this.weapon.kind === 'katana' && (st.firePressed || st.aim || st.meleePressed)) this.returnT = 0; else { this.returnT -= dt; if (this.returnT <= 0) this.switchTo(this.prevWeaponIndex); } }
@@ -305,6 +457,124 @@ export class Player {
     // other players in a versus match, decided by the thrower only
     if (n.mine && ctx.targets) for (const t of ctx.targets()) { if (t.isLocal || !t.alive || (ctx.canHurt && !ctx.canHurt(t))) continue; const dd = t.center.distanceTo(c); if (dd < R * 0.95) t.takeDamage(12 + 50 * (1 - dd / (R * 0.95)), c); }
   }
+  // ---- rockets: Bazuca projectile with rocket trail, high damage and AoE splash ----
+  fireRocket(remote = null) {
+    const ctx = this.ctx;
+    let pos, dir, speed;
+    if (remote) {
+      pos = new THREE.Vector3().fromArray(remote.pos);
+      dir = new THREE.Vector3().fromArray(remote.dir);
+      speed = remote.speed || 52;
+    } else {
+      pos = new THREE.Vector3();
+      pos.copy(this.eye).addScaledVector(this.forward, 0.7).addScaledVector(this.right, 0.16);
+      pos.y -= 0.12;
+      dir = this.aimDir(0.005);
+      speed = 52;
+      if (this.onRocket) {
+        this.onRocket({
+          pos: pos.toArray().map((v) => +v.toFixed(2)),
+          dir: dir.toArray().map((v) => +v.toFixed(3)),
+          speed
+        });
+      }
+    }
+    const g = new THREE.Group();
+    const bodyGeo = new THREE.CylinderGeometry(0.048, 0.048, 0.44, 7);
+    bodyGeo.rotateX(Math.PI / 2);
+    g.add(new THREE.Mesh(bodyGeo, makeInkMaterial({ ink: INK.BLUE })));
+    const coneGeo = new THREE.ConeGeometry(0.06, 0.2, 7);
+    coneGeo.rotateX(Math.PI / 2);
+    const coneMesh = new THREE.Mesh(coneGeo, makeInkMaterial({ ink: INK.ORANGE, fill: true }));
+    coneMesh.position.z = 0.3;
+    g.add(coneMesh);
+    const finMat = makeInkMaterial({ ink: INK.BLACK, fill: true });
+    for (let i = 0; i < 4; i++) {
+      const fin = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.09, 0.14), finMat);
+      fin.rotation.z = (i * Math.PI) / 2;
+      fin.position.set(0, 0, -0.16);
+      g.add(fin);
+    }
+    g.position.copy(pos);
+    g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
+    ctx.scene.add(g);
+    this.rockets.push({ mesh: g, pos, prev: pos.clone(), dir, speed, mine: !remote, life: 5.0, trailT: 0 });
+  }
+  updateRockets(dt) {
+    const ctx = this.ctx, world = ctx.world;
+    for (let i = this.rockets.length - 1; i >= 0; i--) {
+      const r = this.rockets[i];
+      r.life -= dt;
+      r.trailT += dt;
+      if (r.life <= 0) {
+        this.explodeRocket(r.pos, r.mine);
+        ctx.scene.remove(r.mesh);
+        this.rockets.splice(i, 1);
+        continue;
+      }
+      r.prev.copy(r.pos);
+      r.pos.addScaledVector(r.dir, r.speed * dt);
+      r.mesh.position.copy(r.pos);
+      r.mesh.rotateZ(14 * dt);
+      if (r.trailT >= 0.02) {
+        r.trailT = 0;
+        _v.copy(r.pos).addScaledVector(r.dir, -0.28);
+        ctx.effects.strokeBurst(_v, INK.ORANGE, 2, 2.5, { life: 0.1, size: 0.028, gravity: 0 });
+        ctx.effects.smoke(_v, r.dir.clone().negate(), 1);
+      }
+      _d.subVectors(r.pos, r.prev);
+      const segLen = _d.length();
+      if (segLen > 1e-5) {
+        _d.divideScalar(segLen);
+        const hitW = world.raycast(r.prev, _d, segLen, (b) => !!b.data.seeThrough);
+        const hitE = ctx.enemies.raycast(r.prev, _d, segLen);
+        const hitP = ctx.raycastPlayers ? ctx.raycastPlayers(r.prev, _d, segLen) : null;
+        let hit = false, hitPoint = null;
+        if (hitE && (!hitW || hitE.dist < hitW.dist)) {
+          hit = true; hitPoint = hitE.point;
+        } else if (hitP && (!hitW || hitP.dist < hitW.dist)) {
+          hit = true; hitPoint = hitP.point;
+        } else if (hitW) {
+          hit = true; hitPoint = hitW.point;
+        }
+        if (hit) {
+          this.explodeRocket(hitPoint, r.mine);
+          ctx.scene.remove(r.mesh);
+          this.rockets.splice(i, 1);
+          continue;
+        }
+      }
+    }
+  }
+  explodeRocket(point, mine) {
+    const ctx = this.ctx, R = 6.2;
+    ctx.effects.boom(point, R);
+    audio.explosion(point);
+    ctx.effects.shakeAmt += 0.35;
+    ctx.input.rumble(0.9, 0.9, 200);
+    if (mine) {
+      ctx.enemies.blastEnemies(point, R, 220, null);
+      if (ctx.blastBreakables) ctx.blastBreakables(point, R);
+    }
+    const dist = this.center.distanceTo(point);
+    if (this.alive && dist < R) {
+      const fall = 1 - dist / R;
+      const selfDmg = Math.min(26, 65 * fall);
+      this.takeDamage(selfDmg, point);
+      _v.subVectors(this.center, point).normalize();
+      this.knockback(_v, 18 * fall);
+    }
+    if (mine && ctx.targets) {
+      for (const t of ctx.targets()) {
+        if (t.isLocal || !t.alive || (ctx.canHurt && !ctx.canHurt(t))) continue;
+        const dd = t.center.distanceTo(point);
+        if (dd < R) {
+          const fall = 1 - dd / R;
+          t.takeDamage(40 + 130 * fall, point);
+        }
+      }
+    }
+  }
   _weaponState(sprinting, aiming, hs) {
     const inp = this.ctx.input, b = this.body;
     return { fire: inp.down('fire'), firePressed: inp.pressed('fire'), aim: aiming || (inp.down('aim') && this.weapon.kind === 'katana'), reloadPressed: inp.pressed('reload'), meleePressed: inp.pressed('melee') && this.weapon.kind === 'katana',
@@ -373,7 +643,7 @@ export class Player {
     return null;
   }
   _fireGrapple() {
-    if (this.grapStam < STAM_MIN) { audio.winded(); this.ctx.hud.tip('抓钩需要缓口气', 0.9); return; }
+    if (this.grapStam < STAM_MIN) { audio.winded(); this.ctx.hud.tip('O gancho precisa respirar', 0.9); return; }
     const t = this._findGrappleTarget(); if (!t) { audio.empty(); return; }
     this.grapStam -= STAM_FIRE; this.stamPause = STAM_PAUSE;
     const g = this.grapple; g.state = 'fly'; g.anchor.copy(t.point); this._handPos(g.from); g.hook.copy(g.from); g.flyT = 0; g.flyDur = clamp(t.dist / 110, 0.04, 0.6); g.enemy = t.enemy || null; g.mover = t.mover || null; g.t = 0;
@@ -393,7 +663,7 @@ export class Player {
       if (g.mover) g.anchor.copy(g.mover.mesh.position);
       g.flyT += dt; const f = Math.min(1, g.flyT / g.flyDur); g.hook.lerpVectors(g.from, g.anchor, f);
       if (f >= 1) {
-        if (g.enemy) { if (g.enemy.alive) { ctx.enemies.yank(g.enemy, this.center); ctx.game.addScore(30, '拽翻'); audio.grappleHit(); ctx.input.rumble(0.5, 0.5, 90); } this.detachGrapple(false); }
+        if (g.enemy) { if (g.enemy.alive) { ctx.enemies.yank(g.enemy, this.center); ctx.game.addScore(30, 'Puxão'); audio.grappleHit(); ctx.input.rumble(0.5, 0.5, 90); } this.detachGrapple(false); }
         else { g.state = 'on'; g.len = Math.max(1.5, this.center.distanceTo(g.anchor) * 0.94); g.blockedT = 0; g.t = 0; g.swingT = 0; audio.grappleHit(); audio.reelLoop(true); ctx.hud.grappleTarget(2); ctx.input.rumble(0.3, 0.6, 60); if (b.onGround) { b.vel.y = Math.max(b.vel.y, 5); b.onGround = false; } }
       }
     } else if (g.state === 'on') {
