@@ -359,8 +359,10 @@ export class DualNet {
     return this.driver;
   }
   get active() { return this.driver.active; }
-  get conns() { return this.driver.conns; }
   get peerIds() { return this.driver.peerIds; }
+  // main.js drops silent/idle players through net.conns: without this getter that path threw every
+  // frame on the host as soon as anyone went quiet for 9 s (alt-tab, lag), freezing the match
+  get conns() { return this.driver.conns || new Map(); }
   get id() { return this.driver.id; }
   get code() { return this.driver.code; }
   get hostId() { return this.driver.hostId; }

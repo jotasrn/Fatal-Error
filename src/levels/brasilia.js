@@ -294,9 +294,13 @@ export function buildBrasilia(B, arena = false) {
 
   // ---------------- 9. Trânsito no Eixo Monumental ----------------
   const cars = [];
+  // every car of a kind shares one set of merged geometries and is drawn through instancing:
+  // 24 cars cost ~15 draw calls instead of 72, looking exactly the same
+  const carGeos = new Map();
   function makeCar(type, ink) {
-    const g = new THREE.Group(); const isBus = type === 'bus';
+    const g = new THREE.Object3D(); const isBus = type === 'bus';
     const w = isBus ? 2.8 : 1.95, h = isBus ? 2.7 : 1.15, d = isBus ? 10 : type === 'beetle' ? 3.6 : 4.5;
+    if (carGeos.has(type)) return { group: g, w, h, d, isBus, type, ink };
     const body = [], dark = [], light = [];
     const add = (arr, geo, x, y, z) => { geo.translate(x, y, z); arr.push(geo); };
     if (type === 'beetle') { const s = new THREE.SphereGeometry(1, 12, 8); s.scale(w / 2, h * 1.05, d / 2); add(body, s, 0, 0.5, 0); add(dark, new THREE.BoxGeometry(w * 0.7, 0.5, d * 0.35), 0, 1.25, -0.1); }
@@ -310,10 +314,10 @@ export function buildBrasilia(B, arena = false) {
     const rR = isBus ? 0.55 : 0.36, wZ = d * 0.32;
     for (const sx of [-w / 2 - 0.06, w / 2 + 0.06]) for (const sz of [-wZ, wZ]) { const c = new THREE.CylinderGeometry(rR, rR, 0.22, 10); c.rotateZ(Math.PI / 2); add(dark, c, sx, rR, sz); }
     for (const sx of [-w * 0.33, w * 0.33]) { add(light, new THREE.BoxGeometry(0.32, 0.2, 0.08), sx, 0.75, d / 2 + 0.04); add(dark, new THREE.BoxGeometry(0.3, 0.18, 0.08), sx, 0.75, -d / 2 - 0.04); }
-    // one mesh per colour: a car is three draw calls however detailed it is
-    for (const [arr, m] of [[body, mat(ink, true)], [dark, mat(BK, true)], [light, mat(OR, true)]]) { if (!arr.length) continue; const merged = mergeGeometries(arr, false); for (const x of arr) x.dispose(); g.add(new THREE.Mesh(merged, m)); }
-    scene.add(g); L.meshes.push(g);
-    return { group: g, w, h, d, isBus };
+    const parts = [];
+    for (const [arr, part] of [[body, 'body'], [dark, 'dark'], [light, 'light']]) { if (!arr.length) continue; const merged = mergeGeometries(arr, false); for (const x of arr) x.dispose(); parts.push({ part, geo: merged }); }
+    carGeos.set(type, parts);
+    return { group: g, w, h, d, isBus, type, ink };
   }
   const kinds = ['sedan', 'bus', 'beetle', 'taxi', 'sedan', 'police', 'beetle', 'sedan'];
   const inks = [BL, GN, RD, OR, PK, BL];
@@ -327,6 +331,19 @@ export function buildBrasilia(B, arena = false) {
     c.group.rotation.y = c.dir > 0 ? 0 : Math.PI; c.group.position.set(c.laneX, 0, c.z);
     cars.push(c);
   }
+  const carMat = makeInkMaterial({ ink: BK, fill: true, side: THREE.DoubleSide });
+  const carPools = [];
+  for (const [type, parts] of carGeos) {
+    const list = cars.filter((c) => c.type === type);
+    for (const { part, geo } of parts) {
+      const im = new THREE.InstancedMesh(geo, carMat, list.length); im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(list.length * 3), 3);
+      list.forEach((c, i) => im.instanceColor.setXYZ(i, part === 'body' ? c.ink : part === 'dark' ? BK : OR, 1, 0));
+      im.frustumCulled = false; scene.add(im); L.meshes.push(im); carPools.push({ im, list });
+    }
+  }
+  const syncCars = () => { for (const c of cars) c.group.updateMatrix(); for (const p of carPools) { p.list.forEach((c, i) => p.im.setMatrixAt(i, c.group.matrix)); p.im.instanceMatrix.needsUpdate = true; } };
+  syncCars();
   L.animated.push({
     mesh: null,
     update: () => {
@@ -337,6 +354,7 @@ export function buildBrasilia(B, arena = false) {
         if (car.dir < 0 && car.z < routeA) car.z = routeB;
         car.group.position.set(car.laneX, 0, car.z);
       }
+      syncCars();
     }
   });
   L.cars = cars; // o main.js verifica atropelamentos e buzinas

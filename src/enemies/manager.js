@@ -7,6 +7,7 @@ import { makeBody, SEE_THROUGH } from '../physics.js';
 import { rand, randInt, clamp, damp, wrapAngle, angleLerp, alignYAxis, TAU } from '../util.js';
 import { audio } from '../audio.js';
 import { TYPES, STATE_CODES, STATE_NAMES } from './types.js';
+const TYPE_KEYS = Object.keys(TYPES);
 import { buildHumanoid, buildBomber, buildFlyer, buildQuadruped, buildCached, cloneModel } from './models.js';
 import { Projectiles } from './projectiles.js';
 const modelBuilder = (T) => (m, s) => T.model === 'bomber' ? buildBomber(m, s, T) : T.model === 'blob' ? buildBomber(m, s, T, true) : T.model === 'flyer' ? buildFlyer(m, s, T) : (T.model === 'quadruped' || T.model === 'spider') ? buildQuadruped(m, s, T) : buildHumanoid(m, s, T);
@@ -33,12 +34,8 @@ export class EnemyManager {
   _disposeMesh(obj) {
     if (!obj) return;
     obj.traverse((child) => {
-      if (child.isMesh) {
-        if (child.geometry && !child.geometry.userData.shared) try { child.geometry.dispose(); } catch (e) {}
-        if (child.material) {
-          if (Array.isArray(child.material)) child.material.forEach((m) => { try { m.dispose(); } catch (e) {} });
-          else try { child.material.dispose(); } catch (e) {}
-        }
+      if (child.isMesh && child.geometry) {
+        if (!child.geometry.userData.shared) try { child.geometry.dispose(); } catch (e) {}
       }
     });
   }
@@ -85,7 +82,7 @@ export class EnemyManager {
   // build every type's model templates up front (during loading) so no spawn ever pays for it
   prewarm() { for (const type in TYPES) for (let i = 0; i < 3; i++) buildCached(type, TYPES[type], modelBuilder(TYPES[type])); }
   spawn(type, pos, id = null) {
-    const T = TYPES[type] || TYPES.grunt; const ink = T.ink ?? INK.RED;
+    const T = TYPES[type]; const ink = T.ink ?? INK.RED;
     const mat = makeInkMaterial({ ink, shadeScale: 0, shadeBias: 1 });
     const solid = makeInkMaterial({ ink: T.ink === INK.BLACK ? INK.RED : INK.BLACK, fill: true, side: THREE.DoubleSide });
     const tpl = buildCached(type, T, modelBuilder(T));
@@ -102,6 +99,7 @@ export class EnemyManager {
     };
     e.body.alwaysStep = true; if (T.flying) e.body.noSnap = true; e.root.position.copy(pos); e.root.scale.setScalar(0.001);
     this.ctx.scene.add(e.root); this.enemies.push(e); this.alive++;
+    if (this.ctx.batcher) this.ctx.batcher.register(e); // drawn through shared instanced meshes
     if (this.onSpawn && !this.mirror) this.onSpawn(e);
     this.ctx.effects.strokeBurst(pos.clone().add(_v.set(0, 1, 0)), T.ink ?? INK.RED, T.boss ? 60 : 26, T.boss ? 10 : 6, { life: 0.5, size: 0.03 }); audio.spawn(pos);
     if (T.boss) { audio.bossRoar(pos); if (this.onBoss) this.onBoss(e); }
@@ -194,8 +192,7 @@ export class EnemyManager {
     e.hit = e.hit.filter((h) => h[0] !== 'shield'); e.hitSpheres = e.hit.map(() => new THREE.Vector3()); e.J.shieldG = null; audio.shieldHit(e.center); this.ctx.game.addScore(40, 'Escudo Destruído');
   }
   kill(e, info) {
-    if (!e || !e.alive) return;
-    e.alive = false; e.state = 'dead'; e.deadT = 0; this.alive = Math.max(0, this.alive - 1); this._removeLaser(e);
+    e.alive = false; e.state = 'dead'; e.deadT = 0; this.alive--; e.body.vel.set(0, 0, 0); this._removeLaser(e);
     const eff = this.ctx.effects, scene = this.ctx.scene; const inkC = e.T.ink === INK.BLACK ? INK.BLACK : INK.RED;
     if (e.face) { e.face.eyes.visible = false; e.face.xeyes.visible = true; }
     const dir = (info.dir || _d.set(0, 0.5, 0)).clone().normalize();
@@ -242,7 +239,6 @@ export class EnemyManager {
   eye(e, out) { return out.setFromMatrixPosition(e.parts.head.matrixWorld); }
   update(dt) {
     if (this.mirror) { this._updateMirror(dt); return; }
-    this._pathsLeft = 4;
     const ctx = this.ctx, world = ctx.world;
     for (const e of this.enemies) {
       this._cur = e; // lets the game loop drop a bot whose update throws instead of freezing every frame
@@ -264,7 +260,13 @@ export class EnemyManager {
       if (e.T.flying) { this._thinkFlyer(e, dt, pc, P); world.moveBody(e.body, dt); }
       else {
         if (e.state === 'stunned') { if (e.t > e.stunDur) e.state = 'hunt'; }
-        else if (P.alive) this._think(e, dt, pp, pc, P); else this._wander(e, dt);
+        else if (P.alive) {
+          // AI level of detail: a bot far from its target and out of its sight decides ~8x a second
+          // instead of every frame (movement and physics still run every frame, so it stays smooth)
+          const fx = pp.x - e.body.pos.x, fz = pp.z - e.body.pos.z; e.thinkAcc = (e.thinkAcc || 0) + dt;
+          if (fx * fx + fz * fz > 55 * 55 && !e.los && !e.T.boss) { if (e.thinkAcc >= 0.12) { this._think(e, e.thinkAcc, pp, pc, P); e.thinkAcc = 0; } }
+          else { this._think(e, e.thinkAcc, pp, pc, P); e.thinkAcc = 0; }
+        } else this._wander(e, dt);
         e.body.vel.y -= 24 * dt; world.moveBody(e.body, dt);
       }
       if (e.body.pos.y < -6) { this.kill(e, { source: 'fall', dir: _up.clone() }); continue; }
@@ -293,19 +295,20 @@ export class EnemyManager {
     for (const e of this.enemies) {
       if (!e.alive) continue;
       const b = e.body;
+      // compact: positions at 5 cm, yaw at ~0.6 deg, the type as a small index (about half the bytes)
       out.push([
         e.id,
-        +b.pos.x.toFixed(2),
-        +b.pos.y.toFixed(2),
-        +b.pos.z.toFixed(2),
-        +e.yaw.toFixed(2),
+        Math.round(b.pos.x * 20) / 20,
+        Math.round(b.pos.y * 20) / 20,
+        Math.round(b.pos.z * 20) / 20,
+        Math.round(e.yaw * 100) / 100,
         STATE_CODES[e.state] ?? 1,
         Math.round(e.hp),
-        +e.aimAmt.toFixed(2),
-        +e.attackT.toFixed(2),
+        Math.round(e.aimAmt * 10) / 10,
+        Math.round(e.attackT * 20) / 20,
         e.fuseT >= 0 ? 1 : 0,
         e.bossAtk ? 1 : 0,
-        e.type
+        TYPE_KEYS.indexOf(e.type)
       ]);
     }
     return out;
@@ -317,9 +320,10 @@ export class EnemyManager {
       seen.add(id);
       let e = this.byId.get(id);
       // AUTO-HEAL: Se o cliente perdeu o espawn deste bot, cria-o agora mesmo com o tipo correto!
-      if ((!e || !e.alive) && r[11]) {
+      const type = typeof r[11] === 'number' ? TYPE_KEYS[r[11]] : r[11];
+      if ((!e || !e.alive) && type) {
         const pos = new THREE.Vector3(r[1], r[2], r[3]);
-        if (!e) e = this.spawn(r[11], pos, id);
+        if (!e) e = this.spawn(type, pos, id);
         else { e.alive = true; e.state = 'hunt'; }
       }
       if (!e || !e.alive) continue;
@@ -353,25 +357,23 @@ export class EnemyManager {
   _updateMirror(dt) {
     const now = performance.now() / 1000, P = this.ctx.player;
     for (const e of this.enemies) {
-      try {
-        e.t += dt;
-        if (!e.alive) { this._updateDead(e, dt); continue; }
-        if (e.flashT > 0) { e.flashT -= dt; if (e.flashT <= 0 && e.flashOn) { setFill(e.mat, false); e.flashOn = false; } }
-        e.flinch = damp(e.flinch, 0, 9, dt);
-        if (e.state === 'spawn') { const f = clamp(e.t / 0.6, 0, 1); e.root.scale.setScalar(Math.max(0.001, f * e.T.scale * (1 + Math.sin(e.t * 60) * 0.12 * (1 - f)))); if (e.t >= 0.6) { e.state = 'hunt'; e.root.scale.setScalar(e.T.scale); } }
-        if (e.snapA && e.snapB) {
-          // render 100 ms behind the newest snapshot so movement stays smooth between packets
-          const span = Math.max(0.02, e.snapB.t - e.snapA.t); const k = clamp((now - 0.1 - e.snapA.t) / span, 0, 1.2);
-          _v.lerpVectors(e.snapA.p, e.snapB.p, k);
-          e.body.vel.subVectors(_v, e.body.pos).divideScalar(Math.max(dt, 1e-3)).clampLength(0, 30);
-          e.body.pos.copy(_v); e.body.onGround = Math.abs(e.body.vel.y) < 0.5;
-          e.yaw = angleLerp(e.snapA.yaw, e.snapB.yaw, k);
-        }
-        e.root.position.copy(e.body.pos); e.root.rotation.y = e.yaw;
-        if (e.T.flying) this._animateFlyer(e, dt); else this._animate(e, dt, P.center);
-        if (e.T.weapon === 'sniper' && e.laser) e.laser.visible = e.aimAmt > 0.9;
-        this._syncHit(e);
-      } catch (err) { /* ignore single mirror tick error */ }
+      e.t += dt;
+      if (!e.alive) { this._updateDead(e, dt); continue; }
+      if (e.flashT > 0) { e.flashT -= dt; if (e.flashT <= 0 && e.flashOn) { setFill(e.mat, false); e.flashOn = false; } }
+      e.flinch = damp(e.flinch, 0, 9, dt);
+      if (e.state === 'spawn') { const f = clamp(e.t / 0.6, 0, 1); e.root.scale.setScalar(Math.max(0.001, f * e.T.scale * (1 + Math.sin(e.t * 60) * 0.12 * (1 - f)))); if (e.t >= 0.6) { e.state = 'hunt'; e.root.scale.setScalar(e.T.scale); } }
+      if (e.snapA && e.snapB) {
+        // render 100 ms behind the newest snapshot so movement stays smooth between packets
+        const span = Math.max(0.02, e.snapB.t - e.snapA.t); const k = clamp((now - 0.1 - e.snapA.t) / span, 0, 1.2);
+        _v.lerpVectors(e.snapA.p, e.snapB.p, k);
+        e.body.vel.subVectors(_v, e.body.pos).divideScalar(Math.max(dt, 1e-3)).clampLength(0, 30);
+        e.body.pos.copy(_v); e.body.onGround = Math.abs(e.body.vel.y) < 0.5;
+        e.yaw = angleLerp(e.snapA.yaw, e.snapB.yaw, k);
+      }
+      e.root.position.copy(e.body.pos); e.root.rotation.y = e.yaw;
+      if (e.T.flying) this._animateFlyer(e, dt); else this._animate(e, dt, P.center);
+      if (e.T.weapon === 'sniper' && e.laser) e.laser.visible = e.aimAmt > 0.9;
+      this._syncHit(e);
     }
     this.projectiles.update(dt);
     for (let i = this.enemies.length - 1; i >= 0; i--) { const e = this.enemies[i]; if (!e.alive && e.deadT > 2.5) { this._removeLaser(e); if (!e.rootDetached) { this.ctx.scene.remove(e.root); this._disposeMesh(e.root); } this.byId.delete(e.id); this.enemies.splice(i, 1); } }
@@ -425,8 +427,7 @@ export class EnemyManager {
     const nav = this.ctx.nav, b = e.body; e.pathT -= dt;
     target = this._approachPoint(e, dt, target, _goal);
     const stale = !e.path || e.pathI >= e.path.length || (e.pathT <= 0 && (!e.pathGoal || e.pathGoal.distanceTo(target) > 3.5 || !e.path.complete));
-    if (stale && (e.pathT <= 0 || !e.path) && this._pathsLeft > 0) {
-      this._pathsLeft--;
+    if (stale && (e.pathT <= 0 || !e.path)) {
       e.pathT = 0.8 + rand(0, 0.6); const p = nav.findPath(b.pos, target);
       if (p && p.length) { e.path = p; e.pathI = 0; e.pathGoal = target.clone(); while (e.pathI < p.length - 1 && Math.hypot(p[e.pathI].x - b.pos.x, p[e.pathI].z - b.pos.z) < 0.7 && Math.abs(p[e.pathI].y - b.pos.y) < 1) e.pathI++; }
     }
