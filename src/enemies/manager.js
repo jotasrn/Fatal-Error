@@ -160,7 +160,7 @@ export class EnemyManager {
             en.enraged = true;
             en.target = this.ctx.player;
             en.scared = false;
-            if (en.T.isCivilian) { en.T.weapon = 'blade'; en.T.dmg = 10; en.T.reach = 2.6; }
+            if (en.T.isCivilian && en.T.weapon !== 'blade') en.T = { ...en.T, weapon: 'blade', dmg: 10, reach: 2.6, lunge: 2.6, standoff: 1.6, cool: [1.1, 1.7] };
           }
         }
       } else if (e.T.isPolice && !this.ctx.playerWanted) {
@@ -246,6 +246,9 @@ export class EnemyManager {
         if (e.t >= 0.6) { e.state = 'hunt'; e.root.scale.setScalar(e.T.scale); }
         continue;
       }
+      // event code (protests, police, civilians) sets state = 'hunt' right after spawn(): without this
+      // the figure stayed at the 0.001 spawn scale and walked around invisible
+      if (e.root.scale.x !== e.T.scale) e.root.scale.setScalar(e.T.scale);
       if (e.state === 'stunned' && e.laser) this._hideLaser(e);
       if (e.T.flying) { this._thinkFlyer(e, dt, pc, P); world.moveBody(e.body, dt); }
       else {
@@ -430,7 +433,7 @@ export class EnemyManager {
     const dx = pp.x - b.pos.x, dz = pp.z - b.pos.z; const dist = Math.hypot(dx, dz); const dy = pp.y - b.pos.y;
     e.losT -= dt; if (e.losT <= 0) { e.losT = 0.12 + rand(0, 0.1); e.los = ctx.world.hasLineOfSight(this.eye(e, _eye), pc, SEE_THROUGH); }
     e.cool -= dt; const yawTo = Math.atan2(dx, dz);
-    if (T.isCivilian) {
+    if (T.isCivilian && !e.enraged) {
       e.aimAmt = 0;
       // If injured or player/threat is close, civilian panics and flees
       if (e.scared || dist < 20 || e.hp < T.hp) {
