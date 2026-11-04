@@ -476,7 +476,18 @@ net.onPeerJoin = (from, meta) => {
   const name = String(meta && meta.name || 'doodle').slice(0, 14);
   if (meta && meta.prev && meta.prev !== from) { const sc = scores.get(meta.prev); if (sc) { scores.delete(meta.prev); scores.set(from, sc); } const r = remote.get(meta.prev); if (r) r.dispose(); remote.delete(meta.prev); lobby.players.delete(meta.prev); if (lobby.order) lobby.order = lobby.order.filter((id) => id !== meta.prev); }
   lobby.players.set(from, { name }); addRemote(from, name); broadcastLobby();
-  if (game.state === 'play' || game.state === 'dying') { if (!scores.has(from)) scores.set(from, { name, kills: 0, deaths: 0 }); net.sendTo(from, 'start', { late: true, spawn: farthestSpawnIndex(), map: lobby.map || mapKey, broken: level.breakables.filter((b) => !b.alive).map((b) => b.id) }); sendScores(); hud.kill(name + ' entrou na sala', 0); }
+  if (game.state === 'play' || game.state === 'dying') {
+    if (!scores.has(from)) scores.set(from, { name, kills: 0, deaths: 0 });
+    net.sendTo(from, 'start', { late: true, spawn: farthestSpawnIndex(), map: lobby.map || mapKey, broken: level.breakables.filter((b) => !b.alive).map((b) => b.id) });
+    // Sincroniza imediatamente todos os bots vivos para o novo jogador:
+    if (net.isHost) {
+      for (const e of enemies.enemies) {
+        if (e.alive) net.sendTo(from, 'espawn', { id: e.id, type: e.type, pos: e.body.pos.toArray() });
+      }
+    }
+    sendScores();
+    hud.kill(name + ' entrou na sala', 0);
+  }
 };
 net.on('lobby', (d) => {
   lobby.hostId = d.hostId; lobby.isPublic = !!d.isPublic; lobby.code = net.code; lobby.shown = d.shown || net.code; if (d.map) lobby.map = knownMap(d.map); lobby.order = d.players.map((p) => p.id); lobby.players.clear();
@@ -578,7 +589,7 @@ let syncTick = 0;
 function netUpdate(dt) {
   idleUpdate(dt);
   if (!net.active) return; const now = performance.now() / 1000; syncTick++;
-  if (net.isHost && inMatch() && enemies.alive > 0 && syncTick % 3 === 0) {
+  if (net.isHost && inMatch() && syncTick % 3 === 0) {
     net.send('esnap', enemies.snapshot());
   }
   for (const r of remote.values()) r.update(dt, now);
