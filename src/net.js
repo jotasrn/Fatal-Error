@@ -359,6 +359,7 @@ export class DualNet {
     return this.driver;
   }
   get active() { return this.driver.active; }
+  get conns() { return this.driver.conns; }
   get peerIds() { return this.driver.peerIds; }
   get id() { return this.driver.id; }
   get code() { return this.driver.code; }

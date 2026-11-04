@@ -286,6 +286,7 @@ enemies.onKill = (e, info, over) => {
 let brasiliaEventTimer = 0;
 function triggerBrasiliaManifestation() {
   if (level.key !== 'brasilia') return;
+  brasiliaEventTimer = 80;
   ctx.protestersRiot = false;
   ctx.playerWanted = false;
 
@@ -459,7 +460,7 @@ async function _migrateHost() {
   hud.message('O anfitrião saiu', successor === myId ? 'Você é o novo anfitrião' : 'Migrando para novo anfitrião…', 2.6);
   if (successor === myId) {
     let ok = false;
-    for (let tries = 0; tries < 2 && !ok; tries++) { try { await net.host({ isPublic: lobby.isPublic, code }); ok = true; } catch (e) { await sleep(800); } }
+    for (let tries = 0; tries < 2 && !ok; tries++) { try { await net.host({ isPublic: lobby.isPublic, isInternal: lobby.isLan, mode: lobby.mode, code }); ok = true; } catch (e) { await sleep(800); } }
     if (!ok) { leaveOnline('Não foi possível assumir a sala'); return; }
     const mine = lobby.players.get(myId) || { name: myName }; lobby.players.delete(myId); lobby.players.set(net.id, mine);
     const ms = scores.get(myId); scores.delete(myId); if (ms) scores.set(net.id, ms);
@@ -495,7 +496,12 @@ net.onPeerJoin = (from, meta) => {
   }
 };
 net.on('lobby', (d) => {
-  lobby.hostId = d.hostId; lobby.isPublic = !!d.isPublic; lobby.code = net.code; lobby.shown = d.shown || net.code; if (d.map) lobby.map = knownMap(d.map); lobby.order = d.players.map((p) => p.id); lobby.players.clear();
+  lobby.hostId = d.hostId; lobby.isPublic = !!d.isPublic; lobby.code = net.code; lobby.shown = d.shown || net.code;
+  if (d.map) {
+    lobby.map = knownMap(d.map);
+    if (game.state === 'lobby' && loadedKey !== lobby.map) { setLevel(lobby.map, true); player.reset(level.playerStart); }
+  }
+  lobby.order = d.players.map((p) => p.id); lobby.players.clear();
   for (const p of d.players) lobby.players.set(p.id, { name: p.name });
   for (const p of d.players) if (p.id !== net.id) addRemote(p.id, p.name);
   for (const id of [...remote.keys()]) if (!lobby.players.has(id)) removeRemote(id);
@@ -503,7 +509,7 @@ net.on('lobby', (d) => {
   renderLobby();
 });
 net.on('leave', (d) => { const nm = (lobby.players.get(d.id) || {}).name; removeRemote(d.id); if (inMatch()) hud.kill((nm || 'Alguém') + ' saiu da sala', 0); renderLobby(); });
-net.on('start', (d) => { if (net.isHost) return; if (d.map) lobby.map = knownMap(d.map); startMatch(!!d.late, d.spawns ? d.spawns[net.id] : d.spawn); if (d.broken) for (const id of d.broken) { const br = level.breakables[id]; if (br) breakProp(br, null, false, true); } });
+net.on('start', (d) => { if (net.isHost) return; if (d.map) lobby.map = knownMap(d.map); startMatch(!!d.late, d.spawns ? d.spawns[net.id] : d.spawn, d.map); if (d.broken) for (const id of d.broken) { const br = level.breakables[id]; if (br) breakProp(br, null, false, true); } });
 net.on('startreq', () => { if (net.isHost && game.state === 'lobby') hostStart(); });
 net.on('end', (d) => endMatch(d));
 net.on('backtolobby', () => { if (!net.isHost) toLobbyScreen(); });
@@ -620,7 +626,9 @@ async function createLobby(mode) {
     await net.host({ isPublic, isInternal: isLan, mode });
   }
   catch (err) { setStatus(friendlyError(err)); unlockButtons(); return; }
-  lobby.isPublic = isPublic; lobby.isLan = isLan; lobby.mode = mode; lobby.map = mapKey; lobby.players.clear(); lobby.players.set(net.id, { name: myName }); lobby.hostId = net.id; lobby.status = '';
+  lobby.isPublic = isPublic; lobby.isLan = isLan; lobby.mode = mode; lobby.map = knownMap(mapKey);
+  setLevel(lobby.map, true); player.reset(level.playerStart);
+  lobby.players.clear(); lobby.players.set(net.id, { name: myName }); lobby.hostId = net.id; lobby.status = '';
   game.state = 'lobby'; screen = 'lobby'; showStart();
 }
 async function joinLobby(code, forceLan = false) {
@@ -630,10 +638,19 @@ async function joinLobby(code, forceLan = false) {
   lobby.isPublic = net.isPublic; lobby.isLan = net.isInternal; lobby.status = ''; game.state = 'lobby'; screen = 'lobby'; showStart();
 }
 async function quickPlay() {
-  try { await net.quickJoin({ name: myName }, setStatus); lobby.isPublic = true; lobby.status = ''; game.state = 'lobby'; screen = 'lobby'; showStart(); return; }
+  try {
+    await net.quickJoin({ name: myName }, setStatus);
+    lobby.isPublic = true; lobby.isLan = net.isInternal; lobby.mode = 'public'; lobby.status = '';
+    if (net.isHost) {
+      lobby.map = knownMap(mapKey);
+      setLevel(lobby.map, true); player.reset(level.playerStart);
+      lobby.players.clear(); lobby.players.set(net.id, { name: myName }); lobby.hostId = net.id;
+    }
+    game.state = 'lobby'; screen = 'lobby'; showStart(); return;
+  }
   catch (err) { if (!/no open public/.test(String(err.message))) { setStatus(friendlyError(err)); unlockButtons(); return; } }
   setStatus('Nenhuma sala aberta · Criando nova sala pública…');
-  await createLobby(true);
+  await createLobby('public');
 }
 function friendlyError(err) {
   const m = String(err && err.message || err || ''); if (!m) return 'Ocorreu um erro';
@@ -858,7 +875,16 @@ function wireOnline() {
   if (q('backBtn')) q('backBtn').addEventListener('click', () => { lobby.status = ''; lobby.rejoinCode = null; screen = 'main'; showStart(); });
   if (q('refreshBtn')) { q('refreshBtn').addEventListener('click', () => refreshLobbies()); if (!lobbyList && !listBusy) refreshLobbies(); }
   if (q('lobbyRows')) q('lobbyRows').addEventListener('click', (e) => { const b = e.target.closest('button[data-join]'); if (b) { lockButtons(box); joinLobby(b.dataset.join); } });
-  wireMap((k) => { if (net.isHost) { lobby.map = k; broadcastLobby(); } });
+  wireMap((k) => {
+    if (net.isHost) {
+      lobby.map = knownMap(k);
+      mapKey = lobby.map;
+      localStorage.setItem('doodle_map', lobby.map);
+      setLevel(lobby.map, true);
+      player.reset(level.playerStart);
+      broadcastLobby();
+    }
+  });
   if (q('startBtn')) q('startBtn').addEventListener('click', () => { if (net.isHost) hostStart(); else { net.send('startreq', {}); setStatus('Solicitando início ao anfitrião…'); } });
   if (q('leaveBtn')) q('leaveBtn').addEventListener('click', () => { lobby.rejoinCode = null; leaveOnline(''); });
 }
@@ -872,7 +898,8 @@ function showStart() {
   hud.showScreen(html);
   const p = hud.el.panel;
   if (screen === 'main') {
-    wireSettings(); wireCheckpoints((w) => beginAtWave(w)); wireMap((k) => { mapKey = k; localStorage.setItem('doodle_map', k); showStart(); });
+    wireSettings(); wireCheckpoints((w) => beginAtWave(w));
+    wireMap((k) => { mapKey = knownMap(k); lobby.map = mapKey; localStorage.setItem('doodle_map', mapKey); setLevel(mapKey, false); player.reset(level.playerStart); showStart(); });
     p.querySelector('#soloBtn').addEventListener('click', (e) => { e.stopPropagation(); begin(); });
     p.querySelector('#onlineBtn').addEventListener('click', (e) => { e.stopPropagation(); screen = 'online'; showStart(); });
   } else wireOnline();
@@ -902,33 +929,46 @@ function resetGame() {
   enemies.clear(); effects.clear(); survival.clearPickups();
   player.maxHp = online() ? 110 : 120; player.regenDelay = online() ? 4 : 4.5; player.regenRate = online() ? 14 : 11;
   player.reset(level.playerStart); player.name = myName; player.lastHitBy = null; player.lastHit = null; enemies.mods.speed = 1; enemies.mods.damage = 1; hud.setModifier(''); hud.setBoss(null, null); game.boss = null; endFocus(); game.katanaStreak = 0;
-  if (level.key === 'brasilia' && (!online() || net.isHost)) {
-    spawnBrasiliaCivilians();
-  }
   game.score = 0; game.kills = 0; game.combo = 0; game.wave = 0; game.intermission = 0; game.queue = []; game.time = 0; game.over = null; game.matchT = 0; hud.setScore(0, 0); hud.setTimer(''); hud.setPvpScore(null); hud.setWave(1, 0); hud.setBoard(null);
 }
 function beginCommon() { audio.init(); audio.resume(); if (!input.usingGamepad) input.requestLock(); if (musicWanted && !audio.musicPlaying) audio.musicOn(true); hud.hideScreen(); hud.setGameplayVisible(true); game.menu = false; }
-function begin() { game.mode = 'solo'; setArena(false); beginCommon(); if (game.state === 'start' || game.state === 'dead') { resetGame(); startWave(1); } game.state = 'play'; }
-function beginAtWave(n) { game.mode = 'solo'; setArena(false); beginCommon(); resetGame(); startWave(n); game.state = 'play'; }
+function begin() {
+  game.mode = 'solo'; setArena(false); beginCommon();
+  if (game.state === 'start' || game.state === 'dead') {
+    resetGame();
+    if (level.key === 'brasilia') spawnBrasiliaCivilians();
+    startWave(1);
+  }
+  game.state = 'play';
+}
+function beginAtWave(n) {
+  game.mode = 'solo'; setArena(false); beginCommon(); resetGame();
+  if (level.key === 'brasilia') spawnBrasiliaCivilians();
+  startWave(n); game.state = 'play';
+}
 function jumpToWave(n) { enemies.clear(); effects.clear(); enemies.mods.speed = 1; enemies.mods.damage = 1; endFocus(); game.intermission = 0; game.queue = []; startWave(n); hud.hideScreen(); hud.setGameplayVisible(true); game.state = 'play'; game.menu = false; audio.reelLoop(false); }
 function hostStart() {
   scores.clear(); for (const [id, p] of lobby.players) scores.set(id, { name: p.name, kills: 0, deaths: 0 });
-  // random map rotation: every online match rolls a fresh map so no two feel the same
-  lobby.map = choose(LEVELS).key;
+  // preserve the exact map selected by the host in the main menu or lobby
+  lobby.map = knownMap(lobby.map || mapKey);
+  setLevel(lobby.map, true);
   // deal everyone a different spot, shuffled so the same people do not always start together
-  setArena(true); const order = spawnSpots().map((_, i) => i); for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
+  const order = spawnSpots().map((_, i) => i); for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
   const spawns = {}; [...lobby.players.keys()].forEach((id, i) => { spawns[id] = order[i % order.length]; });
-  net.send('start', { spawns, map: lobby.map || mapKey }); startMatch(false, spawns[net.id]); sendScores();
+  net.send('start', { spawns, map: lobby.map }); startMatch(false, spawns[net.id], lobby.map); sendScores();
 }
-function startMatch(late, spawnIdx) {
-  net.inMatch = true; game.mode = 'ffa'; setArena(true); resetGame(); matchLeft = FFA_TIME; clockT = 0; game.clockStarted = false;
+function startMatch(late, spawnIdx, forcedMap) {
+  if (forcedMap) lobby.map = knownMap(forcedMap);
+  const chosenMap = knownMap(lobby.map || mapKey);
+  lobby.map = chosenMap;
+  net.inMatch = true; game.mode = 'ffa'; enemies.mirror = !net.isHost;
+  setLevel(chosenMap, true); resetGame(); matchLeft = FFA_TIME; clockT = 0; game.clockStarted = false;
   // nobody sends snapshots in the lobby, so the silence clock restarts here or the sweep would drop everyone
   for (const r of remote.values()) r.lastSeen = performance.now();
   if (!scores.size) for (const [id, p] of lobby.players) scores.set(id, { name: p.name, kills: 0, deaths: 0 });
   const spots = spawnSpots(); player.reset(spawnIdx != null && spots[spawnIdx] ? spots[spawnIdx].clone() : arenaSpawn()); beginCommon(); game.state = 'play'; screen = 'lobby'; player.shieldT = 2;
-  enemies.mirror = !net.isHost;
-  enemies.clear();
   if (net.isHost) {
+    if (level.key === 'brasilia') spawnBrasiliaCivilians();
     startWave(1);
   }
   refreshScoreHud(); hud.message('Mata-Mata Livre', late ? 'Você entrou em uma partida em andamento' : 'Primeiro a ' + FFA_TARGET + ' eliminações · Limite de ' + Math.round(FFA_TIME / 60) + ' min · Cada um por si', 3);

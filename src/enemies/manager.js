@@ -242,6 +242,7 @@ export class EnemyManager {
   eye(e, out) { return out.setFromMatrixPosition(e.parts.head.matrixWorld); }
   update(dt) {
     if (this.mirror) { this._updateMirror(dt); return; }
+    this._pathsLeft = 4;
     const ctx = this.ctx, world = ctx.world;
     for (const e of this.enemies) {
       this._cur = e; // lets the game loop drop a bot whose update throws instead of freezing every frame
@@ -424,7 +425,8 @@ export class EnemyManager {
     const nav = this.ctx.nav, b = e.body; e.pathT -= dt;
     target = this._approachPoint(e, dt, target, _goal);
     const stale = !e.path || e.pathI >= e.path.length || (e.pathT <= 0 && (!e.pathGoal || e.pathGoal.distanceTo(target) > 3.5 || !e.path.complete));
-    if (stale && (e.pathT <= 0 || !e.path)) {
+    if (stale && (e.pathT <= 0 || !e.path) && this._pathsLeft > 0) {
+      this._pathsLeft--;
       e.pathT = 0.8 + rand(0, 0.6); const p = nav.findPath(b.pos, target);
       if (p && p.length) { e.path = p; e.pathI = 0; e.pathGoal = target.clone(); while (e.pathI < p.length - 1 && Math.hypot(p[e.pathI].x - b.pos.x, p[e.pathI].z - b.pos.z) < 0.7 && Math.abs(p[e.pathI].y - b.pos.y) < 1) e.pathI++; }
     }
