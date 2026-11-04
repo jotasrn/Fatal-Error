@@ -231,7 +231,7 @@ export class InkRenderer {
     this.renderer.autoClear = false;
     this.pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(80, 1, 0.08, 420);
+    this.camera = new THREE.PerspectiveCamera(80, 1, 0.08, 560);
     const depthTexture = new THREE.DepthTexture(2, 2); depthTexture.format = THREE.DepthFormat; depthTexture.type = THREE.FloatType;
     this.rt = new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType, format: THREE.RGBAFormat, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthTexture, depthBuffer: true, stencilBuffer: false, generateMipmaps: false });
     this.post = new THREE.ShaderMaterial({

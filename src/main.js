@@ -321,14 +321,16 @@ function triggerBrasiliaManifestation() {
 
 function spawnBrasiliaCivilians() {
   const civSpots = [
-    new THREE.Vector3(0, 6.5, -114),    // Mezanino da Rodoviária
-    new THREE.Vector3(-12, 0, -108),    // Plataforma da Rodoviária
-    new THREE.Vector3(12, 0, -108),     // Plataforma da Rodoviária
-    new THREE.Vector3(-24, 0, -82),     // Calçada do Museu da República
-    new THREE.Vector3(24, 0, -82),      // Calçada da Catedral
-    new THREE.Vector3(0, 0, -35),       // Gramado Central da Esplanada
-    new THREE.Vector3(-33, 0, -15),     // Calçada Ministério Norte
-    new THREE.Vector3(33, 0, 15),       // Calçada Ministério Sul
+    new THREE.Vector3(0, 7, -213),      // Plataforma superior da Rodoviária
+    new THREE.Vector3(-30, 7, -210),    // Mezanino da Rodoviária
+    new THREE.Vector3(-10, 0, -188),    // Saída da Rodoviária
+    new THREE.Vector3(46, 0, -140),     // Calçada do Museu Nacional
+    new THREE.Vector3(44, 0, -100),     // Entrada da Catedral
+    new THREE.Vector3(-46, 0, -128),    // Teatro Nacional
+    new THREE.Vector3(0, 0.22, -60),    // Gramado Central da Esplanada
+    new THREE.Vector3(-41, 0, -10),     // Parada de ônibus Norte
+    new THREE.Vector3(41, 0, 46),       // Calçada Ministério Sul
+    new THREE.Vector3(6, 0.22, 110),    // Frente do Congresso
   ];
   for (const pos of civSpots) {
     const c = enemies.spawn('civilian', pos);
@@ -430,7 +432,7 @@ function endMatch(winner) {
 // ---------------- networking ----------------
 function addRemote(id, name) {
   if (remote.has(id)) { const r = remote.get(id); r.name = name; return r; }
-  const rp = new RemotePlayer(ctx, id, name, 0, INK.RED);
+  const rp = new RemotePlayer(ctx, id, name, 0, INK.PURPLE); // players are violet; bots never use it
   rp.onDamage = (t, amount, fromPos) => { if (!ctx.canHurt(t) || !t.alive) return; hud.hitmarker(false, false); net.sendTo(t.id, 'pdmg', { amount: Math.round(amount), from: fromPos ? fromPos.toArray().map((v) => +v.toFixed(1)) : null, by: net.id, src: 'grenade' }); };
   remote.set(id, rp); return rp;
 }

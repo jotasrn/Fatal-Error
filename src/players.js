@@ -31,7 +31,8 @@ export class RemotePlayer {
     this.yaw = 0; this.pitch = 0; this.crouching = false; this.sliding = false; this.blocking = false; this.aiming = false; this.firing = false;
     this.snapA = null; this.snapB = null; this.phase = 0; this.walk = 0; this.flashT = 0; this.deadT = 0; this.kills = 0; this.deaths = 0; this.score = 0;
     this.mat = makeInkMaterial({ ink, shadeScale: 0, shadeBias: 1 }); this.solid = makeInkMaterial({ ink: INK.BLACK, fill: true, side: THREE.DoubleSide });
-    this.T = { weapon: 'rifle', scale: 1.0, hat: 'cap', build: { bodyW: 1, headS: 1, limbR: 0.033 }, blockRadius: 0 };
+    // players wear the violet/teal "gamer" kit (headset, vest, teal pack and armbands) that no bot uses
+    this.T = { weapon: 'rifle', scale: 1.0, hat: 'headset', gear: ['vest', 'pack', 'armband'], accent: INK.TEAL, packAccent: true, build: { bodyW: 1, headS: 1, limbR: 0.033 }, blockRadius: 0 };
     this.hit = HIT; this.hitSpheres = HIT.map(() => new THREE.Vector3()); this.vel = new THREE.Vector3(); this.grappling = false; this.gPoint = new THREE.Vector3();
     this._buildModel();
     // the grapple rope: a thin line from the hand to wherever the hook is
@@ -44,7 +45,8 @@ export class RemotePlayer {
     this.root.visible = false; this.ctx.scene.add(this.root); this.weaponIndex = -1;
     // a name tag: a little flag above the head so you know who is who
     this.tagG = new THREE.Group(); this.root.add(this.tagG); this.tagG.position.y = 2.25;
-    const flag = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.28, 0.02), makeInkMaterial({ ink: this.ink, fill: true, side: THREE.DoubleSide })); this.tagG.add(flag);
+    const flag = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.28, 0.02), makeInkMaterial({ ink: INK.TEAL, fill: true, side: THREE.DoubleSide })); this.tagG.add(flag);
+    const pole = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.22, 4), makeInkMaterial({ ink: INK.PURPLE, fill: true })); pole.position.y = -0.3; pole.rotation.x = Math.PI; this.tagG.add(pole);
     this.corpse = false;
   }
   // knocked flat with some physics: the whole figure tumbles away as debris (bits come off on a

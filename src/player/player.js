@@ -256,7 +256,8 @@ export class Player {
     b.noSnap = this.grapple.state === 'on' || b.vel.y > 0.5;
     const spd = b.vel.length(); if (spd > 48) b.vel.multiplyScalar(48 / spd);
     ctx.world.moveBody(b, dt);
-    if (b.pos.y < -12 || Math.abs(b.pos.x) > 95 || Math.abs(b.pos.z) > 95) {
+    const LB = ctx.level.bounds; // out of the map: uses each map's own bounds (Brasília is far bigger than 95)
+    if (b.pos.y < -12 || b.pos.x < LB.minX - 8 || b.pos.x > LB.maxX + 8 || b.pos.z < LB.minZ - 8 || b.pos.z > LB.maxZ + 8) {
       this.detachGrapple(false); b.pos.copy(ctx.level.playerStart); b.vel.set(0, 0, 0); this.takeDamage(20, null); if (this.onFall) this.onFall();
       ctx.hud.message('Caiu do Caderno', 'Redesenhado no ponto inicial', 1.8);
     }

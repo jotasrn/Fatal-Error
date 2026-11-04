@@ -79,7 +79,7 @@ function gearKit() {
 function dressHumanoid(J, hatG, mat, solid, T, bw, hs, limbR) {
   const gear = new Set(T.gear || []);
   const acc = makeInkMaterial({ ink: T.accent ?? INK.ORANGE, fill: true, side: THREE.DoubleSide });
-  const K = gearKit(); const { box, ball, can, ring, hoop } = K;
+  const K = gearKit(); const { put, box, ball, can, ring, hoop } = K;
   const tor = J.torso, hips = J.hips, H = hatG;
   // torso surface helpers (the torso blob is centred at y 0.26 with radii 0.3bw, 0.3, 0.19bw)
   const fz = (y) => 0.19 * bw * Math.sqrt(Math.max(0, 1 - ((y - 0.26) / 0.3) ** 2));
