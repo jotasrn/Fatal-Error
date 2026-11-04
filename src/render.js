@@ -238,7 +238,7 @@ export class InkRenderer {
     canvas.addEventListener('webglcontextlost', (ev) => { ev.preventDefault(); this.lost = true; if (window.FE_LOG) window.FE_LOG.error('webglcontextlost'); });
     canvas.addEventListener('webglcontextrestored', () => { this.lost = false; this.pixelRatio = Math.max(this.minRatio, this.pixelRatio * 0.8); this.resize(); });
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(80, 1, 0.08, 330);
+    this.camera = new THREE.PerspectiveCamera(80, 1, 0.08, 560);
     const depthTexture = new THREE.DepthTexture(2, 2); depthTexture.format = THREE.DepthFormat; depthTexture.type = THREE.FloatType;
     this.rt = new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType, format: THREE.RGBAFormat, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthTexture, depthBuffer: true, stencilBuffer: false, generateMipmaps: false });
     this.post = new THREE.ShaderMaterial({
@@ -272,6 +272,7 @@ export class InkRenderer {
     if (ms <= 0 || ms > 250) return; // a hitch from loading or alt-tab is not a trend
     this._ft += (ms - this._ft) * 0.06;
     if (this._ft > 22) { this._slowT += ms; this._fastT = 0; } else if (this._ft < 17.6) { this._fastT += ms; this._slowT = 0; } else { this._slowT = 0; this._fastT = 0; }
+    if (!this.autoRes) return; // off: the downscale blurred the notebook lines, quality first
     if (now - (this._lastChange || 0) < 4000) return;
     if (this._slowT > 1500 && this.pixelRatio > this.minRatio + 1e-3) { this.pixelRatio = Math.max(this.minRatio, this.pixelRatio * 0.8); this._slowT = 0; this._lastChange = now; this.resize(); }
     else if (this._fastT > 15000 && this.pixelRatio < this.maxRatio - 1e-3) { this.pixelRatio = Math.min(this.maxRatio, this.pixelRatio * 1.1); this._fastT = 0; this._lastChange = now; this.resize(); }
