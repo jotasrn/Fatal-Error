@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { makeBody } from '../physics.js';
 import { makeInkMaterial, INK } from '../render.js';
-import { Revolver, Shotgun, Rifle, Sniper, Bazooka, Katana } from '../weapons/index.js';
+import { Revolver, Shotgun, SMG, Rifle, Sniper, LaserRifle, Bazooka, Katana } from '../weapons/index.js';
 import { clamp, damp, rand, Spring } from '../util.js';
 import { audio } from '../audio.js';
 import {
@@ -27,14 +27,16 @@ export class Player {
     this.eye = new THREE.Vector3(); this.center = new THREE.Vector3(); this.forward = new THREE.Vector3(0, 0, -1); this.right = new THREE.Vector3(1, 0, 0);
     this.speed = 0; this.hurtFx = 0; this.flashFx = 0; this.lastDamageT = 10;
     this.rig = new THREE.Group(); this.camera.add(this.rig); ctx.scene.add(this.camera);
-    this.weapons = [new Revolver(ctx), new Shotgun(ctx), new Rifle(ctx), new Sniper(ctx), new Bazooka(ctx), new Katana(ctx)]; this.katanaIndex = 5;
+    this.weapons = [new Revolver(ctx), new Shotgun(ctx), new SMG(ctx), new Rifle(ctx), new Sniper(ctx), new LaserRifle(ctx), new Bazooka(ctx), new Katana(ctx)]; this.katanaIndex = 7;
     for (const w of this.weapons) { this.rig.add(w.root); if (w.isGun) w.startReserve = w.reserve; }
     this.weapons[0].owned = true;  // Revolver (pistola inicial)
     this.weapons[1].owned = false; // Escopeta ($600)
-    this.weapons[2].owned = false; // Rifle ($900)
-    this.weapons[3].owned = false; // Sniper ($1200)
-    this.weapons[4].owned = false; // Bazuca ($1800)
-    this.weapons[5].owned = true;  // Katana (faca corpo a corpo)
+    this.weapons[2].owned = false; // Submetralhadora SMG ($750)
+    this.weapons[3].owned = false; // Rifle de Assalto ($900)
+    this.weapons[4].owned = false; // Sniper ($1200)
+    this.weapons[5].owned = false; // Fuzil de Plasma Laser ($1500)
+    this.weapons[6].owned = false; // Bazuca ($1800)
+    this.weapons[7].owned = true;  // Katana (faca corpo a corpo)
     this.money = 300; this.armor = 0; this.maxArmor = 100;
     this.weaponIndex = 0; this.weapon = this.weapons[0]; this.weapon.equip(); this.returnT = 0; this.prevWeaponIndex = 0;
     this.recoilPitch = new Spring(190, 17); this.recoilYaw = new Spring(190, 17); this.fovKick = new Spring(220, 14); this.landDip = new Spring(170, 15);
@@ -59,8 +61,8 @@ export class Player {
     for (const w of this.weapons) if (w.isGun) { w.mag = w.magSize; w.reserve = w.startReserve; w.reloading = false; w.pumpT = 0; }
     this.money = 300; this.armor = 0;
     this.weapons[0].owned = true;
-    for (let i = 1; i <= 4; i++) this.weapons[i].owned = false;
-    this.weapons[5].owned = true;
+    for (let i = 1; i <= 6; i++) this.weapons[i].owned = false;
+    this.weapons[7].owned = true;
     this.switchTo(0, true); this.rig.visible = true; this.eyeH = EYE_STAND; this.grenades = 3; this.clearNades(); this.clearRockets();
     if (this.ctx.hud) { this.ctx.hud.setMoney(this.money); this.ctx.hud.setArmor(0, this.maxArmor); }
   }
@@ -147,7 +149,7 @@ export class Player {
     this.alive = false; this.deathT = 0; audio.death(); this.detachGrapple(false);
     // Ao morrer, dropa as armas equipadas no chão para qualquer jogador coletar
     if (this.ctx.survival && this.ctx.survival.spawnPickup) {
-      for (let i = 1; i <= 4; i++) {
+      for (let i = 1; i <= 6; i++) {
         const w = this.weapons[i];
         if (w && w.owned) {
           const dropPos = this.body.pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 2.5, 0, (Math.random() - 0.5) * 2.5));
@@ -158,7 +160,7 @@ export class Player {
     const online = this.ctx.game.mode === 'ffa';
     if (!online) this.money = 0;
     this.armor = 0;
-    for (let i = 1; i <= 4; i++) this.weapons[i].owned = false;
+    for (let i = 1; i <= 6; i++) this.weapons[i].owned = false;
     this.switchTo(0, true);
     if (this.ctx.hud) { this.ctx.hud.setMoney(this.money); this.ctx.hud.setArmor(0, this.maxArmor); }
     this.ctx.game.onPlayerDeath();

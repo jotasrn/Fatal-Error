@@ -8,7 +8,7 @@ import { buildHumanoid, buildWeaponProp } from './enemies/index.js';
 import { clamp, damp, angleLerp, wrapAngle } from './util.js';
 
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
-const WEAPON_KINDS = ['revolver', 'shotgun', 'rifle', 'sniper', 'bazooka', 'blade'];
+const WEAPON_KINDS = ['revolver', 'shotgun', 'smg', 'rifle', 'sniper', 'laser', 'bazooka', 'blade'];
 const HIT = [['head', 0.3], ['torso', 0.33], ['hips', 0.2], ['armL', 0.11], ['armR', 0.11], ['foreL', 0.1], ['foreR', 0.1], ['legL', 0.13], ['legR', 0.13], ['shinL', 0.11], ['shinR', 0.11]];
 
 // what a player broadcasts about itself, ~20 times a second:

@@ -25,6 +25,16 @@ export function createSurvival(ctx, deps) {
         const b2 = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.6, 6), pmat.ammo);
         b2.rotation.x = Math.PI / 2; b2.position.set(0, 0.08, 0.3);
         gunMesh.add(b1, b2);
+      } else if (wk === 'smg') {
+        const b1 = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.42), pmat.cap);
+        const mag = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.22, 0.08), pmat.ammo);
+        mag.position.set(0, -0.14, 0);
+        gunMesh.add(b1, mag);
+      } else if (wk === 'laser') {
+        const b1 = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.14, 0.58), pmat.shell);
+        const cell = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.2, 6), pmat.ammo);
+        cell.position.set(0, -0.12, -0.05);
+        gunMesh.add(b1, cell);
       } else if (wk === 'rifle') {
         const b1 = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.14, 0.6), pmat.cap);
         const mag = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.2, 0.12), pmat.ammo);
@@ -61,7 +71,7 @@ export function createSurvival(ctx, deps) {
   function collectPickup(p) {
     if (p.kind.startsWith('drop_')) {
       const wk = p.kind.replace('drop_', '');
-      const wNames = { shotgun: 'Escopeta', rifle: 'Rifle de Assalto', sniper: 'Rifle de Precisão', bazooka: 'Lança-Foguetes' };
+      const wNames = { shotgun: 'Escopeta', smg: 'Submetralhadora SMG', rifle: 'Rifle de Assalto', sniper: 'Rifle de Precisão', laser: 'Fuzil de Plasma Laser', bazooka: 'Lança-Foguetes' };
       const w = player.weapons.find((x) => x.kind === wk);
       if (w) {
         w.owned = true;

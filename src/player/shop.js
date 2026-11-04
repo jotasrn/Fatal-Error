@@ -21,8 +21,10 @@ export const ShopMixin = {
   buyItem(key) {
     const PRICES = {
       shotgun: 600,
+      smg: 750,
       rifle: 900,
       sniper: 1200,
+      laser: 1500,
       bazooka: 1800,
       armor_light: 300,
       armor_heavy: 600,
@@ -45,32 +47,50 @@ export const ShopMixin = {
         this.weapons[1].owned = true;
         this.switchTo(1);
       }
-    } else if (key === 'rifle') {
+    } else if (key === 'smg') {
       if (this.weapons[2].owned) {
         this.weapons[2].addAmmo(this.weapons[2].maxReserve);
-        this.spendCash(cost, 'Munição Rifle');
+        this.spendCash(cost, 'Munição SMG');
       } else {
-        this.spendCash(cost, 'Rifle Adquirido');
+        this.spendCash(cost, 'Submetralhadora Adquirida');
         this.weapons[2].owned = true;
         this.switchTo(2);
       }
-    } else if (key === 'sniper') {
+    } else if (key === 'rifle') {
       if (this.weapons[3].owned) {
         this.weapons[3].addAmmo(this.weapons[3].maxReserve);
-        this.spendCash(cost, 'Munição Sniper');
+        this.spendCash(cost, 'Munição Rifle');
       } else {
-        this.spendCash(cost, 'Sniper Adquirida');
+        this.spendCash(cost, 'Rifle Adquirido');
         this.weapons[3].owned = true;
         this.switchTo(3);
       }
-    } else if (key === 'bazooka') {
+    } else if (key === 'sniper') {
       if (this.weapons[4].owned) {
         this.weapons[4].addAmmo(this.weapons[4].maxReserve);
+        this.spendCash(cost, 'Munição Sniper');
+      } else {
+        this.spendCash(cost, 'Sniper Adquirida');
+        this.weapons[4].owned = true;
+        this.switchTo(4);
+      }
+    } else if (key === 'laser') {
+      if (this.weapons[5].owned) {
+        this.weapons[5].addAmmo(this.weapons[5].maxReserve);
+        this.spendCash(cost, 'Células de Plasma');
+      } else {
+        this.spendCash(cost, 'Fuzil de Plasma Adquirido');
+        this.weapons[5].owned = true;
+        this.switchTo(5);
+      }
+    } else if (key === 'bazooka') {
+      if (this.weapons[6].owned) {
+        this.weapons[6].addAmmo(this.weapons[6].maxReserve);
         this.spendCash(cost, 'Foguetes Bazuca');
       } else {
         this.spendCash(cost, 'Bazuca Adquirida');
-        this.weapons[4].owned = true;
-        this.switchTo(4);
+        this.weapons[6].owned = true;
+        this.switchTo(6);
       }
     } else if (key === 'armor_light') {
       if (this.armor >= this.maxArmor) {
