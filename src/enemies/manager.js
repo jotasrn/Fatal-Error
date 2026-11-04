@@ -22,6 +22,21 @@ export class EnemyManager {
   }
   // Everyone an enemy may go after. Solo play is just the local player.
   targets() { return this.ctx.targets ? this.ctx.targets() : [this.ctx.player]; }
+  get waveAlive() {
+    let c = 0;
+    for (const e of this.enemies) {
+      if (e.alive && !e.T.isCivilian && !e.T.isProtester && !e.T.isPolice) c++;
+    }
+    return c;
+  }
+  _disposeMesh(obj) {
+    if (!obj) return;
+    obj.traverse((child) => {
+      if (child.isMesh && child.geometry) {
+        try { child.geometry.dispose(); } catch (e) {}
+      }
+    });
+  }
   _pickTarget(e, dt) {
     e.retargetT = (e.retargetT ?? 0) - dt;
     if (e.target && e.target.alive && e.retargetT > 0) return e.target;
@@ -253,7 +268,7 @@ export class EnemyManager {
       this._syncHit(e);
     }
     this._separate(dt); this.projectiles.update(dt);
-    for (let i = this.enemies.length - 1; i >= 0; i--) { const e = this.enemies[i]; if (!e.alive && e.deadT > 9) { this._removeLaser(e); if (!e.rootDetached) this.ctx.scene.remove(e.root); this.enemies.splice(i, 1); } }
+    for (let i = this.enemies.length - 1; i >= 0; i--) { const e = this.enemies[i]; if (!e.alive && e.deadT > 3.5) { this._removeLaser(e); if (!e.rootDetached) { this.ctx.scene.remove(e.root); this._disposeMesh(e.root); } this.byId.delete(e.id); this.enemies.splice(i, 1); } }
   }
   // --- network mirror ---
   // Compact per-enemy state the host sends every few frames; clients ease toward it.

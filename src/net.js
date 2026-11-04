@@ -342,4 +342,94 @@ class SwarmNet {
 
 // In the Electron build the renderer sees window.FE_NET (the Hyperswarm bridge) and uses the
 // serverless DHT transport; a plain browser falls back to PeerJS so the web/dev version still runs.
-export const Net = (typeof window !== 'undefined' && window.FE_NET) ? SwarmNet : PeerNet;
+
+// ---- DualNet: Support both Global P2P (Hyperswarm) and Corporate/GDFNet (WebRTC/PeerNet) ----
+export class DualNet {
+  constructor() {
+    this.swarm = (typeof window !== 'undefined' && window.FE_NET) ? new SwarmNet() : null;
+    this.peer = new PeerNet();
+    this.driver = this.swarm || this.peer;
+    this.mode = this.swarm ? 'swarm' : 'peer';
+    this.isInternal = false;
+  }
+  usePeer(isLan = true) {
+    this.isInternal = isLan;
+    this.driver = (isLan || !this.swarm) ? this.peer : this.swarm;
+    this.mode = (isLan || !this.swarm) ? 'peer' : 'swarm';
+    return this.driver;
+  }
+  get active() { return this.driver.active; }
+  get peerIds() { return this.driver.peerIds; }
+  get id() { return this.driver.id; }
+  get code() { return this.driver.code; }
+  get hostId() { return this.driver.hostId; }
+  get isHost() { return this.driver.isHost; }
+  get isPublic() { return this.driver.isPublic; }
+  set isPublic(v) { this.driver.isPublic = v; }
+  get inMatch() { return this.driver.inMatch; }
+  set inMatch(v) { this.driver.inMatch = v; }
+  get accepting() { return this.driver.accepting; }
+  set accepting(v) { this.driver.accepting = v; }
+  get maxPlayers() { return this.driver.maxPlayers; }
+  set maxPlayers(v) { this.driver.maxPlayers = v; }
+  get hostName() { return this.driver.hostName; }
+  set hostName(v) { this.driver.hostName = v; }
+  get aliasCode() { return this.driver.aliasCode; }
+
+  set onPeerJoin(fn) { this.peer.onPeerJoin = fn; if (this.swarm) this.swarm.onPeerJoin = fn; }
+  set onPeerLeave(fn) { this.peer.onPeerLeave = fn; if (this.swarm) this.swarm.onPeerLeave = fn; }
+  set onDisconnect(fn) { this.peer.onDisconnect = fn; if (this.swarm) this.swarm.onDisconnect = fn; }
+  set onAlias(fn) { this.peer.onAlias = fn; if (this.swarm) this.swarm.onAlias = fn; }
+
+  on(type, fn) {
+    this.peer.on(type, fn);
+    if (this.swarm) this.swarm.on(type, fn);
+  }
+  send(type, data, relay = false) { return this.driver.send(type, data, relay); }
+  broadcast(type, data) { return this.driver.broadcast(type, data); }
+  sendTo(pid, type, data) { return this.driver.sendTo(pid, type, data); }
+
+  async host(opts = {}) {
+    if (opts.mode === 'lan' || opts.isInternal) {
+      this.usePeer(true);
+    } else {
+      this.usePeer(false);
+    }
+    return await this.driver.host(opts);
+  }
+
+  async join(code, meta = {}) {
+    const raw = String(code || '').trim().toUpperCase();
+    if (meta.mode === 'lan' || meta.isInternal || raw.startsWith('GDF') || raw.startsWith('LAN')) {
+      this.usePeer(true);
+      return await this.driver.join(raw.replace(/^(GDF|LAN)-?/, ''), meta);
+    }
+    try {
+      return await this.driver.join(raw, meta);
+    } catch (err) {
+      if (this.driver !== this.peer) {
+        console.warn('Hyperswarm indisponível (GDFNet/UDP bloqueado), tentando via WebRTC...');
+        this.usePeer(true);
+        return await this.driver.join(raw, meta);
+      }
+      throw err;
+    }
+  }
+
+  async quickJoin(meta = {}, onStatus = null) {
+    return await this.driver.quickJoin(meta, onStatus);
+  }
+  async listLobbies(meta = {}, onStatus = null) {
+    return await this.peer.listLobbies(meta, onStatus);
+  }
+  claimAlias(code, tries) {
+    if (this.driver.claimAlias) this.driver.claimAlias(code, tries);
+  }
+  async leave() {
+    await this.peer.leave();
+    if (this.swarm) await this.swarm.leave();
+  }
+}
+
+export const Net = DualNet;
+
