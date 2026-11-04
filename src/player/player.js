@@ -145,10 +145,13 @@ export class Player {
   }
   die() {
     this.alive = false; this.deathT = 0; audio.death(); this.detachGrapple(false);
-    // Ao morrer perde tudo: saldo zerado, colete perdido e armas trancadas
-    this.money = 0; this.armor = 0;
+    // Solo é roguelike: perde tudo. No online o dinheiro é um banco que você leva entre vidas e
+    // partidas (só perde o colete e as armas compradas, que caem no chão como loot).
+    const online = this.ctx.game.mode === 'ffa';
+    if (!online) this.money = 0;
+    this.armor = 0;
     for (let i = 1; i <= 4; i++) this.weapons[i].owned = false;
-    if (this.ctx.hud) { this.ctx.hud.setMoney(0); this.ctx.hud.setArmor(0, this.maxArmor); }
+    if (this.ctx.hud) { this.ctx.hud.setMoney(this.money); this.ctx.hud.setArmor(0, this.maxArmor); }
     this.ctx.game.onPlayerDeath();
   }
   idleCam(t) {

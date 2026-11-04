@@ -45,6 +45,9 @@ const ctx = { scene: R.scene, camera: R.camera, world, level, nav, input, hud, e
 let best = Number(localStorage.getItem('doodle_best') || 0);
 let musicWanted = localStorage.getItem('doodle_music') !== '0';
 let checkpoint = Number(localStorage.getItem('doodle_checkpoint') || 0);
+// online bank: cash you carry between online matches (solo keeps its own roguelike economy)
+let bank = Number(localStorage.getItem('doodle_bank') || 300); let bankSaveT = 0;
+const saveBank = () => { bank = Math.max(0, Math.round(player.money)); localStorage.setItem('doodle_bank', String(bank)); };
 let myName = (localStorage.getItem('doodle_name') || '').slice(0, 14) || 'Doodle' + Math.floor(Math.random() * 90 + 10);
 const settings = { sens: Number(localStorage.getItem('doodle_sens') || 100), invert: localStorage.getItem('doodle_invert') === '1' };
 function applySettings() {
@@ -584,6 +587,8 @@ function beginAtWave(n) { game.mode = 'solo'; setArena(false); beginCommon(); re
 function jumpToWave(n) { enemies.clear(); effects.clear(); enemies.mods.speed = 1; enemies.mods.damage = 1; endFocus(); game.intermission = 0; game.queue = []; startWave(n); hud.hideScreen(); hud.setGameplayVisible(true); game.state = 'play'; game.menu = false; audio.reelLoop(false); }
 function hostStart() {
   scores.clear(); for (const [id, p] of lobby.players) scores.set(id, { name: p.name, kills: 0, deaths: 0 });
+  // random map rotation: every online match rolls a fresh map so no two feel the same
+  lobby.map = choose(LEVELS).key;
   // deal everyone a different spot, shuffled so the same people do not always start together
   setArena(true); const order = spawnSpots().map((_, i) => i); for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
   const spawns = {}; [...lobby.players.keys()].forEach((id, i) => { spawns[id] = order[i % order.length]; });

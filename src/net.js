@@ -13,13 +13,26 @@ const PREFIX = LOCAL ? 'doodledev-' : 'doodledistrict-';
 const PUBLIC_SLOTS = 16;
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 export const makeCode = () => Array.from({ length: 5 }, () => ALPHABET[Math.floor(Math.random() * ALPHABET.length)]).join('');
-const PEER_OPTS = { debug: 0, config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }] } };
-const JOIN_TIMEOUT = 14000, QUICK_TIMEOUT = 11000, SIGNAL_TIMEOUT = 12000;
+// STUN finds each peer's public address; it is enough for most home networks. When both players
+// sit behind strict/symmetric NAT or carrier-grade NAT (common on mobile and some ISPs) a direct
+// connection fails and the data channel never opens ("no answer from that lobby") - a TURN relay
+// bounces the traffic through a public server so the connection still forms. The free Open Relay
+// (metered.ca) needs no account; for heavy use, swap in your own TURN credentials.
+const PEER_OPTS = { debug: 0, config: { iceServers: [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun.cloudflare.com:3478' },
+  { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+] } };
+// relaying through TURN takes a little longer to negotiate, so give the join a wider window
+const JOIN_TIMEOUT = 20000, QUICK_TIMEOUT = 14000, SIGNAL_TIMEOUT = 14000;
 
 function peerAvailable() { return typeof window !== 'undefined' && typeof window.Peer === 'function'; }
 const idFromError = (err) => { const m = /peer\s+(\S+)/.exec(String(err && err.message || '')); return m ? m[1] : null; };
 
-export class Net {
+class PeerNet {
   constructor() {
     this.peer = null; this.conns = new Map(); this.isHost = false; this.id = null; this.code = null; this.hostId = null;
     this.handlers = new Map(); this.connected = false; this.onPeerJoin = null; this.onPeerLeave = null; this.onDisconnect = null;
@@ -220,3 +233,113 @@ export class Net {
     else { const c = this.conns.get(this.hostId); if (c && c.open) c.send({ t: type, d: data, to: pid, from: this.id }); }
   }
 }
+
+// ---- Hyperswarm transport (Electron build) ----
+// Same public API as PeerNet, but the connection is a real DHT-discovered P2P link with
+// hole-punching (via electron/main.cjs over window.FE_NET), so it crosses NAT without any broker
+// or TURN relay. The lobby code becomes a DHT topic; the host announces it, clients look it up.
+// Peer ids are the swarm public keys, which both sides agree on, so scores/lobby keys line up.
+const SWARM_JOIN_TIMEOUT = 20000;
+class SwarmNet {
+  constructor() {
+    this.bridge = window.FE_NET;
+    this.conns = new Map();      // key -> { open, send, close }
+    this.isHost = false; this.id = null; this.code = null; this.hostId = null;
+    this.handlers = new Map(); this.connected = false; this.onPeerJoin = null; this.onPeerLeave = null; this.onDisconnect = null; this.onAlias = null;
+    this.maxPlayers = 10; this.accepting = true; this.hostName = ''; this.stats = { sent: 0, recv: 0 }; this.isPublic = false; this.aliasCode = null; this.inMatch = false;
+    this._pendingJoin = null; this._joinMeta = null;
+    this.bridge.onConnect((key) => this._onConnect(key));
+    this.bridge.onData((key, msg) => this._onData(key, msg));
+    this.bridge.onDisconnect((key) => this._onDisconnect(key));
+  }
+  get active() { return this.connected; }
+  get peerIds() { return [...this.conns.keys()]; }
+  on(type, fn) { this.handlers.set(type, fn); }
+  _emit(type, data, from) { const h = this.handlers.get(type); if (h) h(data, from); }
+  _wrap(key) { return { open: true, send: (m) => { this.stats.sent++; this.bridge.send(key, m); }, close: () => { /* per-peer close handled by leave() */ } }; }
+  _onConnect(key) {
+    // client: greet the host as soon as the link is up; the host replies with a welcome
+    if (!this.isHost) this.bridge.send(key, { t: 'hello', d: this._joinMeta || {}, from: this.id });
+  }
+  _onData(key, msg) {
+    this.stats.recv++; if (!msg || typeof msg !== 'object') return;
+    if (this.isHost) {
+      if (msg.t === 'hello') {
+        if (!this.accepting || this.conns.size >= this.maxPlayers - 1) {
+          this.bridge.send(key, { t: 'refused', d: { reason: this.accepting ? 'that lobby is full' : 'that lobby is closed', code: this.code, players: this.conns.size + 1, max: this.maxPlayers, inMatch: !!this.inMatch, hostName: this.hostName } });
+          return;
+        }
+        const isNew = !this.conns.has(key);
+        if (isNew) this.conns.set(key, this._wrap(key));
+        // Send welcome BEFORE onPeerJoin (which broadcasts the lobby). The client sets its hostId
+        // from the welcome, and until it does it drops every other host message — so if the lobby
+        // arrived first the client would never register the host and would see an invisible player.
+        this.bridge.send(key, { t: 'welcome', d: { hostId: this.id, code: this.code, isPublic: this.isPublic, players: this.conns.size + 1, max: this.maxPlayers, inMatch: !!this.inMatch, hostName: this.hostName }, from: this.id });
+        if (isNew && this.onPeerJoin) this.onPeerJoin(key, msg.d || {});
+        return;
+      }
+      // host routing: forward addressed messages, fan out relays, then deliver locally
+      if (msg.to && msg.to !== this.id) { const w = this.conns.get(msg.to); if (w) w.send(msg); return; }
+      if (msg.relay) { for (const [pid, w] of this.conns) if (pid !== key) w.send({ t: msg.t, d: msg.d, from: key }); }
+      this._emit(msg.t, msg.d, msg.from || key);
+    } else {
+      if (msg.t === 'welcome') {
+        this.hostId = key; this.conns.set(key, this._wrap(key)); this.connected = true; this.isPublic = !!(msg.d && msg.d.isPublic); this.code = (msg.d && msg.d.code) || this.code;
+        if (this._pendingJoin) { clearTimeout(this._pendingJoin.timer); this._pendingJoin.resolve(this.code); this._pendingJoin = null; }
+        return;
+      }
+      if (msg.t === 'refused') { if (this._pendingJoin) { clearTimeout(this._pendingJoin.timer); this._pendingJoin.reject(new Error(msg.d && msg.d.reason || 'the lobby turned you away')); this._pendingJoin = null; } return; }
+      if (key !== this.hostId) return;   // only the host speaks to a client
+      this._emit(msg.t, msg.d, msg.from || key);
+    }
+  }
+  _onDisconnect(key) {
+    const had = this.conns.has(key); this.conns.delete(key);
+    if (this.isHost) { if (had) { if (this.onPeerLeave) this.onPeerLeave(key); this.broadcast('leave', { id: key }); } }
+    else if (key === this.hostId) { this.connected = false; if (this.onDisconnect) this.onDisconnect(); }
+  }
+  async host({ isPublic = false, code = null } = {}) {
+    await this.leave(); this.isHost = true; this.isPublic = isPublic;
+    this.code = code ? String(code).toUpperCase() : (isPublic ? 'PUBLIC' : makeCode());
+    this.id = await this.bridge.host(this.code); this.hostId = this.id; this.connected = true; this.accepting = true;
+    return this.code;
+  }
+  async join(code, meta = {}) {
+    await this.leave(); this.isHost = false; code = String(code || '').trim().toUpperCase();
+    if (!code) throw new Error('enter a lobby code');
+    this.code = code; this._joinMeta = { ...meta };
+    this.id = await this.bridge.join(code);
+    for (const key of this.conns.keys()) this.bridge.send(key, { t: 'hello', d: this._joinMeta, from: this.id });
+    return await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { this._pendingJoin = null; this.leave(); reject(new Error('no answer from that lobby')); }, SWARM_JOIN_TIMEOUT);
+      this._pendingJoin = { resolve, reject, timer };
+    });
+  }
+  async quickJoin(meta = {}, onStatus = null) {
+    if (onStatus) onStatus('Procurando sala pública…');
+    try { return await this.join('PUBLIC', meta); }
+    catch (e) { if (onStatus) onStatus('Nenhuma sala aberta · criando uma nova…'); return await this.host({ isPublic: true, code: 'PUBLIC' }); }
+  }
+  async listLobbies() { return []; }   // a serverless DHT has no lobby directory
+  claimAlias() { /* host-migration alias is not used in the swarm build */ }
+  async leave() {
+    if (this._pendingJoin) { clearTimeout(this._pendingJoin.timer); this._pendingJoin = null; }
+    this.conns.clear(); this.connected = false; this.isHost = false; this.id = null; this.code = null; this.hostId = null;
+    try { await this.bridge.leave(); } catch (e) { /* ignore */ }
+  }
+  send(type, data, relay = false) {
+    this.stats.sent++;
+    if (this.isHost) { const m = { t: type, d: data, from: this.id }; for (const w of this.conns.values()) w.send(m); }
+    else { const w = this.conns.get(this.hostId); if (w) w.send({ t: type, d: data, relay }); }
+  }
+  broadcast(type, data) { this.send(type, data, true); }
+  sendTo(pid, type, data) {
+    this.stats.sent++;
+    if (this.isHost) { const w = this.conns.get(pid); if (w) w.send({ t: type, d: data, from: this.id }); }
+    else { const w = this.conns.get(this.hostId); if (w) w.send({ t: type, d: data, to: pid, from: this.id }); }
+  }
+}
+
+// In the Electron build the renderer sees window.FE_NET (the Hyperswarm bridge) and uses the
+// serverless DHT transport; a plain browser falls back to PeerJS so the web/dev version still runs.
+export const Net = (typeof window !== 'undefined' && window.FE_NET) ? SwarmNet : PeerNet;

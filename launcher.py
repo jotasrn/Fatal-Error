@@ -139,7 +139,7 @@ class SecureLANRequestHandler(http.server.SimpleHTTPRequestHandler):
         # CSP: permite execução segura de shaders Three.js, áudio e WebRTC PeerJS
         csp = (
             "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; "
-            "connect-src 'self' https://*.peerjs.com wss://*.peerjs.com https://0.peerjs.com wss://0.peerjs.com stun:*; "
+            "connect-src 'self' https://*.peerjs.com wss://*.peerjs.com https://0.peerjs.com wss://0.peerjs.com stun:* turn:* turns:*; "
             "img-src 'self' data: blob:; "
             "media-src 'self' blob: data:; "
             "font-src 'self' data:;"
