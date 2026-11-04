@@ -40,7 +40,9 @@ class Sfx {
     const env = ctx.createGain(); env.gain.setValueAtTime(0.0001, t0); env.gain.linearRampToValueAtTime(gain, t0 + attack); env.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
     src.connect(f); let last = f;
     if (hp > 0) { const h = ctx.createBiquadFilter(); h.type = 'highpass'; h.frequency.value = hp; last.connect(h); last = h; }
-    last.connect(env); env.connect(this._out(pos));
+    const outG = this._out(pos);
+    last.connect(env); env.connect(outG);
+    src.onended = () => { try { src.disconnect(); f.disconnect(); env.disconnect(); outG.disconnect(); } catch (e) {} };
     src.start(t0, Math.random() * 1.5); src.stop(t0 + dur + 0.05);
   }
   tone({ freq = 440, freqEnd = null, dur = 0.2, gain = 0.3, type = 'sine', attack = 0.005, pos = null, delay = 0, at, out }) {
@@ -48,7 +50,9 @@ class Sfx {
     const o = ctx.createOscillator(); o.type = type; o.frequency.setValueAtTime(freq, t0);
     if (freqEnd) o.frequency.exponentialRampToValueAtTime(Math.max(20, freqEnd), t0 + dur);
     const env = ctx.createGain(); env.gain.setValueAtTime(0.0001, t0); env.gain.linearRampToValueAtTime(gain, t0 + attack); env.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    o.connect(env); env.connect(out || this._out(pos)); o.start(t0); o.stop(t0 + dur + 0.05);
+    const dest = out || this._out(pos);
+    o.connect(env); env.connect(dest);
+    o.onended = () => { try { o.disconnect(); env.disconnect(); if (!out) dest.disconnect(); } catch (e) {} }; o.start(t0); o.stop(t0 + dur + 0.05);
   }
   // ---------- game sounds ----------
   shot() {
