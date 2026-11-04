@@ -288,29 +288,29 @@ function triggerBrasiliaManifestation() {
   ctx.protestersRiot = false;
   ctx.playerWanted = false;
 
-  // Cidadãos manifestantes com bandeiras vermelhas do PT no gramado central
+  const existingAmbient = enemies.enemies.filter(e => e.alive && (e.T.isProtester || e.T.isPolice || e.T.isCivilian)).length;
+  if (existingAmbient > 8) return; // Evita acúmulo excessivo de bots
+
+  // Manifestantes com bandeiras do PT
   const protSpots = [
-    new THREE.Vector3(-4, 0, 0), new THREE.Vector3(4, 0, 2),
-    new THREE.Vector3(-6, 0, 10), new THREE.Vector3(0, 0, 12), new THREE.Vector3(6, 0, 14),
-    new THREE.Vector3(-5, 0, 22), new THREE.Vector3(2, 0, 24), new THREE.Vector3(7, 0, 26),
-    new THREE.Vector3(-7, 0, 34), new THREE.Vector3(0, 0, 36), new THREE.Vector3(5, 0, 38),
-    new THREE.Vector3(-3, 0, 46), new THREE.Vector3(4, 0, 48), new THREE.Vector3(0, 0, 52)
+    new THREE.Vector3(-4, 0, 10), new THREE.Vector3(4, 0, 12),
+    new THREE.Vector3(-6, 0, 22), new THREE.Vector3(0, 0, 24), new THREE.Vector3(5, 0, 26),
+    new THREE.Vector3(-3, 0, 36), new THREE.Vector3(3, 0, 38)
   ];
   for (const pos of protSpots) {
     const p = enemies.spawn('protester', pos);
     p.state = 'hunt';
   }
 
-  // Pelotão da PMDF / Choque em linha de bloqueio
+  // Pelotão da PMDF / Choque
   const polSpots = [
-    new THREE.Vector3(-8, 0, 70), new THREE.Vector3(-4, 0, 70),
-    new THREE.Vector3(0, 0, 70), new THREE.Vector3(4, 0, 70), new THREE.Vector3(8, 0, 70)
+    new THREE.Vector3(-6, 0, 68), new THREE.Vector3(0, 0, 68), new THREE.Vector3(6, 0, 68)
   ];
   for (const pos of polSpots) {
     const pol = enemies.spawn('police', pos);
     pol.state = 'hunt';
   }
-  const chief = enemies.spawn('police_chief', new THREE.Vector3(0, 0, 74));
+  const chief = enemies.spawn('police_chief', new THREE.Vector3(0, 0, 72));
   chief.state = 'hunt';
 
   audio.siren(new THREE.Vector3(0, 0, 60));
@@ -596,17 +596,22 @@ function leaveOnline(reason) {
   if (game.state !== 'start') { game.state = 'start'; game.mode = 'solo'; setArena(false); resetGame(); hud.setGameplayVisible(false); }
   game.menu = false; lobby.status = reason || ''; screen = 'online'; showStart();
 }
-async function createLobby(isPublic) {
+async function createLobby(mode) {
   setStatus('Criando sala…');
-  try { await net.host({ isPublic }); }
+  const isLan = mode === 'lan';
+  const isPublic = mode === 'public';
+  try {
+    await net.host({ isPublic, isInternal: isLan, mode });
+  }
   catch (err) { setStatus(friendlyError(err)); unlockButtons(); return; }
-  lobby.isPublic = isPublic; lobby.map = mapKey; lobby.players.clear(); lobby.players.set(net.id, { name: myName }); lobby.hostId = net.id; lobby.status = '';
+  lobby.isPublic = isPublic; lobby.isLan = isLan; lobby.mode = mode; lobby.map = mapKey; lobby.players.clear(); lobby.players.set(net.id, { name: myName }); lobby.hostId = net.id; lobby.status = '';
   game.state = 'lobby'; screen = 'lobby'; showStart();
 }
-async function joinLobby(code) {
+async function joinLobby(code, forceLan = false) {
   setStatus('Conectando…');
-  try { await net.join(code, { name: myName }); } catch (err) { setStatus(friendlyError(err)); unlockButtons(); return; }
-  lobby.isPublic = net.isPublic; lobby.status = ''; game.state = 'lobby'; screen = 'lobby'; showStart();
+  try { await net.join(code, { name: myName, isInternal: forceLan, mode: forceLan ? 'lan' : undefined }); }
+  catch (err) { setStatus(friendlyError(err)); unlockButtons(); return; }
+  lobby.isPublic = net.isPublic; lobby.isLan = net.isInternal; lobby.status = ''; game.state = 'lobby'; screen = 'lobby'; showStart();
 }
 async function quickPlay() {
   try { await net.quickJoin({ name: myName }, setStatus); lobby.isPublic = true; lobby.status = ''; game.state = 'lobby'; screen = 'lobby'; showStart(); return; }
@@ -781,8 +786,8 @@ function onlineHTML() {
       <div class="row"><span>Seu Apelido</span><input type="text" class="namebox" id="setName" maxlength="14" placeholder="Seu apelido" value="${esc(myName)}"></div>
       <div class="row"><button type="button" class="big" id="quickBtn">Partida Rápida</button><span class="hint">Entra em qualquer sala aberta ou cria uma nova</span></div>
       <div class="row split"><span>ou</span></div>
-      <div class="row"><button type="button" id="createBtn">Criar Sala</button><div class="radio"><label><input type="radio" name="vis" value="public" ${lobby.isPublic ? 'checked' : ''}> Pública</label><label><input type="radio" name="vis" value="private" ${lobby.isPublic ? '' : 'checked'}> Privada · Colegas</label></div></div>
-      <div class="row"><span>Tem o código da sala?</span><input type="text" id="codeBox" placeholder="CÓDIGO" maxlength="5" autocomplete="off"><button type="button" id="joinBtn">Entrar</button></div>
+      <div class="row"><button type="button" id="createBtn">Criar Sala</button><div class="radio" style="display:flex; flex-wrap:wrap; gap:10px;"><label><input type="radio" name="vis" value="public" ${lobby.mode === 'public' || (!lobby.mode && lobby.isPublic) ? 'checked' : ''}> 🌐 Pública (Global)</label><label><input type="radio" name="vis" value="private" ${lobby.mode === 'private' || (!lobby.mode && !lobby.isPublic && !lobby.isLan) ? 'checked' : ''}> 🔒 Privada (Global)</label><label style="color:#0077aa; font-weight:bold;"><input type="radio" name="vis" value="lan" ${lobby.mode === 'lan' || lobby.isLan ? 'checked' : ''}> 🏢 Sala Interna (GDFNet / Mesma Rede)</label></div></div>
+      <div class="row"><span>Tem o código da sala?</span><input type="text" id="codeBox" placeholder="CÓDIGO" maxlength="12" autocomplete="off"><label style="font-size:16px; margin:0 4px;"><input type="checkbox" id="joinLanCheck"> Forçar GDFNet</label><button type="button" id="joinBtn">Entrar</button></div>
       <div class="lobbylist" id="lobbylist"><div class="row"><span>Salas Abertas</span><button type="button" class="alt" id="refreshBtn">Atualizar</button></div><div class="rows" id="lobbyRows">${lobbyListHTML()}</div></div>
       <div class="status" id="status">${esc(lobby.status || '')}</div>
       ${lobby.rejoinCode ? `<div class="row"><button type="button" class="big" id="rejoinBtn">Reconectar a ${esc(lobby.rejoinCode)}</button></div>` : ''}
@@ -793,7 +798,7 @@ function lobbyHTML() {
   const rows = lobbyRows(); const host = net.isHost; const n = rows.length;
   return `<h1>Sala de Espera</h1><h2>Mata-Mata Livre · Primeiro a ${FFA_TARGET} eliminações · ${n}/${net.maxPlayers} jogadores</h2>
     <div class="online" id="online">
-      <div class="row"><span>Código</span><span class="code">${String(net.isHost ? (net.aliasCode || net.code) : (lobby.shown || net.code) || '').replace(/-\d+$/, '')}</span></div>
+      <div class="row"><span>Código</span><span class="code">${String(net.isHost ? (net.aliasCode || net.code) : (lobby.shown || net.code) || '').replace(/-\d+$/, '')}</span> ${net.isInternal || lobby.isLan ? '<b style="color:#0077aa; font-size:20px; margin-left:8px;">[Rede Interna GDFNet]</b>' : ''}</div>
       ${mapHTML(lobby.map || mapKey, host)}
       <div class="hint">${lobby.isPublic ? 'Sala pública: qualquer um na rede ou com o código pode entrar' : 'Sala privada: passe este código de 5 letras para seus colegas entrarem'}</div>
       <div class="plist">${rows.map((p) => `<div class="${p.id === lobby.hostId ? 'host' : ''}${p.id === net.id ? ' me' : ''}"><span>${esc(p.name)}</span><span>${p.id === net.id ? ' (Você)' : ''}</span></div>`).join('')}</div>
@@ -818,8 +823,21 @@ function wireOnline() {
   box.addEventListener('click', (e) => e.stopPropagation()); box.addEventListener('keydown', (e) => e.stopPropagation());
   const q = (id) => box.querySelector('#' + id); wireName(box);
   if (q('quickBtn')) q('quickBtn').addEventListener('click', () => { lockButtons(box); quickPlay(); });
-  if (q('createBtn')) q('createBtn').addEventListener('click', () => { lockButtons(box); createLobby(box.querySelector('input[name=vis]:checked').value === 'public'); });
-  if (q('joinBtn')) { q('joinBtn').addEventListener('click', () => { const c = q('codeBox').value.trim().toUpperCase(); if (!c) { setStatus('Digite o código da sala de 5 letras'); return; } lockButtons(box); joinLobby(c); }); q('codeBox').addEventListener('keydown', (e) => { if (e.key === 'Enter') q('joinBtn').click(); }); }
+  if (q('createBtn')) q('createBtn').addEventListener('click', () => {
+    lockButtons(box);
+    const sel = box.querySelector('input[name=vis]:checked');
+    createLobby(sel ? sel.value : 'public');
+  });
+  if (q('joinBtn')) {
+    q('joinBtn').addEventListener('click', () => {
+      const c = q('codeBox').value.trim().toUpperCase();
+      if (!c) { setStatus('Digite o código da sala'); return; }
+      lockButtons(box);
+      const forceLan = q('joinLanCheck') && q('joinLanCheck').checked;
+      joinLobby(c, forceLan);
+    });
+    q('codeBox').addEventListener('keydown', (e) => { if (e.key === 'Enter') q('joinBtn').click(); });
+  }
   if (q('rejoinBtn')) q('rejoinBtn').addEventListener('click', () => { const c = lobby.rejoinCode; lobby.rejoinCode = null; lockButtons(box); joinLobby(c); });
   if (q('backBtn')) q('backBtn').addEventListener('click', () => { lobby.status = ''; lobby.rejoinCode = null; screen = 'main'; showStart(); });
   if (q('refreshBtn')) { q('refreshBtn').addEventListener('click', () => refreshLobbies()); if (!lobbyList && !listBusy) refreshLobbies(); }

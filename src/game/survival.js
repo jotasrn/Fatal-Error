@@ -181,19 +181,20 @@ export function createSurvival(ctx, deps) {
       if (game.intermission <= 0) { hud.setTimer(''); startWave(game.wave + 1); }
       return;
     }
-    if (game.queue.length && enemies.alive < game.maxAlive) {
+    const aliveWaveCount = enemies.waveAlive !== undefined ? enemies.waveAlive : enemies.alive;
+    if (game.queue.length && aliveWaveCount < game.maxAlive) {
       game.spawnT -= dt;
       if (game.spawnT <= 0) {
         game.spawnT = Math.max(0.7, 2.9 - game.wave * 0.13); const t = game.queue.shift(); const e = enemies.spawn(t, pickSpawn(t));
         if (e.T.boss) { const mul = 1 + 0.35 * Math.floor((game.wave - 5) / 15); e.hp = e.maxHp = Math.round(e.T.hp * mul); }
       }
     }
-    if (!game.queue.length && enemies.alive === 0) {
+    if (!game.queue.length && aliveWaveCount === 0) {
       game.intermission = 8; hud.message('Onda ' + game.wave + ' Concluída', 'Respire um pouco · +' + 200 * game.wave + ' pts', 2.5);
       game.addScore(200 * game.wave, null); audio.waveClear(); player.hp = Math.min(player.maxHp, player.hp + 40); player.addCash(300 + 50 * game.wave, 'Onda Concluída');
       if (net.active && net.isHost) net.send('ewaveclear', { wave: game.wave });
     }
-    hud.setWave(game.wave, enemies.alive + game.queue.length);
+    hud.setWave(game.wave, aliveWaveCount + game.queue.length);
   }
 
   // ---------------- focus slash (solo only) ----------------
