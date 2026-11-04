@@ -71,11 +71,24 @@ export function createBuilder(scene, world) {
   const sniper = (x, y, z) => L.snipers.push(new THREE.Vector3(x, y, z));
   const pickup = (x, y, z) => L.pickups.push(new THREE.Vector3(x, y, z));
   // ---------------- shared finish ----------------
+  // The map is merged per ink AND per ~110 m tile. One mesh per ink spanned the whole map, so the
+  // camera could never skip anything: the whole Esplanada was drawn even while looking at a wall.
+  // With tiles, frustum culling skips what is behind or beside you and the far plane drops what is
+  // beyond sight; pieces bigger than a tile (ground, roads, boundary walls) stay in one shared mesh.
   function finish() {
-    for (const ink in geos) {
-      const merged = mergeGeometries(geos[ink], false);
-      const mesh = new THREE.Mesh(merged, makeInkMaterial({ ink: Number(ink) }));
-      mesh.matrixAutoUpdate = false; scene.add(mesh); L.meshes.push(mesh);
+    const CELL = 160, buckets = new Map(), mats = {};
+    for (const ink in geos) for (const g of geos[ink]) {
+      g.computeBoundingBox(); const bb = g.boundingBox;
+      const big = bb.max.x - bb.min.x > CELL * 1.5 || bb.max.z - bb.min.z > CELL * 1.5;
+      const key = ink + ':' + (big ? 'all' : Math.floor((bb.min.x + bb.max.x) / 2 / CELL) + ',' + Math.floor((bb.min.z + bb.max.z) / 2 / CELL));
+      let list = buckets.get(key); if (!list) buckets.set(key, list = []); list.push(g);
+    }
+    for (const [key, list] of buckets) {
+      const ink = Number(key.slice(0, key.indexOf(':')));
+      const merged = list.length === 1 ? list[0] : mergeGeometries(list, false);
+      if (merged !== list[0]) for (const g of list) g.dispose();
+      const mesh = new THREE.Mesh(merged, mats[ink] || (mats[ink] = makeInkMaterial({ ink })));
+      merged.computeBoundingSphere(); mesh.matrixAutoUpdate = false; scene.add(mesh); L.meshes.push(mesh);
     }
     world.finalize();
     return L;

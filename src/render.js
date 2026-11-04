@@ -225,95 +225,7 @@ void main() {
 }`;
 
 
-// ---------------- HQ (comic book) style ----------------
-// Same scene buffer, different ink: cel-shaded flat colours, thick black outlines, Ben-Day
-// halftone dots in the shadows, a printed sky and depth haze. Cheaper than the notebook pass
-// (no world-space hatching rebuild, no paper grain noise per pixel).
-const comicFrag = /* glsl */`
-precision highp float;
-varying vec2 vUv;
-uniform sampler2D tScene;
-uniform sampler2D tDepth;
-uniform vec2 uRes;
-uniform float uAspect;
-uniform float uTime;
-uniform float uNear;
-uniform float uFar;
-uniform float uHurt;
-uniform float uFlash;
-uniform float uSlow;
-uniform float uLowHp;
-uniform vec3 uPaper;
-uniform vec3 uInks[8];
-float linDepth(float z) { float zn = z * 2.0 - 1.0; return 2.0 * uNear * uFar / (uFar + uNear - zn * (uFar - uNear)); }
-vec3 inkColor(float id) {
-  int i = int(id + 0.5);
-  if (i <= 0) return uInks[0]; if (i == 1) return uInks[1]; if (i == 2) return uInks[2];
-  if (i == 3) return uInks[3]; if (i == 4) return uInks[4]; if (i == 5) return uInks[5];
-  if (i == 6) return uInks[6]; return uInks[7];
-}
-// halftone: a 45-degree grid of round dots; amt 0..1 grows the dots until they merge
-float halftone(vec2 p, float cell, float amt) {
-  vec2 r = vec2(p.x + p.y, p.y - p.x) * 0.70710678 / cell;
-  vec2 f = fract(r) - 0.5;
-  float rad = sqrt(clamp(amt, 0.0, 1.0)) * 0.62;
-  return 1.0 - smoothstep(rad - 0.08, rad + 0.08, length(f));
-}
-void main() {
-  vec2 px = 1.0 / uRes;
-  float sc = uRes.y / 900.0;
-  vec4 s = texture2D(tScene, vUv);
-  float z = texture2D(tDepth, vUv).x;
-  float d = linDepth(z);
-  bool sky = z >= 0.99999;
-  vec2 pp = gl_FragCoord.xy;
-  vec3 skyCol = mix(vec3(0.99, 0.93, 0.78), vec3(0.45, 0.72, 0.96), smoothstep(0.35, 1.0, vUv.y));
-  skyCol = mix(skyCol, skyCol * 0.9, halftone(pp, 7.0 * sc, 0.18 * smoothstep(0.5, 1.0, vUv.y)));
-  vec3 col = skyCol;
-  if (!sky) {
-    vec3 ink = inkColor(s.g);
-    float shade = s.r;
-    if (shade < 0.0) {
-      col = ink * 0.92; // solid fills print as saturated ink
-    } else {
-      vec3 base = mix(vec3(1.0), ink, 0.5);
-      vec3 mid = mix(vec3(1.0), ink, 0.72);
-      vec3 dark = ink * 0.62;
-      // three printed tones; the band edges get a halftone ramp instead of a hard cut
-      if (shade > 0.6) col = base;
-      else if (shade > 0.33) col = mix(base, mid, halftone(pp, 5.0 * sc, 0.55));
-      else col = mix(mid, dark, halftone(pp, 5.0 * sc, 0.45 + (0.33 - shade) * 1.6));
-    }
-    // aerial haze toward the printed sky so the huge maps read in depth
-    col = mix(col, skyCol, smoothstep(120.0, 480.0, d) * 0.65);
-  }
-  // thick black outline: depth silhouettes (scale-invariant 1/d test) plus normal creases
-  float o = 1.9 * sc;
-  vec2 ox = vec2(o, 0.0) * px, oy = vec2(0.0, o) * px;
-  float zl = texture2D(tDepth, vUv - ox).x, zr = texture2D(tDepth, vUv + ox).x;
-  float zu = texture2D(tDepth, vUv + oy).x, zd = texture2D(tDepth, vUv - oy).x;
-  float iw = 1.0 / d;
-  float lap = abs(1.0 / linDepth(zl) + 1.0 / linDepth(zr) - 2.0 * iw) + abs(1.0 / linDepth(zu) + 1.0 / linDepth(zd) - 2.0 * iw);
-  float edge = smoothstep(0.06, 0.22, lap / (iw + 1e-7));
-  vec4 sl = texture2D(tScene, vUv - ox), sr = texture2D(tScene, vUv + ox), su = texture2D(tScene, vUv + oy), sd = texture2D(tScene, vUv - oy);
-  edge = max(edge, smoothstep(0.38, 0.75, length(sl.ba - sr.ba) + length(su.ba - sd.ba)));
-  // a change of ink between neighbours is an outline too (flat colours need it)
-  edge = max(edge, step(0.5, abs(sl.g - sr.g) + abs(su.g - sd.g)) * (sky ? 0.0 : 1.0));
-  float zmin = min(min(zl, zr), min(zu, zd));
-  float fadeE = mix(1.0, 0.35, smoothstep(60.0, 300.0, linDepth(min(z, zmin))));
-  col = mix(col, vec3(0.05, 0.05, 0.07), clamp(edge, 0.0, 1.0) * fadeE);
-  // hurt / low hp: red halftone closing in from the edges
-  vec2 vc = (vUv - 0.5) * vec2(uAspect, 1.0);
-  float vig = smoothstep(0.3, 0.85, length(vc));
-  float hurt = clamp(uHurt + uLowHp * (0.35 + 0.25 * sin(uTime * 6.0)), 0.0, 1.0);
-  col = mix(col, uInks[1], hurt * halftone(pp, 6.0 * sc, vig * 1.2));
-  col = mix(col, vec3(1.0), uFlash);
-  float lum = dot(col, vec3(0.3, 0.5, 0.2));
-  col = mix(col, vec3(lum) * vec3(0.85, 0.9, 1.0), uSlow * 0.55);
-  gl_FragColor = vec4(col, 1.0);
-}`;
 
-export const STYLES = ['hq', 'caderno'];
 export class InkRenderer {
   constructor(canvas) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false });
@@ -326,7 +238,7 @@ export class InkRenderer {
     canvas.addEventListener('webglcontextlost', (ev) => { ev.preventDefault(); this.lost = true; if (window.FE_LOG) window.FE_LOG.error('webglcontextlost'); });
     canvas.addEventListener('webglcontextrestored', () => { this.lost = false; this.pixelRatio = Math.max(this.minRatio, this.pixelRatio * 0.8); this.resize(); });
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(80, 1, 0.08, 560);
+    this.camera = new THREE.PerspectiveCamera(80, 1, 0.08, 330);
     const depthTexture = new THREE.DepthTexture(2, 2); depthTexture.format = THREE.DepthFormat; depthTexture.type = THREE.FloatType;
     this.rt = new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType, format: THREE.RGBAFormat, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthTexture, depthBuffer: true, stencilBuffer: false, generateMipmaps: false });
     this.post = new THREE.ShaderMaterial({
@@ -338,22 +250,14 @@ export class InkRenderer {
       },
       vertexShader: postVert, fragmentShader: postFrag, depthTest: false, depthWrite: false,
     });
-    this.paperPost = this.post;
-    this.comicPost = new THREE.ShaderMaterial({ uniforms: this.post.uniforms, vertexShader: postVert, fragmentShader: comicFrag, depthTest: false, depthWrite: false });
     this.postScene = new THREE.Scene(); this.postCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     this.postQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.post); this.postScene.add(this.postQuad);
     this.beforeRender = null; // hook run after world matrices are fresh, before drawing (bot batching)
-    this.style = 'caderno'; this.setStyle(localStorage.getItem('doodle_style') || 'hq');
+
     this._clear = new THREE.Color(1, 0, 0);
     this._ld = new THREE.Vector3();
     this.resize();
     window.addEventListener('resize', () => this.resize());
-  }
-  setStyle(st) {
-    this.style = STYLES.includes(st) ? st : 'hq';
-    this.post = this.style === 'hq' ? this.comicPost : this.paperPost; this.postQuad.material = this.post;
-    try { localStorage.setItem('doodle_style', this.style); } catch (e) { /* storage blocked */ }
-    document.documentElement.dataset.style = this.style;
   }
   resize() {
     const w = Math.max(2, window.innerWidth), h = Math.max(2, window.innerHeight);
@@ -368,8 +272,9 @@ export class InkRenderer {
     if (ms <= 0 || ms > 250) return; // a hitch from loading or alt-tab is not a trend
     this._ft += (ms - this._ft) * 0.06;
     if (this._ft > 22) { this._slowT += ms; this._fastT = 0; } else if (this._ft < 17.6) { this._fastT += ms; this._slowT = 0; } else { this._slowT = 0; this._fastT = 0; }
-    if (this._slowT > 1000 && this.pixelRatio > this.minRatio + 1e-3) { this.pixelRatio = Math.max(this.minRatio, this.pixelRatio * 0.85); this._slowT = 0; this.resize(); }
-    else if (this._fastT > 6000 && this.pixelRatio < this.maxRatio - 1e-3) { this.pixelRatio = Math.min(this.maxRatio, this.pixelRatio * 1.08); this._fastT = 0; this.resize(); }
+    if (now - (this._lastChange || 0) < 4000) return;
+    if (this._slowT > 1500 && this.pixelRatio > this.minRatio + 1e-3) { this.pixelRatio = Math.max(this.minRatio, this.pixelRatio * 0.8); this._slowT = 0; this._lastChange = now; this.resize(); }
+    else if (this._fastT > 15000 && this.pixelRatio < this.maxRatio - 1e-3) { this.pixelRatio = Math.min(this.maxRatio, this.pixelRatio * 1.1); this._fastT = 0; this._lastChange = now; this.resize(); }
   }
   render(time, fx = {}) {
     if (this.lost) return;
