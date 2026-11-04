@@ -67,7 +67,20 @@ export function createSurvival(ctx, deps) {
     if (net.isHost) net.send('pickup', { id: p.id, kind, pos: pos.toArray() });
     return p;
   }
-  function removePickup(p) { scene.remove(p.mesh); const i = pickups.indexOf(p); if (i >= 0) pickups.splice(i, 1); }
+  function _disposeMesh(obj) {
+    if (!obj) return;
+    obj.traverse((c) => {
+      if (c.isMesh && c.geometry) {
+        try { c.geometry.dispose(); } catch (e) {}
+      }
+    });
+  }
+  function removePickup(p) {
+    scene.remove(p.mesh);
+    _disposeMesh(p.mesh);
+    const i = pickups.indexOf(p);
+    if (i >= 0) pickups.splice(i, 1);
+  }
   function collectPickup(p) {
     if (p.kind.startsWith('drop_')) {
       const wk = p.kind.replace('drop_', '');
@@ -105,7 +118,14 @@ export function createSurvival(ctx, deps) {
     if (!net.isHost) return; pickupClock -= dt;
     if (pickupClock <= 0 && pickups.length < 10) { pickupClock = 7; spawnPickup('ammo', choose(ctx.level.pickups)); }
   }
-  function clearPickups() { for (const p of pickups) scene.remove(p.mesh); pickups.length = 0; pickupClock = 0; }
+  function clearPickups() {
+    for (const p of pickups) {
+      scene.remove(p.mesh);
+      _disposeMesh(p.mesh);
+    }
+    pickups.length = 0;
+    pickupClock = 0;
+  }
 
   // ---------------- solo waves ----------------
   const ROSTER = [

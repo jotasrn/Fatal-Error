@@ -167,20 +167,20 @@ export class Effects {
   // ---------- blood ----------
   blood(pos, dir, amount = 1, opts = {}) {
     const ink = opts.ink ?? INK.RED;
-    const n = Math.round(14 * amount);
+    const n = Math.min(10, Math.round(8 * amount));
     for (let i = 0; i < n; i++) {
       _v.copy(dir).multiplyScalar(rand(1, 6)).add(_v2.set(rand(-1, 1), rand(-0.5, 1.2), rand(-1, 1)).multiplyScalar(rand(1, 4.5)));
-      this._spawn('drop', pos, _v, { size: rand(0.02, 0.065), life: rand(1.2, 2.6), ink, collide: 'decal', gravity: 22, decalSize: rand(4, 8) });
+      this._spawn('drop', pos, _v, { size: rand(0.02, 0.06), life: rand(0.9, 1.8), ink, collide: i < 3 ? 'decal' : null, gravity: 22, decalSize: rand(4, 7) });
     }
-    const m = Math.round(7 * amount);
+    const m = Math.min(6, Math.round(5 * amount));
     for (let i = 0; i < m; i++) {
-      _v.copy(dir).multiplyScalar(rand(6, 15)).add(_v2.set(rand(-1, 1), rand(-0.3, 1), rand(-1, 1)).multiplyScalar(rand(1, 4)));
-      this._spawn('stroke', pos, _v, { size: rand(0.02, 0.04), life: rand(0.3, 0.6), ink, collide: 'decal', gravity: 12, stretch: 0.05, decalSize: 5 });
+      _v.copy(dir).multiplyScalar(rand(6, 14)).add(_v2.set(rand(-1, 1), rand(-0.3, 1), rand(-1, 1)).multiplyScalar(rand(1, 4)));
+      this._spawn('stroke', pos, _v, { size: rand(0.02, 0.035), life: rand(0.25, 0.45), ink, collide: i < 2 ? 'decal' : null, gravity: 12, stretch: 0.05, decalSize: 5 });
     }
-    const k = Math.round(6 * amount);
+    const k = Math.min(4, Math.round(3 * amount));
     for (let i = 0; i < k; i++) {
       _v.set(rand(-1, 1), rand(-0.2, 1), rand(-1, 1)).multiplyScalar(rand(0.5, 2.5)).addScaledVector(dir, rand(0, 2));
-      this._spawn('drop', pos, _v, { size: rand(0.012, 0.03), life: rand(0.3, 0.7), ink, collide: null, gravity: 6, drag: 2 });
+      this._spawn('drop', pos, _v, { size: rand(0.012, 0.03), life: rand(0.3, 0.6), ink, collide: null, gravity: 6, drag: 2 });
     }
   }
   // a fat bead of ink running off a blade
@@ -206,47 +206,45 @@ export class Effects {
       this._spawn('stroke', pos, _v, { size: rand(0.09, 0.2) * k, life: rand(0.3, 0.55), ink: i % 4 === 0 ? INK.BLACK : INK.ORANGE, gravity: 8, stretch: 0.09, drag: 2, collide: null });
     }
     // black soot that splatters onto whatever it lands on
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 20; i++) {
       _v.set(rand(-1, 1), rand(0.2, 1), rand(-1, 1)).normalize().multiplyScalar(rand(3, 10) * k);
-      this._spawn('drop', pos, _v, { size: rand(0.06, 0.14), life: rand(0.8, 1.6), ink: INK.BLACK, collide: 'decal', gravity: 16, decalSize: rand(3, 7) * k });
+      this._spawn('drop', pos, _v, { size: rand(0.06, 0.14), life: rand(0.6, 1.2), ink: INK.BLACK, collide: i < 5 ? 'decal' : null, gravity: 16, decalSize: rand(3, 7) * k });
     }
     // a rising column of outlined smoke rings
-    for (let i = 0; i < 18; i++) {
+    for (let i = 0; i < 12; i++) {
       _v.set(rand(-1, 1), rand(0.8, 2.0), rand(-1, 1)).multiplyScalar(rand(1.2, 3.4));
-      this._spawn('drop', pos, _v, { size: rand(0.35, 0.7) * k, life: rand(1.0, 1.8), ink: INK.BLACK, fill: false, gravity: -2, drag: 2.2, collide: null, grow: 3.6, shrink: false });
+      this._spawn('drop', pos, _v, { size: rand(0.35, 0.7) * k, life: rand(0.8, 1.4), ink: INK.BLACK, fill: false, gravity: -2, drag: 2.2, collide: null, grow: 3.6, shrink: false });
     }
     this.bloodPool(pos, radius * 0.8, INK.BLACK); this.shakeAmt += 0.8;
   }
-  fountain(pos, dir, dur = 0.8, ink = INK.RED) { this._spawn('emitter', pos, dir, { life: dur, ink, rate: 40, size: 0.05 }); }
+  fountain(pos, dir, dur = 0.8, ink = INK.RED) { this._spawn('emitter', pos, dir, { life: dur, ink, rate: 30, size: 0.05 }); }
   // ejected casing: a small tumbling stroke
-  shell(pos, vel, ink = INK.ORANGE, size = 0.02) { this._spawn('stroke', pos, vel, { size, life: rand(0.9, 1.4), ink, gravity: 22, stretch: 0.012, collide: null, shrink: false, len: 0, drag: 0.5 }); }
+  shell(pos, vel, ink = INK.ORANGE, size = 0.02) { this._spawn('stroke', pos, vel, { size, life: rand(0.6, 1.0), ink, gravity: 22, stretch: 0.012, collide: null, shrink: false, len: 0, drag: 0.5 }); }
   // doodle smoke: outlined circles that rise and grow
   smoke(pos, dir, n = 3) {
     for (let i = 0; i < n; i++) { _v.copy(dir).multiplyScalar(rand(0.6, 1.8)).add(_v2.set(rand(-0.5, 0.5), rand(0.6, 1.4), rand(-0.5, 0.5))); this._spawn('drop', pos, _v, { size: rand(0.04, 0.07), life: rand(0.45, 0.8), ink: INK.BLUE, fill: false, gravity: -1.2, drag: 3, collide: null, grow: 3.2, shrink: false }); }
   }
   // ink explosion: burst of drops + strokes, a big decal on the ground and shake
   explosion(pos, radius = 4, ink = INK.BLACK) {
-    for (let i = 0; i < 40; i++) { _v.set(rand(-1, 1), rand(-0.2, 1), rand(-1, 1)).normalize().multiplyScalar(rand(4, 14)); this._spawn('drop', pos, _v, { size: rand(0.03, 0.1), life: rand(1, 2), ink, collide: 'decal', gravity: 20, decalSize: rand(3, 6) }); }
-    for (let i = 0; i < 26; i++) { _v.set(rand(-1, 1), rand(-0.3, 1), rand(-1, 1)).normalize().multiplyScalar(rand(10, 22)); this._spawn('stroke', pos, _v, { size: rand(0.03, 0.06), life: rand(0.2, 0.45), ink: i % 3 === 0 ? INK.ORANGE : ink, gravity: 6, stretch: 0.05, collide: null }); }
-    for (let i = 0; i < 8; i++) { _v.set(rand(-1, 1), rand(0.5, 1.5), rand(-1, 1)).multiplyScalar(rand(1, 3)); this._spawn('drop', pos, _v, { size: rand(0.12, 0.25), life: rand(0.7, 1.2), ink: INK.BLUE, fill: false, gravity: -1.5, drag: 2.5, collide: null, grow: 3, shrink: false }); }
+    for (let i = 0; i < 22; i++) { _v.set(rand(-1, 1), rand(-0.2, 1), rand(-1, 1)).normalize().multiplyScalar(rand(4, 14)); this._spawn('drop', pos, _v, { size: rand(0.03, 0.09), life: rand(0.8, 1.5), ink, collide: i < 4 ? 'decal' : null, gravity: 20, decalSize: rand(3, 5) }); }
+    for (let i = 0; i < 18; i++) { _v.set(rand(-1, 1), rand(-0.3, 1), rand(-1, 1)).normalize().multiplyScalar(rand(10, 22)); this._spawn('stroke', pos, _v, { size: rand(0.03, 0.05), life: rand(0.2, 0.35), ink: i % 3 === 0 ? INK.ORANGE : ink, gravity: 6, stretch: 0.05, collide: null }); }
+    for (let i = 0; i < 6; i++) { _v.set(rand(-1, 1), rand(0.5, 1.5), rand(-1, 1)).multiplyScalar(rand(1, 3)); this._spawn('drop', pos, _v, { size: rand(0.12, 0.22), life: rand(0.6, 1.0), ink: INK.BLUE, fill: false, gravity: -1.5, drag: 2.5, collide: null, grow: 3, shrink: false }); }
     this.bloodPool(pos, radius * 0.9, ink); this.shakeAmt += 0.5;
   }
 
   _spawn(kind, pos, vel, o = {}) {
     const p = { kind, pos: pos.clone(), vel: vel ? vel.clone() : null, life: o.life ?? 1, maxLife: o.life ?? 1, size: o.size ?? 0.05, ink: o.ink ?? INK.RED, fill: o.fill ?? true, gravity: o.gravity ?? 20, drag: o.drag ?? 0, collide: o.collide ?? null, stretch: o.stretch ?? 0.03, len: o.len ?? 0, axis: o.axis ?? null, decalSize: o.decalSize ?? 3, shrink: o.shrink ?? true, rate: o.rate ?? 0, acc: 0, grow: o.grow ?? 0 };
-    // budget: a big fight used to pile up ~2000 live particles, each raycasting every frame.
-    // Past the cap new ones are dropped; past half of it they stop colliding (no raycast).
     const n = this.particles.length;
-    if (n >= 900 && kind !== 'emitter') return p;
-    if (n >= 450 && kind !== 'emitter') p.collide = null;
+    if (n >= 350 && kind !== 'emitter') return p;
+    if (n >= 120 && kind !== 'emitter') p.collide = null;
     this.particles.push(p); return p;
   }
   // ---------- rigid debris (gibs, dropped weapons) ----------
   debris(mesh, pos, vel, angVel, o = {}) {
     mesh.position.copy(pos); this.scene.add(mesh);
-    const d = { mesh, vel: vel.clone(), ang: angVel.clone(), life: o.life ?? 10, radius: o.radius ?? 0.18, blood: o.blood ?? false, rest: false, bloodT: 0, bounces: 0, baseScale: mesh.scale.x };
+    const d = { mesh, vel: vel.clone(), ang: angVel.clone(), life: o.life ?? 8, radius: o.radius ?? 0.18, blood: o.blood ?? false, rest: false, bloodT: 0, bounces: 0, baseScale: mesh.scale.x };
     this.debrisList.push(d); if (d.blood) this.gibsAlive++;
-    if (this.debrisList.length > 30) { const old = this.debrisList.shift(); this.scene.remove(old.mesh); this._disposeObj(old.mesh); if (old.blood) this.gibsAlive--; }
+    if (this.debrisList.length > 18) { const old = this.debrisList.shift(); this.scene.remove(old.mesh); this._disposeObj(old.mesh); if (old.blood) this.gibsAlive--; }
     return d;
   }
 

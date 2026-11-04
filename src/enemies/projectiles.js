@@ -59,13 +59,13 @@ export class Projectiles {
             if (this._segHitsPlayer(p.prev, p.pos, P, p.blast ? 0.9 : 0.5)) { if (p.blast) this._burst(p, p.pos); else P.takeDamage(p.dmg, p.origin); consumed = true; break; }
           } else if (this._segHitsPlayer(p.prev, p.pos, P, p.blast ? 0.9 : 0.5)) { consumed = true; break; }
         }
-        // Dano entre facções (Polícia vs Manifestantes)
-        if (!consumed && p.owner && (p.owner.T.isPolice || p.owner.T.isProtester)) {
+        // Dano entre facções (Polícia vs Manifestantes) - Host autoritativo
+        if (!consumed && !mgr.mirror && p.owner && (p.owner.T.isPolice || p.owner.T.isProtester)) {
           const vsProtester = p.owner.T.isPolice;
           for (const opp of mgr.enemies) {
             if (!opp.alive || opp === p.owner) continue;
             if (vsProtester ? !opp.T.isProtester : !opp.T.isPolice) continue;
-            if (opp.center.distanceTo(p.pos) < 0.95) {
+            if (opp.center.distanceToSquared(p.pos) < 0.95 * 0.95) {
               mgr.damage(opp, p.dmg, { point: p.pos.clone(), dir: _d.clone(), source: 'bot' });
               consumed = true;
               break;
