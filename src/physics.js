@@ -127,12 +127,24 @@ export class World {
     }
   }
 
-  // Ray vs all boxes (slab test). Returns {dist, point, normal, box} or null.
+  // Ray vs boxes (slab test). Returns {dist, point, normal, box} or null.
+  // The ray walks the xz spatial-hash cells it crosses (2D DDA) and only tests the boxes stored in
+  // them, stopping as soon as the nearest hit lies inside the cells already walked. It used to test
+  // every box in the world: fine for ~400 boxes, but the big Brasília has ~1700, and bots, bullets,
+  // particles and the player cast many rays per frame - that was the main cost of a crowd of bots.
   raycast(o, d, maxDist = 1000, ignore = null) {
     let best = null, bestT = maxDist, bAxis = -1, bSign = 0;
-    const boxes = this.boxes;
-    for (let i = 0; i < boxes.length; i++) {
-      const b = boxes[i]; if (ignore && ignore(b)) continue;
+    const c = this.cell, q = ++this._qid;
+    let ix = Math.floor(o.x / c), iz = Math.floor(o.z / c);
+    const adx = Math.abs(d.x), adz = Math.abs(d.z);
+    const stepX = d.x > 0 ? 1 : -1, stepZ = d.z > 0 ? 1 : -1;
+    const tDX = adx < 1e-9 ? Infinity : c / adx, tDZ = adz < 1e-9 ? Infinity : c / adz;
+    let tMX = adx < 1e-9 ? Infinity : (d.x > 0 ? (ix + 1) * c - o.x : o.x - ix * c) / adx;
+    let tMZ = adz < 1e-9 ? Infinity : (d.z > 0 ? (iz + 1) * c - o.z : o.z - iz * c) / adz;
+    for (let guard = 0; guard < 4096; guard++) {
+      const arr = this.grid.get(this._key(ix, iz));
+      if (arr) for (let i = 0; i < arr.length; i++) {
+      const b = arr[i]; if (b._q === q) continue; b._q = q; if (ignore && ignore(b)) continue;
       let tmin = 0, tmax = bestT, nAxis = -1, nSign = 0, ok = true;
       for (let a = 0; a < 3; a++) {
         const ax = AX[a]; const da = d[ax], oa = o[ax];
@@ -145,6 +157,10 @@ export class World {
       }
       if (!ok || nAxis < 0) continue;
       if (tmin < bestT) { best = b; bestT = tmin; bAxis = nAxis; bSign = nSign; }
+      }
+      const tNext = tMX < tMZ ? tMX : tMZ;
+      if (bestT <= tNext || tNext >= maxDist) break; // nearest hit is inside the walked cells, or the ray ended
+      if (tMX < tMZ) { ix += stepX; tMX += tDX; } else { iz += stepZ; tMZ += tDZ; }
     }
     if (!best) return null;
     const point = new THREE.Vector3(o.x + d.x * bestT, o.y + d.y * bestT, o.z + d.z * bestT);
