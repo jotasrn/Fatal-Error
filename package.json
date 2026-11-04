@@ -1,6 +1,6 @@
 {
   "name": "fatal-error",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Fatal Error — doodle arena shooter (Electron + Hyperswarm P2P).",
   "main": "electron/main.cjs",
   "author": "jotasrn",
