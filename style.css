@@ -322,3 +322,12 @@ canvas#c { position: fixed; inset: 0; width: 100vw; height: 100vh; display: bloc
 .panel::-webkit-scrollbar-track, .bm-box::-webkit-scrollbar-track, .screen::-webkit-scrollbar-track {
   background: rgba(26,48,192,0.06); border-radius: 4px;
 }
+
+/* ---------------- minimap ---------------- */
+#hud .minimap { position: absolute; right: 2.2%; top: 21%; width: 184px; height: 184px; border-radius: 50%; pointer-events: none; z-index: 3; filter: drop-shadow(3px 3px 0 rgba(0,0,0,0.35)); }
+#hud.nogame .minimap { display: none; }
+/* ---------------- HQ style: onomatopoeia + comic HUD touches ---------------- */
+#hud .onoma { position: absolute; transform: translate(-50%, -50%) rotate(var(--r)) scale(var(--s)); font: 900 44px/1 'Bangers', 'Impact', 'Arial Black', sans-serif; color: var(--c); letter-spacing: 1px;
+  -webkit-text-stroke: 3px #111; paint-order: stroke fill; text-shadow: 4px 4px 0 #111; pointer-events: none; z-index: 4; animation: onomaPop 0.9s ease-out forwards; white-space: nowrap; }
+@keyframes onomaPop { 0% { transform: translate(-50%, -50%) rotate(var(--r)) scale(calc(var(--s) * 0.2)); } 18% { transform: translate(-50%, -50%) rotate(var(--r)) scale(calc(var(--s) * 1.25)); } 32% { transform: translate(-50%, -50%) rotate(var(--r)) scale(var(--s)); } 100% { transform: translate(-50%, -50%) rotate(var(--r)) scale(var(--s)); } }
+#hud.nogame .onoma { display: none; }

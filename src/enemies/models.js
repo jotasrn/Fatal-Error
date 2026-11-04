@@ -83,7 +83,7 @@ export function bakeModel(model, extra = []) {
 // protest spawning a dozen at once used to hitch. Each type keeps a few baked templates and new bots
 // are clones that SHARE the geometry (marked userData.shared so removal never disposes it) and only
 // get their own materials, so hit flashes stay per bot.
-const _tpl = new Map(), TPL_VARIANTS = 3;
+const _tpl = new Map(), TPL_VARIANTS = 1; // one shared model per kind: the whole crowd of a kind is drawn in one go
 export function buildCached(type, T, build) {
   let list = _tpl.get(type); if (!list) _tpl.set(type, list = []);
   if (list.length < TPL_VARIANTS) {

@@ -9,6 +9,9 @@ import { buildLevel, LEVELS } from './levels/index.js';
 import { NavGrid } from './nav.js';
 import { Effects } from './effects.js';
 import { EnemyManager, BOSSES } from './enemies/index.js';
+import { BotBatcher } from './enemies/batch.js';
+import { Minimap } from './minimap.js';
+import { Onoma } from './onoma.js';
 import { Player } from './player/index.js';
 import { RemotePlayer, encodeLocal } from './players.js';
 import { Net } from './net.js';
@@ -25,6 +28,7 @@ let mapKey = knownMap(localStorage.getItem('doodle_map') || 'district');
 let level = buildLevel(R.scene, world, mapKey, { arena: false });
 let nav = new NavGrid(world, level.bounds, 1).build();
 let loadedKey = mapKey, arenaLoaded = false;
+let minimap = null, onoma = null; // created with the HUD below
 audio.setTune(mapKey === 'mexico' ? 'mexico' : 'district');
 // the map in play: solo uses the picked map, a match uses the host's choice; a rebuild wipes broken props
 function setLevel(key, on, force = false) {
@@ -32,13 +36,16 @@ function setLevel(key, on, force = false) {
   for (const m of level.meshes) { R.scene.remove(m); if (m.geometry) m.geometry.dispose(); if (m.traverse) m.traverse((o) => { if (o !== m && o.geometry) o.geometry.dispose(); }); }
   level.animated.length = 0; world.clear();
   level = buildLevel(R.scene, world, key, { arena: on }); nav = new NavGrid(world, level.bounds, 1).build();
-  ctx.level = level; ctx.nav = nav; if (window.__game) { window.__game.level = level; window.__game.nav = nav; }
+  ctx.level = level; ctx.nav = nav; if (minimap) minimap.setLevel(level, world); if (onoma) onoma.clear(); if (window.__game) { window.__game.level = level; window.__game.nav = nav; }
   audio.setTune(key === 'mexico' ? 'mexico' : 'district');
 }
 const setArena = (on) => setLevel(knownMap(net.active ? (lobby.map || mapKey) : mapKey), on);
 const input = new Input(canvas);
 const hud = new HUD(document.getElementById('hud'));
+minimap = new Minimap(hud.root); minimap.setLevel(level, world);
+onoma = new Onoma(hud.root, R.camera); onoma.enabled = R.style === 'hq';
 const effects = new Effects(R.scene, world);
+{ const ex = effects.explosion.bind(effects); effects.explosion = (pos, ...rest) => { if (onoma) onoma.pop('KABOOM!', pos, 1.35); return ex(pos, ...rest); }; }
 const ctx = { scene: R.scene, camera: R.camera, world, level, nav, input, hud, effects, audio, renderer: R };
 
 // ---------------- persistent bits ----------------
@@ -108,6 +115,9 @@ const game = ctx.game = {
 const online = () => game.mode === 'ffa';
 const enemies = ctx.enemies = new EnemyManager(ctx);
 enemies.prewarm(); // every bot model is built once here, while loading, instead of mid-fight
+// all bots of a kind are drawn together (instancing): a few dozen draw calls instead of hundreds
+const batcher = ctx.batcher = new BotBatcher(R.scene);
+R.beforeRender = (cam) => batcher.update(enemies.enemies, cam);
 const player = ctx.player = new Player(ctx);
 hud.onBuy = (itemKey) => {
   player.buyItem(itemKey);
@@ -255,6 +265,7 @@ enemies.onClientHit = (e, amount, info) => {
   }
 };
 enemies.onKill = (e, info, over) => {
+  if (onoma && e.center) onoma.kill(e.center, info && info.crit);
   if (net.active && net.isHost) {
     net.send('ekill', {
       id: e.id,
@@ -286,12 +297,13 @@ enemies.onKill = (e, info, over) => {
 let brasiliaEventTimer = 0;
 function triggerBrasiliaManifestation() {
   if (level.key !== 'brasilia') return;
-  brasiliaEventTimer = 80;
   ctx.protestersRiot = false;
   ctx.playerWanted = false;
 
-  const existingAmbient = enemies.enemies.filter(e => e.alive && (e.T.isProtester || e.T.isPolice || e.T.isCivilian)).length;
-  if (existingAmbient > 8) return; // Evita acúmulo excessivo de bots
+  // only an ongoing protest blocks a new one: civilians used to count too, and with the 10
+  // civilians of the bigger Esplanada the protest never started at all
+  const existingAmbient = enemies.enemies.filter(e => e.alive && (e.T.isProtester || e.T.isPolice)).length;
+  if (existingAmbient > 6) return; // Evita acúmulo excessivo de bots
 
   // Manifestantes com bandeiras do PT
   const protSpots = [
@@ -460,7 +472,7 @@ async function _migrateHost() {
   hud.message('O anfitrião saiu', successor === myId ? 'Você é o novo anfitrião' : 'Migrando para novo anfitrião…', 2.6);
   if (successor === myId) {
     let ok = false;
-    for (let tries = 0; tries < 2 && !ok; tries++) { try { await net.host({ isPublic: lobby.isPublic, isInternal: lobby.isLan, mode: lobby.mode, code }); ok = true; } catch (e) { await sleep(800); } }
+    for (let tries = 0; tries < 2 && !ok; tries++) { try { await net.host({ isPublic: lobby.isPublic, code }); ok = true; } catch (e) { await sleep(800); } }
     if (!ok) { leaveOnline('Não foi possível assumir a sala'); return; }
     const mine = lobby.players.get(myId) || { name: myName }; lobby.players.delete(myId); lobby.players.set(net.id, mine);
     const ms = scores.get(myId); scores.delete(myId); if (ms) scores.set(net.id, ms);
@@ -496,12 +508,7 @@ net.onPeerJoin = (from, meta) => {
   }
 };
 net.on('lobby', (d) => {
-  lobby.hostId = d.hostId; lobby.isPublic = !!d.isPublic; lobby.code = net.code; lobby.shown = d.shown || net.code;
-  if (d.map) {
-    lobby.map = knownMap(d.map);
-    if (game.state === 'lobby' && loadedKey !== lobby.map) { setLevel(lobby.map, true); player.reset(level.playerStart); }
-  }
-  lobby.order = d.players.map((p) => p.id); lobby.players.clear();
+  lobby.hostId = d.hostId; lobby.isPublic = !!d.isPublic; lobby.code = net.code; lobby.shown = d.shown || net.code; if (d.map) lobby.map = knownMap(d.map); lobby.order = d.players.map((p) => p.id); lobby.players.clear();
   for (const p of d.players) lobby.players.set(p.id, { name: p.name });
   for (const p of d.players) if (p.id !== net.id) addRemote(p.id, p.name);
   for (const id of [...remote.keys()]) if (!lobby.players.has(id)) removeRemote(id);
@@ -509,7 +516,7 @@ net.on('lobby', (d) => {
   renderLobby();
 });
 net.on('leave', (d) => { const nm = (lobby.players.get(d.id) || {}).name; removeRemote(d.id); if (inMatch()) hud.kill((nm || 'Alguém') + ' saiu da sala', 0); renderLobby(); });
-net.on('start', (d) => { if (net.isHost) return; if (d.map) lobby.map = knownMap(d.map); startMatch(!!d.late, d.spawns ? d.spawns[net.id] : d.spawn, d.map); if (d.broken) for (const id of d.broken) { const br = level.breakables[id]; if (br) breakProp(br, null, false, true); } });
+net.on('start', (d) => { if (net.isHost) return; if (d.map) lobby.map = knownMap(d.map); startMatch(!!d.late, d.spawns ? d.spawns[net.id] : d.spawn); if (d.broken) for (const id of d.broken) { const br = level.breakables[id]; if (br) breakProp(br, null, false, true); } });
 net.on('startreq', () => { if (net.isHost && game.state === 'lobby') hostStart(); });
 net.on('end', (d) => endMatch(d));
 net.on('backtolobby', () => { if (!net.isHost) toLobbyScreen(); });
@@ -596,17 +603,20 @@ function idleUpdate(dt) {
   if (net.isHost) for (const [id, r] of remote) if (r.idle && r.idleSince && performance.now() / 1000 - r.idleSince > limit - IDLE_FLAG + 15) { net.sendTo(id, 'kick', { reason: 'Desconectado por inatividade' }); const c = net.conns.get(id); setTimeout(() => { try { c && c.close(); } catch (e) { /* ignore */ } }, 500); }
 }
 net.on('kick', (d) => { const back = String(net.aliasCode || net.code || '').replace(/-\d+$/, ''); leaveOnline(d && d.reason || 'Desconectado da sala'); lobby.rejoinCode = back; if (back) showStart(); });
-let syncTick = 0;
+let syncTick = 0, esnapT = 0, psT = 0;
 function netUpdate(dt) {
   idleUpdate(dt);
   if (!net.active) return; const now = performance.now() / 1000; syncTick++;
-  if (net.isHost && inMatch() && syncTick % 3 === 0) {
+  // send rates are tied to time, not frames: at 144 fps the frame-based rate tripled the traffic
+  esnapT -= dt; psT -= dt;
+  if (net.isHost && inMatch() && esnapT <= 0) { esnapT = 1 / 15;
     net.send('esnap', enemies.snapshot());
   }
   for (const r of remote.values()) r.update(dt, now);
   // a connection that died without saying so leaves a figure standing around: drop anyone silent too long
   if (inMatch() && !migrating) for (const [id, r] of remote) { if (r.lastSeen && performance.now() - r.lastSeen > 9000) { if (!net.isHost && id === net.hostId) { net.leave(); migrateHost(); break; } const nm = r.name; removeRemote(id); hud.kill(nm + ' desconectou', 0); if (net.isHost) { const c = net.conns.get(id); if (c) { try { c.close(); } catch (e) { /* ignore */ } net.conns.delete(id); } net.send('leave', { id }); broadcastLobby(); sendScores(); } } }
-  if (syncTick % 3 === 0 && inMatch()) net.send('ps', encodeLocal(player, player.weaponIndex, { firing: player.firing, idle: input.idleSeconds > IDLE_FLAG }), true);
+  const sendPs = psT <= 0 && inMatch(); if (sendPs) psT = 1 / 20;
+  if (sendPs) net.send('ps', encodeLocal(player, player.weaponIndex, { firing: player.firing, idle: input.idleSeconds > IDLE_FLAG }), true);
   if (shotQueue.length) net.broadcast('shots', { k: player.weapon.kind, e: shotQueue.splice(0) });
   if (net.isHost && inMatch() && remote.size > 0) game.clockStarted = true;
   const clockOn = inMatch() && !game.over && (net.isHost ? !!game.clockStarted : clockRunning);
@@ -626,9 +636,7 @@ async function createLobby(mode) {
     await net.host({ isPublic, isInternal: isLan, mode });
   }
   catch (err) { setStatus(friendlyError(err)); unlockButtons(); return; }
-  lobby.isPublic = isPublic; lobby.isLan = isLan; lobby.mode = mode; lobby.map = knownMap(mapKey);
-  setLevel(lobby.map, true); player.reset(level.playerStart);
-  lobby.players.clear(); lobby.players.set(net.id, { name: myName }); lobby.hostId = net.id; lobby.status = '';
+  lobby.isPublic = isPublic; lobby.isLan = isLan; lobby.mode = mode; lobby.map = mapKey; lobby.players.clear(); lobby.players.set(net.id, { name: myName }); lobby.hostId = net.id; lobby.status = '';
   game.state = 'lobby'; screen = 'lobby'; showStart();
 }
 async function joinLobby(code, forceLan = false) {
@@ -638,19 +646,10 @@ async function joinLobby(code, forceLan = false) {
   lobby.isPublic = net.isPublic; lobby.isLan = net.isInternal; lobby.status = ''; game.state = 'lobby'; screen = 'lobby'; showStart();
 }
 async function quickPlay() {
-  try {
-    await net.quickJoin({ name: myName }, setStatus);
-    lobby.isPublic = true; lobby.isLan = net.isInternal; lobby.mode = 'public'; lobby.status = '';
-    if (net.isHost) {
-      lobby.map = knownMap(mapKey);
-      setLevel(lobby.map, true); player.reset(level.playerStart);
-      lobby.players.clear(); lobby.players.set(net.id, { name: myName }); lobby.hostId = net.id;
-    }
-    game.state = 'lobby'; screen = 'lobby'; showStart(); return;
-  }
+  try { await net.quickJoin({ name: myName }, setStatus); lobby.isPublic = true; lobby.status = ''; game.state = 'lobby'; screen = 'lobby'; showStart(); return; }
   catch (err) { if (!/no open public/.test(String(err.message))) { setStatus(friendlyError(err)); unlockButtons(); return; } }
   setStatus('Nenhuma sala aberta · Criando nova sala pública…');
-  await createLobby('public');
+  await createLobby(true);
 }
 function friendlyError(err) {
   const m = String(err && err.message || err || ''); if (!m) return 'Ocorreu um erro';
@@ -685,6 +684,8 @@ function settingsHTML() {
     <div class="settings-grid">
       <label class="settings-row">Sensibilidade do Mouse <input type="range" id="setSens" min="25" max="250" step="5" value="${settings.sens}"><b id="setSensV">${settings.sens}%</b></label>
       <label class="settings-row"><input type="checkbox" id="setInv" ${settings.invert ? 'checked' : ''}> Inverter Eixo Y</label>
+      <label class="settings-row">Estilo Visual <select id="setStyle"><option value="hq" ${R.style === 'hq' ? 'selected' : ''}>HQ (quadrinho)</option><option value="caderno" ${R.style === 'caderno' ? 'selected' : ''}>Caderno (papel)</option></select></label>
+      <label class="settings-row"><input type="checkbox" id="setMap" ${minimap && minimap.enabled ? 'checked' : ''}> Minimapa</label>
       <label class="settings-row"><input type="checkbox" id="setMus" ${musicWanted ? 'checked' : ''}> Música de Fundo <span class="k">(M)</span></label>
     </div>
 
@@ -727,6 +728,8 @@ function wireSettings() {
   const sens = box.querySelector('#setSens'), out = box.querySelector('#setSensV');
   sens.addEventListener('input', () => { settings.sens = Number(sens.value); out.textContent = settings.sens + '%'; applySettings(); });
   box.querySelector('#setInv').addEventListener('change', (e) => { settings.invert = e.target.checked; applySettings(); });
+  box.querySelector('#setStyle').addEventListener('change', (e) => { R.setStyle(e.target.value); if (onoma) { onoma.enabled = R.style === 'hq'; onoma.clear(); } });
+  box.querySelector('#setMap').addEventListener('change', (e) => { if (minimap) minimap.setEnabled(e.target.checked); });
   box.querySelector('#setMus').addEventListener('change', (e) => { musicWanted = e.target.checked; localStorage.setItem('doodle_music', musicWanted ? '1' : '0'); audio.musicOn(musicWanted); });
 
   // Cor da mira via paleta
@@ -875,16 +878,7 @@ function wireOnline() {
   if (q('backBtn')) q('backBtn').addEventListener('click', () => { lobby.status = ''; lobby.rejoinCode = null; screen = 'main'; showStart(); });
   if (q('refreshBtn')) { q('refreshBtn').addEventListener('click', () => refreshLobbies()); if (!lobbyList && !listBusy) refreshLobbies(); }
   if (q('lobbyRows')) q('lobbyRows').addEventListener('click', (e) => { const b = e.target.closest('button[data-join]'); if (b) { lockButtons(box); joinLobby(b.dataset.join); } });
-  wireMap((k) => {
-    if (net.isHost) {
-      lobby.map = knownMap(k);
-      mapKey = lobby.map;
-      localStorage.setItem('doodle_map', lobby.map);
-      setLevel(lobby.map, true);
-      player.reset(level.playerStart);
-      broadcastLobby();
-    }
-  });
+  wireMap((k) => { if (net.isHost) { lobby.map = k; broadcastLobby(); } });
   if (q('startBtn')) q('startBtn').addEventListener('click', () => { if (net.isHost) hostStart(); else { net.send('startreq', {}); setStatus('Solicitando início ao anfitrião…'); } });
   if (q('leaveBtn')) q('leaveBtn').addEventListener('click', () => { lobby.rejoinCode = null; leaveOnline(''); });
 }
@@ -898,8 +892,7 @@ function showStart() {
   hud.showScreen(html);
   const p = hud.el.panel;
   if (screen === 'main') {
-    wireSettings(); wireCheckpoints((w) => beginAtWave(w));
-    wireMap((k) => { mapKey = knownMap(k); lobby.map = mapKey; localStorage.setItem('doodle_map', mapKey); setLevel(mapKey, false); player.reset(level.playerStart); showStart(); });
+    wireSettings(); wireCheckpoints((w) => beginAtWave(w)); wireMap((k) => { mapKey = k; localStorage.setItem('doodle_map', k); showStart(); });
     p.querySelector('#soloBtn').addEventListener('click', (e) => { e.stopPropagation(); begin(); });
     p.querySelector('#onlineBtn').addEventListener('click', (e) => { e.stopPropagation(); screen = 'online'; showStart(); });
   } else wireOnline();
@@ -929,46 +922,33 @@ function resetGame() {
   enemies.clear(); effects.clear(); survival.clearPickups();
   player.maxHp = online() ? 110 : 120; player.regenDelay = online() ? 4 : 4.5; player.regenRate = online() ? 14 : 11;
   player.reset(level.playerStart); player.name = myName; player.lastHitBy = null; player.lastHit = null; enemies.mods.speed = 1; enemies.mods.damage = 1; hud.setModifier(''); hud.setBoss(null, null); game.boss = null; endFocus(); game.katanaStreak = 0;
+  if (level.key === 'brasilia' && (!online() || net.isHost)) {
+    spawnBrasiliaCivilians();
+  }
   game.score = 0; game.kills = 0; game.combo = 0; game.wave = 0; game.intermission = 0; game.queue = []; game.time = 0; game.over = null; game.matchT = 0; hud.setScore(0, 0); hud.setTimer(''); hud.setPvpScore(null); hud.setWave(1, 0); hud.setBoard(null);
 }
 function beginCommon() { audio.init(); audio.resume(); if (!input.usingGamepad) input.requestLock(); if (musicWanted && !audio.musicPlaying) audio.musicOn(true); hud.hideScreen(); hud.setGameplayVisible(true); game.menu = false; }
-function begin() {
-  game.mode = 'solo'; setArena(false); beginCommon();
-  if (game.state === 'start' || game.state === 'dead') {
-    resetGame();
-    if (level.key === 'brasilia') spawnBrasiliaCivilians();
-    startWave(1);
-  }
-  game.state = 'play';
-}
-function beginAtWave(n) {
-  game.mode = 'solo'; setArena(false); beginCommon(); resetGame();
-  if (level.key === 'brasilia') spawnBrasiliaCivilians();
-  startWave(n); game.state = 'play';
-}
+function begin() { game.mode = 'solo'; setArena(false); beginCommon(); if (game.state === 'start' || game.state === 'dead') { resetGame(); startWave(1); } game.state = 'play'; }
+function beginAtWave(n) { game.mode = 'solo'; setArena(false); beginCommon(); resetGame(); startWave(n); game.state = 'play'; }
 function jumpToWave(n) { enemies.clear(); effects.clear(); enemies.mods.speed = 1; enemies.mods.damage = 1; endFocus(); game.intermission = 0; game.queue = []; startWave(n); hud.hideScreen(); hud.setGameplayVisible(true); game.state = 'play'; game.menu = false; audio.reelLoop(false); }
 function hostStart() {
   scores.clear(); for (const [id, p] of lobby.players) scores.set(id, { name: p.name, kills: 0, deaths: 0 });
-  // preserve the exact map selected by the host in the main menu or lobby
-  lobby.map = knownMap(lobby.map || mapKey);
-  setLevel(lobby.map, true);
+  // random map rotation: every online match rolls a fresh map so no two feel the same
+  lobby.map = choose(LEVELS).key;
   // deal everyone a different spot, shuffled so the same people do not always start together
-  const order = spawnSpots().map((_, i) => i); for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
+  setArena(true); const order = spawnSpots().map((_, i) => i); for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
   const spawns = {}; [...lobby.players.keys()].forEach((id, i) => { spawns[id] = order[i % order.length]; });
-  net.send('start', { spawns, map: lobby.map }); startMatch(false, spawns[net.id], lobby.map); sendScores();
+  net.send('start', { spawns, map: lobby.map || mapKey }); startMatch(false, spawns[net.id]); sendScores();
 }
-function startMatch(late, spawnIdx, forcedMap) {
-  if (forcedMap) lobby.map = knownMap(forcedMap);
-  const chosenMap = knownMap(lobby.map || mapKey);
-  lobby.map = chosenMap;
-  net.inMatch = true; game.mode = 'ffa'; enemies.mirror = !net.isHost;
-  setLevel(chosenMap, true); resetGame(); matchLeft = FFA_TIME; clockT = 0; game.clockStarted = false;
+function startMatch(late, spawnIdx) {
+  net.inMatch = true; game.mode = 'ffa'; setArena(true); resetGame(); matchLeft = FFA_TIME; clockT = 0; game.clockStarted = false;
   // nobody sends snapshots in the lobby, so the silence clock restarts here or the sweep would drop everyone
   for (const r of remote.values()) r.lastSeen = performance.now();
   if (!scores.size) for (const [id, p] of lobby.players) scores.set(id, { name: p.name, kills: 0, deaths: 0 });
   const spots = spawnSpots(); player.reset(spawnIdx != null && spots[spawnIdx] ? spots[spawnIdx].clone() : arenaSpawn()); beginCommon(); game.state = 'play'; screen = 'lobby'; player.shieldT = 2;
+  enemies.mirror = !net.isHost;
+  enemies.clear();
   if (net.isHost) {
-    if (level.key === 'brasilia') spawnBrasiliaCivilians();
     startWave(1);
   }
   refreshScoreHud(); hud.message('Mata-Mata Livre', late ? 'Você entrou em uma partida em andamento' : 'Primeiro a ' + FFA_TARGET + ' eliminações · Limite de ' + Math.round(FFA_TIME / 60) + ' min · Cada um por si', 3);
@@ -1027,7 +1007,11 @@ function safeEnemies(sdt) {
 function step(now) {
   try { stepInner(now); } catch (err) { reportError('step', err); }
 }
+let lastWall = 0;
 function stepInner(now) {
+  // after this machine itself stalled (minimised window, map load, a hitch), everyone looks "silent"
+  // only because we were not reading: give remotes a fresh grace period instead of dropping them all
+  { const wall = performance.now(); if (lastWall && wall - lastWall > 1500) for (const r of remote.values()) if (r.lastSeen) r.lastSeen = wall; lastWall = wall; }
   // never more than 50 ms a step: a bigger jump (a tab coming back) makes the springs in the view model fly apart
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   input.update(dt);
@@ -1115,6 +1099,8 @@ function stepInner(now) {
   else hud.setFocusMeter(playing && (w.kind === 'katana' || game.katanaStreak > 0 || game.focus.active), game.focus.active ? 1 : clamp(game.katanaStreak / KATANA_CHARGE_KILLS, 0, 1), game.focus.active, 'Katana');
   if (game.boss) { if (game.boss.alive) hud.setBoss(game.boss.T.name, game.boss.hp / game.boss.maxHp); else { hud.setBoss(null, null); game.boss = null; } }
   audio.setIntensity(clamp((enemies.alive + game.queue.length + remote.size * 2) / 12, 0, 1) * (game.intermission > 0 ? 0.25 : 1));
+  if (minimap) minimap.update(dt, player, enemies.enemies, remote.values());
+  if (onoma) onoma.update(dt);
   R.render(game.time, { hurt: player.hurtFx, flash: player.flashFx, slow: scale < 1 ? 1 : 0, lowHp: player.alive && player.hp < 30 ? 1 - player.hp / 30 : 0 });
 }
 requestAnimationFrame(tick);
