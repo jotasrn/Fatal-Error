@@ -145,15 +145,25 @@ export class Player {
   }
   die() {
     this.alive = false; this.deathT = 0; audio.death(); this.detachGrapple(false);
-    // Solo é roguelike: perde tudo. No online o dinheiro é um banco que você leva entre vidas e
-    // partidas (só perde o colete e as armas compradas, que caem no chão como loot).
+    // Ao morrer, dropa as armas equipadas no chão para qualquer jogador coletar
+    if (this.ctx.survival && this.ctx.survival.spawnPickup) {
+      for (let i = 1; i <= 4; i++) {
+        const w = this.weapons[i];
+        if (w && w.owned) {
+          const dropPos = this.body.pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 2.5, 0, (Math.random() - 0.5) * 2.5));
+          this.ctx.survival.spawnPickup('drop_' + w.kind, dropPos);
+        }
+      }
+    }
     const online = this.ctx.game.mode === 'ffa';
     if (!online) this.money = 0;
     this.armor = 0;
     for (let i = 1; i <= 4; i++) this.weapons[i].owned = false;
+    this.switchTo(0, true);
     if (this.ctx.hud) { this.ctx.hud.setMoney(this.money); this.ctx.hud.setArmor(0, this.maxArmor); }
     this.ctx.game.onPlayerDeath();
   }
+
   idleCam(t) {
     const c = this.camera; c.position.set(Math.sin(t * 0.08) * 70, 30 + Math.sin(t * 0.23) * 4, Math.cos(t * 0.08) * 70); c.lookAt(0, 10, 0); this.rig.visible = false;
     this.eye.copy(c.position); this.center.copy(c.position); c.getWorldDirection(this.forward); this.right.set(this.forward.z, 0, -this.forward.x).normalize();

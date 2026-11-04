@@ -17,6 +17,35 @@ export function createSurvival(ctx, deps) {
   const pmat = { ammo: makeInkMaterial({ ink: INK.BLUE }), health: makeInkMaterial({ ink: INK.GREEN }), cap: makeInkMaterial({ ink: INK.BLACK }), shell: makeInkMaterial({ ink: INK.ORANGE }) };
   function makePickup(kind) {
     const g = new THREE.Group();
+    if (kind.startsWith('drop_')) {
+      const wk = kind.replace('drop_', '');
+      const gunMesh = new THREE.Group();
+      if (wk === 'shotgun') {
+        const b1 = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.16, 0.7), pmat.cap);
+        const b2 = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.6, 6), pmat.ammo);
+        b2.rotation.x = Math.PI / 2; b2.position.set(0, 0.08, 0.3);
+        gunMesh.add(b1, b2);
+      } else if (wk === 'rifle') {
+        const b1 = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.14, 0.6), pmat.cap);
+        const mag = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.2, 0.12), pmat.ammo);
+        mag.position.set(0, -0.12, 0.1);
+        gunMesh.add(b1, mag);
+      } else if (wk === 'sniper') {
+        const b1 = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.8), pmat.cap);
+        const scope = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.3, 6), pmat.shell);
+        scope.rotation.x = Math.PI / 2; scope.position.set(0, 0.12, 0);
+        gunMesh.add(b1, scope);
+      } else if (wk === 'bazooka') {
+        const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.9, 8), pmat.ammo);
+        tube.rotation.x = Math.PI / 2;
+        gunMesh.add(tube);
+      }
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.35, 0.03, 4, 12), pmat.ammo);
+      ring.rotation.x = Math.PI / 2; ring.position.y = -0.18;
+      gunMesh.add(ring);
+      g.add(gunMesh);
+      return g;
+    }
     if (kind === 'ammo') { g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.24, 0.5, 10), pmat.ammo)); const c = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.16, 8), pmat.cap); c.position.y = 0.33; g.add(c); const l = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.2, 0.02), pmat.cap); l.position.set(0, 0, 0.24); g.add(l); }
     else if (ctx.level.key === 'mexico') { const sh = new THREE.CylinderGeometry(0.42, 0.42, 0.22, 12, 1, false, 0, Math.PI); sh.rotateZ(Math.PI / 2); sh.rotateX(-Math.PI / 2); g.add(new THREE.Mesh(sh, pmat.shell)); const f = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.1, 0.2), pmat.health); f.position.y = 0.02; g.add(f); const m = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.08, 0.14), pmat.cap); m.position.y = 0.1; g.add(m); }
     else { g.add(new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.2, 0.2), pmat.health), new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.6, 0.2), pmat.health)); }
@@ -30,6 +59,23 @@ export function createSurvival(ctx, deps) {
   }
   function removePickup(p) { scene.remove(p.mesh); const i = pickups.indexOf(p); if (i >= 0) pickups.splice(i, 1); }
   function collectPickup(p) {
+    if (p.kind.startsWith('drop_')) {
+      const wk = p.kind.replace('drop_', '');
+      const wNames = { shotgun: 'Escopeta', rifle: 'Rifle de Assalto', sniper: 'Rifle de Precisão', bazooka: 'Lança-Foguetes' };
+      const w = player.weapons.find((x) => x.kind === wk);
+      if (w) {
+        w.owned = true;
+        if (w.isGun) {
+          w.reserve = Math.max(w.reserve, w.maxReserve);
+          w.mag = w.magSize;
+        }
+        hud.kill('Arma Coletada: ' + (wNames[wk] || wk), 0);
+        hud.message('Arma Adquirida!', wNames[wk] || wk, 1.8);
+      }
+      audio.switchWeapon();
+      effects.strokeBurst(p.mesh.position, INK.BLUE, 16, 5, { life: 0.35 });
+      return;
+    }
     if (p.kind === 'ammo') { player.addAmmoAll(0.4); player.grenades = Math.min(player.maxGrenades, player.grenades + 1); hud.kill('+MUNIÇÃO · +GRANADA', 0); } else { player.hp = Math.min(player.maxHp, player.hp + 35); hud.kill(ctx.level.key === 'mexico' ? 'Taco · +35 Vida' : '+35 Vida', 0); }
     audio.pickup(); effects.strokeBurst(p.mesh.position, p.kind === 'ammo' ? INK.BLUE : INK.GREEN, 12, 4, { life: 0.3 });
   }
@@ -53,8 +99,17 @@ export function createSurvival(ctx, deps) {
 
   // ---------------- solo waves ----------------
   const ROSTER = [
-    { t: 'grunt', from: 1, w: 10 }, { t: 'rusher', from: 2, w: 6 }, { t: 'bomber', from: 3, w: 3 },
-    { t: 'sniper', from: 3, w: 4 }, { t: 'flyer', from: 4, w: 4 }, { t: 'heavy', from: 5, w: 4 }, { t: 'shield', from: 6, w: 4 },
+    { t: 'grunt', from: 1, w: 10 },
+    { t: 'rusher', from: 2, w: 6 },
+    { t: 'hound', from: 2, w: 5 },
+    { t: 'bomber', from: 3, w: 3 },
+    { t: 'bat', from: 3, w: 4 },
+    { t: 'sniper', from: 3, w: 4 },
+    { t: 'flyer', from: 4, w: 4 },
+    { t: 'spider', from: 4, w: 4 },
+    { t: 'heavy', from: 5, w: 4 },
+    { t: 'shield', from: 6, w: 4 },
+    { t: 'elitesniper', from: 6, w: 3 },
   ];
   const MODIFIERS = [
     { name: '', apply: () => { enemies.mods.speed = 1; enemies.mods.damage = 1; } },
@@ -92,11 +147,12 @@ export function createSurvival(ctx, deps) {
     for (let i = 0; i < 7; i++) spawnPickup(i < 5 ? 'ammo' : 'health', choose(ctx.level.pickups));
     const checkpoint = getCheckpoint();
     if (n >= 5 && n % 5 === 0 && n > checkpoint) { setCheckpoint(n); hud.kill('Ponto de Controle · Onda ' + n, 0); }
+    if (net.active && net.isHost) net.send('ewave', { wave: n, name: boss ? enemyName(bossFor(n)) : (mod.name || '') });
   }
   function pickSpawn(type) {
     const level = ctx.level;
-    const spots = type === 'sniper' ? level.snipers : level.spawns; const pp = player.body.pos;
-    if (type === 'flyer') { const a = Math.random() * Math.PI * 2, r = 22 + Math.random() * 10; return new THREE.Vector3(clamp(pp.x + Math.cos(a) * r, level.bounds.minX + 4, level.bounds.maxX - 4), pp.y + 12 + Math.random() * 6, clamp(pp.z + Math.sin(a) * r, level.bounds.minZ + 4, level.bounds.maxZ - 4)); }
+    const spots = (type === 'sniper' || type === 'elitesniper') ? (level.snipers && level.snipers.length ? level.snipers : level.spawns) : level.spawns; const pp = player.body.pos;
+    if (type === 'flyer' || type === 'bat') { const a = Math.random() * Math.PI * 2, r = 22 + Math.random() * 10; return new THREE.Vector3(clamp(pp.x + Math.cos(a) * r, level.bounds.minX + 4, level.bounds.maxX - 4), pp.y + 12 + Math.random() * 6, clamp(pp.z + Math.sin(a) * r, level.bounds.minZ + 4, level.bounds.maxZ - 4)); }
     if (BOSSES.includes(type)) {
       const fits = (sp) => !world.overlapsAABB({ x: sp.x - 1.1, y: sp.y + 0.1, z: sp.z - 1.1 }, { x: sp.x + 1.1, y: sp.y + 5.2, z: sp.z + 1.1 });
       const open = spots.filter((sp) => fits(sp)); const far = open.filter((sp) => sp.distanceTo(pp) > 20);
@@ -125,6 +181,7 @@ export function createSurvival(ctx, deps) {
     if (!game.queue.length && enemies.alive === 0) {
       game.intermission = 8; hud.message('Onda ' + game.wave + ' Concluída', 'Respire um pouco · +' + 200 * game.wave + ' pts', 2.5);
       game.addScore(200 * game.wave, null); audio.waveClear(); player.hp = Math.min(player.maxHp, player.hp + 40); player.addCash(300 + 50 * game.wave, 'Onda Concluída');
+      if (net.active && net.isHost) net.send('ewaveclear', { wave: game.wave });
     }
     hud.setWave(game.wave, enemies.alive + game.queue.length);
   }

@@ -89,6 +89,7 @@ const survival = createSurvival(ctx, {
   getCheckpoint: () => checkpoint,
   setCheckpoint: (v) => { checkpoint = v; localStorage.setItem('doodle_checkpoint', String(v)); },
 });
+ctx.survival = survival;
 const {
   pickups, spawnPickup, removePickup, updatePickups, updateArenaPickups,
   startWave, updateWaves, pickSpawn,
@@ -193,7 +194,36 @@ const TRACER_THICK = { rifle: 0.02, shotgun: 0.014, sniper: 0.03 };
 const _sm = new THREE.Vector3(), _se = new THREE.Vector3();
 
 
+enemies.onSpawn = (e) => {
+  if (net.active && net.isHost) {
+    net.send('espawn', { id: e.id, type: e.type, pos: e.body.pos.toArray() });
+  }
+};
+enemies.onClientHit = (e, amount, info) => {
+  if (net.active && !net.isHost) {
+    net.send('ehit', {
+      id: e.id,
+      amount,
+      info: {
+        crit: !!info.crit,
+        part: info.part,
+        point: info.point ? info.point.toArray().map(v => +v.toFixed(2)) : null,
+        dir: info.dir ? info.dir.toArray().map(v => +v.toFixed(2)) : null
+      }
+    });
+  }
+};
 enemies.onKill = (e, info, over) => {
+  if (net.active && net.isHost) {
+    net.send('ekill', {
+      id: e.id,
+      info: {
+        crit: !!info.crit,
+        dir: info.dir ? info.dir.toArray().map(v => +v.toFixed(2)) : null,
+        point: info.point ? info.point.toArray().map(v => +v.toFixed(2)) : null
+      }
+    });
+  }
   game.kills++; game.combo++; game.comboT = 3.5;
   let label = e.T.name, pts = e.T.score;
   if (info.crit) { label = 'Tiro na Cabeça'; pts += 60; }
@@ -352,11 +382,38 @@ net.on('pdmg', (d) => {
   if (!player.alive || game.state !== 'play' || player.shieldT > 0) return; player.lastHitBy = d.by || null; player.lastHit = { from: d.from || null, crit: !!d.crit, amount: d.amount, src: d.src };
   player.takeDamage(d.amount, d.from ? new THREE.Vector3().fromArray(d.from) : null);
 });
+net.on('espawn', (d) => { if (!net.isHost) enemies.spawn(d.type, new THREE.Vector3().fromArray(d.pos), d.id); });
+net.on('esnap', (arr) => { if (!net.isHost) enemies.applySnapshot(arr, performance.now() / 1000); });
+net.on('ekill', (d) => { if (!net.isHost) enemies.killMirror(d.id, d.info); });
+net.on('ekillcredit', (d) => { game.kills++; game.addScore(d.pts, d.label); player.addCash(d.cash, d.label); audio.kill(true); });
+net.on('ewave', (d) => { if (!net.isHost) { game.wave = d.wave; hud.setWave(d.wave, 0); hud.message('Onda ' + d.wave, d.name || 'Bots e Jogadores!', 2.5); audio.wave(); } });
+net.on('ewaveclear', (d) => { if (!net.isHost) { hud.message('Onda ' + d.wave + ' Concluída', 'Prepare-se para a próxima onda!', 2.5); audio.waveClear(); player.hp = Math.min(player.maxHp, player.hp + 40); player.addCash(300 + 50 * d.wave, 'Onda Concluída'); } });
+net.on('ehit', (d, from) => {
+  if (!net.isHost) return;
+  const e = enemies.byId.get(d.id);
+  if (!e || !e.alive) return;
+  const info = {
+    crit: !!(d.info && d.info.crit),
+    part: (d.info && d.info.part) || 'torso',
+    source: 'remote_bullet',
+    point: d.info && d.info.point ? new THREE.Vector3().fromArray(d.info.point) : e.center.clone(),
+    dir: d.info && d.info.dir ? new THREE.Vector3().fromArray(d.info.dir) : new THREE.Vector3(0, 1, 0),
+    by: from
+  };
+  enemies.damage(e, d.amount, info);
+  if (!e.alive) {
+    const sc = scores.get(from);
+    const kname = sc ? sc.name : 'Jogador';
+    net.sendTo(from, 'ekillcredit', { pts: e.T.score, cash: 125 + (info.crit ? 75 : 0), label: e.T.name });
+    net.send('feed', { text: kname + ' eliminou ' + e.T.name + (info.crit ? ' (Tiro na Cabeça)' : '') });
+  }
+});
+
 net.on('pdead', (d, from) => {
   const r = remote.get(from); const vn = r ? r.name : 'Alguém'; const kn = d.killer && scores.get(d.killer) ? scores.get(d.killer).name : null;
   if (r) { r.ragdoll(d.dir ? new THREE.Vector3().fromArray(d.dir) : null, !!d.over); audio.enemyDie(r.center); }
   const how = d.how ? ' · ' + d.how + (d.crit ? ' Tiro na Cabeça' : '') : '';
-  if (d.killer === net.id) { game.kills++; game.addScore(100, 'Eliminou ' + vn + how); audio.kill(true); }
+  if (d.killer === net.id) { game.kills++; game.addScore(150, 'Eliminou ' + vn + how); player.addCash(300, 'Eliminação PvP'); audio.kill(true); }
   else hud.kill(kn ? kn + ' eliminou ' + vn + how : vn + ' caiu da página', 0);
   if (net.isHost) tallyDeath(from, d.killer);
 });
@@ -404,6 +461,9 @@ let syncTick = 0;
 function netUpdate(dt) {
   idleUpdate(dt);
   if (!net.active) return; const now = performance.now() / 1000; syncTick++;
+  if (net.isHost && inMatch() && enemies.alive > 0 && syncTick % 3 === 0) {
+    net.send('esnap', enemies.snapshot());
+  }
   for (const r of remote.values()) r.update(dt, now);
   // a connection that died without saying so leaves a figure standing around: drop anyone silent too long
   if (inMatch() && !migrating) for (const [id, r] of remote) { if (r.lastSeen && performance.now() - r.lastSeen > 9000) { if (!net.isHost && id === net.hostId) { net.leave(); migrateHost(); break; } const nm = r.name; removeRemote(id); hud.kill(nm + ' desconectou', 0); if (net.isHost) { const c = net.conns.get(id); if (c) { try { c.close(); } catch (e) { /* ignore */ } net.conns.delete(id); } net.send('leave', { id }); broadcastLobby(); sendScores(); } } }
@@ -600,6 +660,11 @@ function startMatch(late, spawnIdx) {
   for (const r of remote.values()) r.lastSeen = performance.now();
   if (!scores.size) for (const [id, p] of lobby.players) scores.set(id, { name: p.name, kills: 0, deaths: 0 });
   const spots = spawnSpots(); player.reset(spawnIdx != null && spots[spawnIdx] ? spots[spawnIdx].clone() : arenaSpawn()); beginCommon(); game.state = 'play'; screen = 'lobby'; player.shieldT = 2;
+  enemies.mirror = !net.isHost;
+  enemies.clear();
+  if (net.isHost) {
+    startWave(1);
+  }
   refreshScoreHud(); hud.message('Mata-Mata Livre', late ? 'Você entrou em uma partida em andamento' : 'Primeiro a ' + FFA_TARGET + ' eliminações · Limite de ' + Math.round(FFA_TIME / 60) + ' min · Cada um por si', 3);
   hud.tip(`Segure <b>${hud.key('score')}</b> para ver o placar`, 5);
   // a match started by someone else's click cannot grab the mouse: ask for a click
@@ -662,7 +727,7 @@ function step(now) {
     musicHealT -= dt; if (musicHealT <= 0) { musicHealT = 2; if (musicWanted && st === 'play' && !audio.musicPlaying && audio.ctx) audio.musicOn(true); if (input.anyInput) audio.resume(); }
     { const B = level.bounds, bp = player.body.pos; if (bp.x < B.minX - 8 || bp.x > B.maxX + 8 || bp.z < B.minZ - 8 || bp.z > B.maxZ + 8 || bp.y > 150) bp.y = -100; }
     player.update(sdt); enemies.update(sdt); effects.update(sdt); updatePickups(sdt); netUpdate(dt);
-    if (st === 'play' && !online()) updateWaves(sdt);
+    if (st === 'play' && (!online() || net.isHost)) updateWaves(sdt);
     if (online()) updateArenaPickups(dt);
     if (game.comboT > 0) { game.comboT -= sdt; if (game.comboT <= 0) { game.combo = 0; hud.setScore(game.score, 0); } }
     if (st === 'dying') {

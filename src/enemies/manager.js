@@ -7,7 +7,7 @@ import { makeBody, SEE_THROUGH } from '../physics.js';
 import { rand, randInt, clamp, damp, wrapAngle, angleLerp, alignYAxis, TAU } from '../util.js';
 import { audio } from '../audio.js';
 import { TYPES, STATE_CODES, STATE_NAMES } from './types.js';
-import { buildHumanoid, buildBomber, buildFlyer } from './models.js';
+import { buildHumanoid, buildBomber, buildFlyer, buildQuadruped } from './models.js';
 import { Projectiles } from './projectiles.js';
 
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _d = new THREE.Vector3(), _q = new THREE.Quaternion(), _m = new THREE.Matrix4(), _s = new THREE.Vector3();
@@ -35,7 +35,7 @@ export class EnemyManager {
     const T = TYPES[type]; const ink = T.ink ?? INK.RED;
     const mat = makeInkMaterial({ ink, shadeScale: 0, shadeBias: 1 });
     const solid = makeInkMaterial({ ink: T.ink === INK.BLACK ? INK.RED : INK.BLACK, fill: true, side: THREE.DoubleSide });
-    const model = T.model === 'bomber' ? buildBomber(mat, solid, T) : T.model === 'blob' ? buildBomber(mat, solid, T, true) : T.model === 'flyer' ? buildFlyer(mat, solid, T) : buildHumanoid(mat, solid, T);
+    const model = T.model === 'bomber' ? buildBomber(mat, solid, T) : T.model === 'blob' ? buildBomber(mat, solid, T, true) : T.model === 'flyer' ? buildFlyer(mat, solid, T) : (T.model === 'quadruped' || T.model === 'spider') ? buildQuadruped(mat, solid, T) : buildHumanoid(mat, solid, T);
     const hw = T.flying ? 0.45 : Math.min(0.33 * T.scale, 0.9);
     const e = { type, T, mat, root: model.root, parts: model.parts, J: model.J, tip: model.tip, face: model.face, hit: model.hit, hp: T.hp, maxHp: T.hp, alive: true, state: 'spawn', t: 0,
       body: makeBody(pos, hw, (T.flying ? 0.8 : 1.85) * T.scale, T.boss ? 1.2 : 0.6), center: new THREE.Vector3(), yaw: rand(0, TAU), yawT: 0, phase: rand(0, TAU), walk: 0, aimAmt: 0, flinch: 0, flashT: 0, flashOn: false,
@@ -500,15 +500,23 @@ export class EnemyManager {
     if (T.weapon === 'sniper') {
       if (e.cool > 0) { this._hideLaser(e); return; }
       e.aimT += dt;
-      // The beam chases the player rather than being glued to them, and the shot goes exactly
-      // where the beam is pointing - so if you keep moving once you see it, it misses.
-      if (!e.aimPoint) { e.aimPoint = pc.clone(); }
-      else e.aimPoint.lerp(pc, 1 - Math.exp(-2.6 * dt));
+      // Predictive sniper aiming: leads moving targets based on bullet velocity
+      const pVel = (P.body && P.body.vel) ? P.body.vel : _v2.set(0, 0, 0);
+      const leadTime = muzzle.distanceTo(pc) / Math.max(1, T.pspeed || 120);
+      const isElite = (T.name && T.name.includes('Precisão')) || T.spread < 0.002;
+      const leadFactor = isElite ? 0.95 : 0.6;
+      const targetPredict = _v3.copy(pc).addScaledVector(pVel, leadTime * leadFactor);
+      const trackRate = isElite ? 8.8 : 5.8;
+
+      if (!e.aimPoint) { e.aimPoint = targetPredict.clone(); }
+      else e.aimPoint.lerp(targetPredict, 1 - Math.exp(-trackRate * dt));
+
       this._showLaser(e, muzzle, e.aimPoint, clamp(e.aimT / T.aimTime, 0, 1));
-      if (e.aimT > T.aimTime * 0.5 && !e.aimWarned) { e.aimWarned = true; audio.sniperAim(e.center); }
+      if (e.aimT > T.aimTime * 0.45 && !e.aimWarned) { e.aimWarned = true; audio.sniperAim(e.center); }
       if (e.aimT >= T.aimTime) {
         e.aimT = 0; e.aimWarned = false; e.cool = rand(T.cool[0], T.cool[1]);
-        this._fireOne(e, muzzle, e.aimPoint, T.spread, T.pspeed, T.dmg, 0.07, P); audio.sniperShot(e.center);
+        this._fireOne(e, muzzle, e.aimPoint, T.spread, T.pspeed, T.dmg, isElite ? 0.09 : 0.07, P);
+        audio.sniperShot(e.center);
         this._hideLaser(e); e.aimPoint = null;
       }
       return;
@@ -550,6 +558,23 @@ export class EnemyManager {
     e.phase += dt * (sp * 2.2 + (sp > 0.4 ? 3 : 0)); const s = Math.sin(e.phase), c = Math.cos(e.phase);
     J.legL.rotation.x = s * 0.9 * w; J.legR.rotation.x = -s * 0.9 * w; J.shinL.rotation.x = Math.max(0, c) * 1.1 * w; J.shinR.rotation.x = Math.max(0, -c) * 1.1 * w;
     if (!b.onGround) { J.legL.rotation.x = -0.5; J.legR.rotation.x = 0.6; J.shinL.rotation.x = 1.0; J.shinR.rotation.x = 0.5; }
+    if (T.model === 'quadruped') {
+      if (J.legFL && J.legBL) {
+        J.legFL.rotation.x = s * 0.9 * w; J.legFR.rotation.x = -s * 0.9 * w;
+        J.legBL.rotation.x = -s * 0.9 * w; J.legBR.rotation.x = s * 0.9 * w;
+      }
+      if (J.tail) J.tail.rotation.y = Math.sin(e.t * 8) * 0.45;
+      return;
+    }
+    if (T.model === 'spider' && J.spiderLegs) {
+      for (const leg of J.spiderLegs) {
+        const offset = leg.i * 0.78 + (leg.side > 0 ? 0 : Math.PI);
+        const wave = Math.sin(e.phase + offset) * w;
+        leg.base.rotation.x = wave * 0.4;
+        leg.base.rotation.y = leg.side * 0.2 + wave * 0.2;
+      }
+      return;
+    }
     if (T.weapon === 'bomb' || T.model === 'blob') {
       J.armL.rotation.x = -2.4 + Math.sin(e.t * 20) * 0.4 * w; J.armR.rotation.x = -2.4 - Math.sin(e.t * 20) * 0.4 * w; J.torso.rotation.z = Math.sin(e.phase) * 0.12 * w; J.torso.rotation.x = -0.15 * w;
       if (J.spark) J.spark.scale.setScalar(0.7 + Math.random() * 0.8 + (e.fuseT >= 0 ? 1.5 : 0)); J.hips.position.y = 0.5 + Math.abs(c) * 0.08 * w;
