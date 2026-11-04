@@ -937,7 +937,13 @@ input.onDeviceChange = (pad) => { hud.setDevice(pad); hud.setWeapon(player.weapo
 window.addEventListener('pagehide', () => { if (net.active) net.leave(); });
 // browsers only let audio start on a gesture; any press wakes the context if it went to sleep
 for (const ev of ['pointerdown', 'keydown']) window.addEventListener(ev, () => { audio.init(); audio.resume(); }, { passive: true });
-hud.setDevice(input.usingGamepad); applySettings(); hud.setWeapon(player.weapon.name, player.weapon.hint); showStart();
+hud.setDevice(input.usingGamepad);
+applySettings();
+hud.onCloseBuy = () => {
+  if (game.state === 'play' && !input.usingGamepad) input.requestLock();
+};
+hud.setWeapon(player.weapon.name, player.weapon.hint);
+showStart();
 
 // ---------------- loop ----------------
 let last = performance.now(), boardToggle = false, lockTipT = 0.5, musicHealT = 2;
