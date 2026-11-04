@@ -4,16 +4,16 @@ canvas#c { position: fixed; inset: 0; width: 100vw; height: 100vh; display: bloc
 #hud { position: fixed; inset: 0; pointer-events: none; color: var(--ink); user-select: none; overflow: hidden; }
 .hud-tl, .hud-tr, .hud-bl, .hud-br, .crosshair, .grapple-ret, .hitmarker, .dmg-ind, .message, .killfeed { mix-blend-mode: multiply; }
 #hud.nogame .hud-tl, #hud.nogame .hud-tr, #hud.nogame .hud-bl, #hud.nogame .hud-br, #hud.nogame .crosshair, #hud.nogame .grapple-ret, #hud.nogame .killfeed { display: none; }
-.hud-tl { position: absolute; left: 9%; top: 3%; font-size: 30px; transform: rotate(-1.5deg); }
-.hud-tr { position: absolute; right: 4%; top: 3%; text-align: right; font-size: 30px; transform: rotate(1deg); }
-.hud-bl { position: absolute; left: 9%; bottom: 5%; }
-.hud-br { position: absolute; right: 4%; bottom: 5%; text-align: right; }
+.hud-tl { position: absolute; left: 3.5%; top: 3%; font-size: 28px; transform: rotate(-1deg); }
+.hud-tr { position: absolute; right: 3.5%; top: 3%; text-align: right; font-size: 28px; transform: rotate(1deg); }
+.hud-bl { position: absolute; left: 3.5%; bottom: 3.5%; }
+.hud-br { position: absolute; right: 3.5%; bottom: 3.5%; text-align: right; }
 .ammo b { font-size: 58px; } .ammo span { font-size: 28px; opacity: .8; } .reloading { font-size: 22px !important; color: var(--red); }
 .tally { display: flex; flex-wrap: wrap; width: 240px; gap: 3px; margin-top: -8px; align-items: flex-end; }
 .tally i { display: block; width: 4px; height: 20px; background: var(--ink); transform: rotate(4deg); border-radius: 2px; opacity: .9; }
 .tally i:nth-child(5n) { width: 4px; margin-right: 10px; transform: rotate(-8deg); }
 .health { margin-bottom: 8px; font-size: 26px; display: flex; align-items: center; gap: 10px; }
-.bar { width: 210px; height: 16px; border: 2.5px solid var(--ink); border-radius: 6px 8px 5px 7px / 8px 5px 7px 6px; overflow: hidden; transform: rotate(-1deg); }
+.bar { width: 280px; height: 19px; border: 2.5px solid var(--ink); border-radius: 6px 8px 5px 7px / 8px 5px 7px 6px; overflow: hidden; transform: rotate(-1deg); }
 .fill { height: 100%; width: 100%; background: repeating-linear-gradient(-55deg, var(--ink) 0 2.5px, transparent 2.5px 6px); transition: width .15s; }
 .low .bar { border-color: var(--red); } .low .fill { background: repeating-linear-gradient(-55deg, var(--red) 0 2.5px, transparent 2.5px 6px); }
 .crosshair { position: absolute; left: 50%; top: 50%; width: 0; height: 0; --s: 10px; filter: drop-shadow(0 0 1px rgba(255,255,255,.9)); }
@@ -271,3 +271,8 @@ canvas#c { position: fixed; inset: 0; width: 100vw; height: 100vh; display: bloc
   border-radius: 8px; cursor: pointer; font-family: inherit; box-shadow: 3px 3px 0 rgba(26, 48, 192, .2);
 }
 .bm-close-btn:hover { background: #b01020; }
+
+
+.shop-hint { font-size: 20px; color: var(--ink); background: rgba(255,255,255,0.85); border: 2px dashed var(--ink); border-radius: 6px; padding: 3px 10px; margin-top: 6px; display: inline-block; cursor: pointer; pointer-events: auto; font-weight: bold; transition: all .15s; }
+.shop-hint:hover { background: var(--ink); color: var(--paper); }
+.hud-tr .timer { font-size: 36px; font-weight: bold; color: var(--red); letter-spacing: 1px; margin-top: 4px; text-shadow: 1px 1px 0 rgba(255,255,255,0.8); }

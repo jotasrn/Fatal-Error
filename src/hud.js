@@ -10,7 +10,7 @@ export class HUD {
       <div class="grapple-ret" id="gret"></div><div class="gstam" id="gstam" hidden><i id="gstamfill"></i></div>
       <div class="hitmarker" id="hitmarker"><i></i><i></i></div>
       <div class="dmg-ind" id="dmg"></div>
-      <div class="hud-tl"><div class="score">Pontos <b id="score">0</b></div><div class="money">Dinheiro <b id="money">$300</b></div><div class="money-flash" id="mflash"></div><div class="combo" id="combo"></div></div>
+      <div class="hud-tl"><div class="score">Pontos <b id="score">0</b></div><div class="money">Dinheiro <b id="money">$300</b></div><div class="money-flash" id="mflash"></div><div class="combo" id="combo"></div><div class="shop-hint" id="shopHintBtn">🛒 [B] Loja de Armas</div></div>
       <div class="hud-tr"><div class="wave">Onda <b id="wave">1</b></div><div class="modifier" id="modifier"></div><div class="left"><b id="left">0</b> inimigos restantes</div><div class="timer" id="timer"></div><div class="pvpscore" id="pvpscore" hidden></div></div><div class="board" id="board" hidden></div>
       <div class="bossbar" id="bossbar"><div class="bossname" id="bossname"></div><div class="bar big"><div class="fill red" id="bossfill"></div></div></div>
       <div class="hud-bl">

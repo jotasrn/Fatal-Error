@@ -42,6 +42,7 @@ function buildHat(headG, mat, solid, T) {
   else if (h === 'helmet') { const c = new THREE.Mesh(new THREE.SphereGeometry(0.32, 10, 6, 0, TAU, 0, Math.PI * 0.55), mat); c.position.y = 0.0; c.scale.y = 0.85; headG.add(c); const rim = new THREE.Mesh(new THREE.TorusGeometry(0.315, 0.03, 4, 14), mat); rim.rotation.x = Math.PI / 2; rim.position.y = -0.02; headG.add(rim); }
   else if (h === 'hood') { const c = new THREE.Mesh(new THREE.SphereGeometry(0.33, 10, 7, 0, TAU, 0, Math.PI * 0.62), mat); c.position.y = -0.02; c.scale.set(1.03, 1.15, 0.95); headG.add(c); const tail = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.5, 5), mat); tail.position.set(0, 0.16, -0.3); tail.rotation.x = 1.5; headG.add(tail); }
   else if (h === 'crown') { for (let i = 0; i < 6; i++) { const a = (i / 6) * TAU; const sp = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.26, 4), mat); sp.position.set(Math.cos(a) * 0.22, 0.34, Math.sin(a) * 0.22); headG.add(sp); } const b = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.035, 4, 14), mat); b.rotation.x = Math.PI / 2; b.position.y = 0.24; headG.add(b); }
+  else if (h === 'beret') { const c = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.26, 0.09, 8), mat); c.position.set(0.08, 0.22, 0); c.rotation.z = -0.32; headG.add(c); bx(0.06, 0.06, 0.04, -0.15, 0.2, 0.18, solid, headG); }
 }
 export function buildWeaponProp(gun, mat, solid, T) {
   if (T.weapon === 'blade') { bx(0.02, 0.05, 0.95, 0, 0.04, 0.42, mat, gun); bx(0.11, 0.11, 0.03, 0, 0.04, -0.06, solid, gun); bx(0.035, 0.045, 0.24, 0, 0.04, -0.19, solid, gun); }
@@ -139,4 +140,63 @@ export function buildFlyer(mat, solid, T) {
   Object.assign(J, { body, wl, wr, headG, torso: body, gun: new THREE.Group() });
   root.scale.setScalar(T.scale);
   return { root, parts, J, tip: headG, face: fc, hit: [['torso', 0.48]] };
+}
+
+export function buildQuadruped(mat, solid, T) {
+  const root = new THREE.Group(); const parts = {}, J = {};
+  const isSpider = T.model === 'spider';
+  const hips = new THREE.Group(); hips.position.y = isSpider ? 0.42 : 0.65; root.add(hips);
+  parts.hips = hips;
+  const torso = new THREE.Group(); hips.add(torso);
+  if (isSpider) {
+    blob(0.42, 0.25, 0.52, 0, 0.1, -0.22, mat, torso);
+    blob(0.28, 0.2, 0.28, 0, 0.12, 0.22, mat, torso);
+  } else {
+    blob(0.32, 0.3, 0.65, 0, 0.12, 0, mat, torso);
+    const tail = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.5, 4), mat);
+    tail.position.set(0, 0.2, -0.6); tail.rotation.x = -1.2; torso.add(tail);
+    J.tail = tail;
+  }
+  parts.torso = new THREE.Object3D(); parts.torso.position.y = 0.12; torso.add(parts.torso);
+
+  const headG = new THREE.Group(); headG.position.set(0, isSpider ? 0.14 : 0.28, isSpider ? 0.48 : 0.68); torso.add(headG);
+  const head = blob(isSpider ? 0.22 : 0.24, isSpider ? 0.18 : 0.22, isSpider ? 0.22 : 0.32, 0, 0, 0, mat, headG);
+  parts.head = headG;
+
+  if (!isSpider) {
+    const earL = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.22, 4), mat); earL.position.set(-0.14, 0.2, -0.05); earL.rotation.z = 0.3; headG.add(earL);
+    const earR = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.22, 4), mat); earR.position.set(0.14, 0.2, -0.05); earR.rotation.z = -0.3; headG.add(earR);
+    bx(0.16, 0.14, 0.22, 0, -0.04, 0.22, mat, headG);
+  } else {
+    bx(0.05, 0.12, 0.12, -0.08, -0.1, 0.24, solid, headG);
+    bx(0.05, 0.12, 0.12, 0.08, -0.1, 0.24, solid, headG);
+  }
+  const fc = doodleFace(headG, solid, { ex: isSpider ? 0.08 : 0.09, ey: 0.04, ez: isSpider ? 0.2 : 0.26, er: isSpider ? 0.035 : 0.04, smile: true });
+
+  const legs = [];
+  if (isSpider) {
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < 4; i++) {
+        const zOff = 0.3 - i * 0.18;
+        const base = noodle(0.42, 0.024, mat, torso, side * 0.24, 0.1, zOff, 0.08);
+        base.rotation.z = side * 0.55;
+        const tipL = noodle(0.48, 0.02, mat, base, 0, -0.42, 0, 0.04);
+        tipL.rotation.z = side * -1.1;
+        legs.push({ base, tipL, side, i });
+      }
+    }
+  } else {
+    const legFL = noodle(0.38, 0.032, mat, torso, -0.22, 0, 0.35);
+    const legFR = noodle(0.38, 0.032, mat, torso, 0.22, 0, 0.35);
+    const legBL = noodle(0.42, 0.034, mat, torso, -0.22, 0, -0.35);
+    const legBR = noodle(0.42, 0.034, mat, torso, 0.22, 0, -0.35);
+    J.legFL = legFL; J.legFR = legFR; J.legBL = legBL; J.legBR = legBR;
+    J.legL = legFL; J.legR = legFR;
+  }
+  J.spiderLegs = legs;
+  Object.assign(J, { hips, torso, headG, gun: new THREE.Group() });
+
+  const hit = [['head', 0.26], ['torso', 0.42], ['hips', 0.3]];
+  root.scale.setScalar(T.scale);
+  return { root, parts, J, tip: headG, face: fc, hit };
 }
