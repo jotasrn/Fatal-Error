@@ -1,0 +1,48 @@
+{
+  "name": "fatal-error",
+  "version": "1.0.1",
+  "description": "Fatal Error — doodle arena shooter (Electron + Hyperswarm P2P).",
+  "main": "electron/main.cjs",
+  "author": "jotasrn",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win"
+  },
+  "dependencies": {
+    "hyperswarm": "^4.8.4",
+    "b4a": "^1.6.6"
+  },
+  "devDependencies": {
+    "electron": "^32.3.3",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.fatalerror.game",
+    "productName": "Fatal Error",
+    "files": [
+      "electron/**/*",
+      "src/**/*",
+      "vendor/**/*",
+      "index.html",
+      "style.css"
+    ],
+    "asarUnpack": [
+      "**/*.node",
+      "node_modules/sodium-native/**",
+      "node_modules/udx-native/**"
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "shortcutName": "Fatal Error"
+    }
+  }
+}
