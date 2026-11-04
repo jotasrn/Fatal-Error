@@ -5,10 +5,42 @@ const _min = new THREE.Vector3(), _max = new THREE.Vector3(), _q = [];
 const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
 
 class Heap {
-  constructor() { this.a = []; }
-  push(f, n) { const a = this.a; a.push([f, n]); let i = a.length - 1; while (i > 0) { const p = (i - 1) >> 1; if (a[p][0] <= a[i][0]) break; [a[p], a[i]] = [a[i], a[p]]; i = p; } }
-  pop() { const a = this.a; const top = a[0]; const last = a.pop(); if (a.length) { a[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < a.length && a[l][0] < a[m][0]) m = l; if (r < a.length && a[r][0] < a[m][0]) m = r; if (m === i) break; [a[m], a[i]] = [a[i], a[m]]; i = m; } } return top; }
-  get size() { return this.a.length; }
+  constructor() { this.f = []; this.n = []; }
+  clear() { this.f.length = 0; this.n.length = 0; }
+  push(f, n) {
+    const fa = this.f, na = this.n;
+    let i = fa.length;
+    fa.push(f); na.push(n);
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (fa[p] <= fa[i]) break;
+      const tf = fa[p]; fa[p] = fa[i]; fa[i] = tf;
+      const tn = na[p]; na[p] = na[i]; na[i] = tn;
+      i = p;
+    }
+  }
+  popNode() {
+    const fa = this.f, na = this.n;
+    const top = na[0];
+    const lf = fa.pop(), ln = na.pop();
+    const len = fa.length;
+    if (len > 0) {
+      fa[0] = lf; na[0] = ln;
+      let i = 0;
+      for (;;) {
+        const l = 2 * i + 1, r = l + 1;
+        let m = i;
+        if (l < len && fa[l] < fa[m]) m = l;
+        if (r < len && fa[r] < fa[m]) m = r;
+        if (m === i) break;
+        const tf = fa[m]; fa[m] = fa[i]; fa[i] = tf;
+        const tn = na[m]; na[m] = na[i]; na[i] = tn;
+        i = m;
+      }
+    }
+    return top;
+  }
+  get size() { return this.f.length; }
 }
 
 export class NavGrid {
@@ -17,7 +49,7 @@ export class NavGrid {
     this.minX = bounds.minX; this.minZ = bounds.minZ;
     this.nx = Math.ceil((bounds.maxX - bounds.minX) / cell); this.nz = Math.ceil((bounds.maxZ - bounds.minZ) / cell);
     this.nodes = []; this.cells = new Array(this.nx * this.nz).fill(null);
-    this._gen = null; this._searchId = 0;
+    this._gen = null; this._closed = null; this._heap = new Heap(); this._searchId = 0;
   }
   build() {
     const w = this.world, c = this.cell;
@@ -52,7 +84,7 @@ export class NavGrid {
         }
       }
     }
-    this._gen = new Int32Array(this.nodes.length); this._g = new Float32Array(this.nodes.length); this._from = new Int32Array(this.nodes.length);
+    this._gen = new Int32Array(this.nodes.length); this._closed = new Int32Array(this.nodes.length); this._g = new Float32Array(this.nodes.length); this._from = new Int32Array(this.nodes.length);
     return this;
   }
   _hasNodeNear(ix, iz, y1, y2) {
@@ -89,22 +121,36 @@ export class NavGrid {
     return best >= 0 ? best : bestAny;
   }
   // A* between two world positions; returns array of Vector3 or null
-  findPath(from, to, maxExpand = 40000) {
+  findPath(from, to, maxExpand = 3500) {
     const start = this.nearestNode(from, 3, 3), goal = this.nearestNode(to, 4, 8);
     if (start < 0 || goal < 0) return null;
-    const nodes = this.nodes, gen = this._gen, g = this._g, fromArr = this._from; const sid = ++this._searchId;
-    const G = nodes[goal]; const h = (n) => Math.hypot(n.x - G.x, n.y - G.y, n.z - G.z) * 1.15;
-    const heap = new Heap(); gen[start] = sid; g[start] = 0; fromArr[start] = -1; heap.push(h(nodes[start]), start);
-    let bestN = start, bestH = h(nodes[start]); let expanded = 0; let found = false;
-    const closed = new Set();
+    const nodes = this.nodes, gen = this._gen, closed = this._closed, g = this._g, fromArr = this._from;
+    const sid = ++this._searchId;
+    const G = nodes[goal], gx = G.x, gy = G.y, gz = G.z;
+    const heap = this._heap; heap.clear();
+    const sNode = nodes[start];
+    const hStart = Math.hypot(sNode.x - gx, sNode.y - gy, sNode.z - gz) * 1.15;
+    gen[start] = sid; g[start] = 0; fromArr[start] = -1; heap.push(hStart, start);
+    let bestN = start, bestH = hStart; let expanded = 0; let found = false;
     while (heap.size) {
-      const [, cur] = heap.pop(); if (closed.has(cur)) continue; closed.add(cur);
+      const cur = heap.popNode();
+      if (closed[cur] === sid) continue;
+      closed[cur] = sid;
       if (cur === goal) { found = true; bestN = cur; break; }
       if (++expanded > maxExpand) break;
-      const N = nodes[cur]; const hc = h(N); if (hc < bestH) { bestH = hc; bestN = cur; }
-      for (const l of N.links) {
+      const N = nodes[cur];
+      const hc = Math.hypot(N.x - gx, N.y - gy, N.z - gz) * 1.15;
+      if (hc < bestH) { bestH = hc; bestN = cur; }
+      const links = N.links;
+      for (let i = 0; i < links.length; i++) {
+        const l = links[i], toId = l.to;
+        if (closed[toId] === sid) continue;
         const ng = g[cur] + l.cost;
-        if (gen[l.to] !== sid || ng < g[l.to]) { gen[l.to] = sid; g[l.to] = ng; fromArr[l.to] = cur; heap.push(ng + h(nodes[l.to]), l.to); }
+        if (gen[toId] !== sid || ng < g[toId]) {
+          gen[toId] = sid; g[toId] = ng; fromArr[toId] = cur;
+          const nb = nodes[toId];
+          heap.push(ng + Math.hypot(nb.x - gx, nb.y - gy, nb.z - gz) * 1.15, toId);
+        }
       }
     }
     const path = []; let n = bestN;
