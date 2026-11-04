@@ -25,7 +25,38 @@ export class EnemyManager {
   _pickTarget(e, dt) {
     e.retargetT = (e.retargetT ?? 0) - dt;
     if (e.target && e.target.alive && e.retargetT > 0) return e.target;
-    e.retargetT = 0.5; let best = null, bd = Infinity;
+    e.retargetT = 0.4;
+
+    // Se é manifestante e a multidão se revoltou contra os jogadores, persegue os players!
+    if (e.T.isProtester && this.ctx.protestersRiot) {
+      let best = null, bd = Infinity;
+      for (const t of this.targets()) { if (!t.alive) continue; const d = t.body.pos.distanceToSquared(e.body.pos); if (d < bd) { bd = d; best = t; } }
+      e.target = best; return best;
+    }
+
+    // Se é manifestante normal, foca na polícia
+    if (e.T.isProtester) {
+      let bestPol = null, bd = Infinity;
+      for (const other of this.enemies) {
+        if (!other.alive || !other.T.isPolice) continue;
+        const d = other.body.pos.distanceToSquared(e.body.pos);
+        if (d < bd) { bd = d; bestPol = other; }
+      }
+      if (bestPol) { e.target = bestPol; return bestPol; }
+    }
+
+    // Se é polícia e o jogador não está procurado nem atacou a polícia, a polícia foca nos manifestantes!
+    if (e.T.isPolice && !this.ctx.playerWanted) {
+      let bestProt = null, bd = Infinity;
+      for (const other of this.enemies) {
+        if (!other.alive || !other.T.isProtester) continue;
+        const d = other.body.pos.distanceToSquared(e.body.pos);
+        if (d < bd) { bd = d; bestProt = other; }
+      }
+      if (bestProt) { e.target = bestProt; return bestProt; }
+    }
+
+    let best = null, bd = Infinity;
     for (const t of this.targets()) { if (!t.alive) continue; const d = t.body.pos.distanceToSquared(e.body.pos); if (d < bd) { bd = d; best = t; } }
     e.target = best; return best;
   }
@@ -43,6 +74,9 @@ export class EnemyManager {
       appAng: (this._slot++) * 2.39996, appR: 0, appT: rand(0, 2), keepMul: rand(0.75, 1.35), backoffT: 0,
       hitSpheres: model.hit.map(() => new THREE.Vector3()), fuseT: -1, shieldHp: T.shield ? 2 : 0, flyState: 'orbit', flyT: rand(0, 3), orbitDir: Math.random() < 0.5 ? 1 : -1, bossAtk: null, rootDetached: false };
     e.id = id ?? this.nextId++; this.byId.set(e.id, e);
+    e.takeDamage = (dmg, from) => {
+      this.damage(e, dmg, { source: 'bot', dir: _v.subVectors(e.center, from).normalize(), point: e.center.clone() });
+    };
     e.body.alwaysStep = true; if (T.flying) e.body.noSnap = true; e.root.position.copy(pos); e.root.scale.setScalar(0.001);
     this.ctx.scene.add(e.root); this.enemies.push(e); this.alive++;
     if (this.onSpawn && !this.mirror) this.onSpawn(e);
@@ -99,6 +133,29 @@ export class EnemyManager {
     }
     amount *= this.mods.damage;
     e.hp -= amount; e.flinch = 1; e.flashT = 0.07; if (!e.flashOn) { setFill(e.mat, true); e.flashOn = true; }
+
+    // Reação de facção ao ataque de um jogador:
+    if (info.source !== 'bot') {
+      if ((e.T.isProtester || e.T.isCivilian) && !this.ctx.protestersRiot) {
+        this.ctx.protestersRiot = true;
+        if (this.ctx.hud) this.ctx.hud.message('⚠️ MULTIDÃO EM FÚRIA!', 'Você atacou os manifestantes! A multidão partiu para cima de você!', 4.0);
+        audio.siren(e.center);
+        for (const en of this.enemies) {
+          if (en.alive && (en.T.isProtester || en.T.isCivilian)) {
+            en.enraged = true;
+            en.target = this.ctx.player;
+            en.scared = false;
+            if (en.T.isCivilian) { en.T.weapon = 'blade'; en.T.dmg = 10; en.T.reach = 2.6; }
+          }
+        }
+      } else if (e.T.isPolice && !this.ctx.playerWanted) {
+        this.ctx.playerWanted = true;
+        if (this.ctx.hud) this.ctx.hud.message('🚨 FORÇA POLICIAL ACIONADA!', 'A Polícia revidou o ataque ao oficial!', 3.5);
+        for (const en of this.enemies) {
+          if (en.alive && en.T.isPolice) en.target = this.ctx.player;
+        }
+      }
+    }
     const dir = info.dir || _d.set(0, 1, 0); const amt = clamp(0.5 + amount / 70, 0.5, 2.2) * (e.T.boss ? 1.6 : 1);
     this.ctx.effects.blood(info.point || e.center, dir, amt, { ink: e.T.ink === INK.BLACK ? INK.BLACK : INK.RED });
     if (info.crit) audio.headshot(e.center); else audio.hitEnemy(e.center);
@@ -331,7 +388,7 @@ export class EnemyManager {
       if (e.los && dist < 12 && Math.abs(dy) < 1.5) this._steer(e, dt, pp.x, pp.z, T.speed, 45); else this._follow(e, dt, pp, T.speed);
       return;
     }
-    if (T.weapon === 'blade') {
+    if (T.weapon === 'blade' || T.weapon === 'flag') {
       e.aimAmt = damp(e.aimAmt, 0, 8, dt);
       // back off after a swing instead of walking into the player
       if (e.backoffT > 0) {
@@ -354,8 +411,8 @@ export class EnemyManager {
             ctx.effects.tracer(_v, _v2, INK.RED, 0.025, 0.16);
           }
           if (dist < T.reach && Math.abs(dy) < 1.7) {
-            if (P.tryBlockMelee(e)) { e.state = 'stunned'; e.t = 0; e.stunDur = 1.1; b.vel.set(-dx / dist * 7, 3.5, -dz / dist * 7); }
-            else P.takeDamage(T.dmg * this.mods.damage, e.center);
+            if (P.tryBlockMelee && P.tryBlockMelee(e)) { e.state = 'stunned'; e.t = 0; e.stunDur = 1.1; b.vel.set(-dx / dist * 7, 3.5, -dz / dist * 7); }
+            else if (P.takeDamage) P.takeDamage(T.dmg * this.mods.damage, e.center);
           } else audio.katanaSwing();
           e.cool = rand(T.cool[0], T.cool[1]); e.backoffT = rand(0.45, 0.75);
         }
@@ -568,7 +625,8 @@ export class EnemyManager {
   _hideLaser(e) { if (e.laser) e.laser.visible = false; }
   _removeLaser(e) { if (e.laser) { this.ctx.scene.remove(e.laser); e.laser.geometry.dispose(); e.laser = null; } }
   _fireOne(e, muzzle, pc, spread, speed, dmg, thick, P = this.ctx.player) { _d.subVectors(pc, muzzle); _d.y += rand(-0.2, 0.3); _d.normalize();
-    const sp = spread * (1 + P.speed * 0.06); _d.x += rand(-sp, sp); _d.y += rand(-sp, sp); _d.z += rand(-sp, sp); _d.normalize();
+    const pSpd = (P.body && P.body.vel) ? Math.hypot(P.body.vel.x, P.body.vel.z) : (P.speed || 0);
+    const sp = spread * (1 + pSpd * 0.06); _d.x += rand(-sp, sp); _d.y += rand(-sp, sp); _d.z += rand(-sp, sp); _d.normalize();
     this.projectiles.fire(muzzle, _d, speed, dmg * this.mods.damage, e, INK.RED, thick); this.ctx.effects.strokeBurst(muzzle, INK.ORANGE, 4, 4, { life: 0.07, size: 0.03 });
   }
   _animateFlyer(e, dt) {

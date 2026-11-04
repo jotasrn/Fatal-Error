@@ -50,9 +50,49 @@ let bank = Number(localStorage.getItem('doodle_bank') || 300); let bankSaveT = 0
 const saveBank = () => { bank = Math.max(0, Math.round(player.money)); localStorage.setItem('doodle_bank', String(bank)); };
 let myName = (localStorage.getItem('doodle_name') || '').slice(0, 14) || 'Doodle' + Math.floor(Math.random() * 90 + 10);
 const settings = { sens: Number(localStorage.getItem('doodle_sens') || 100), invert: localStorage.getItem('doodle_invert') === '1' };
+
+const hudPrefs = {
+  chColor: localStorage.getItem('doodle_ch_color') || '#d02030',
+  chSize: Number(localStorage.getItem('doodle_ch_size') || '1'),
+  chDot: localStorage.getItem('doodle_ch_dot') !== '0',
+  scale: Number(localStorage.getItem('doodle_hud_scale') || '100'),
+  opacity: Number(localStorage.getItem('doodle_hud_opacity') || '100'),
+  killfeed: localStorage.getItem('doodle_hud_kf') !== '0',
+  damageNums: localStorage.getItem('doodle_hud_dmg') !== '0',
+};
+
+function applyHudSettings() {
+  document.documentElement.style.setProperty('--ch-color', hudPrefs.chColor);
+  document.documentElement.style.setProperty('--ch-scale', String(hudPrefs.chSize));
+  
+  const ch = document.getElementById('crosshair');
+  if (ch) ch.style.transform = `scale(${hudPrefs.chSize})`;
+  
+  const dot = document.querySelector('.ch-dot');
+  if (dot) dot.style.display = hudPrefs.chDot ? 'block' : 'none';
+
+  const hudEl = document.getElementById('hud');
+  if (hudEl) {
+    hudEl.style.opacity = (hudPrefs.opacity / 100).toFixed(2);
+  }
+  const kf = document.querySelector('.killfeed');
+  if (kf) kf.style.display = hudPrefs.killfeed ? 'block' : 'none';
+  const dmg = document.querySelector('.dmg-ind');
+  if (dmg) dmg.style.display = hudPrefs.damageNums ? 'block' : 'none';
+
+  localStorage.setItem('doodle_ch_color', hudPrefs.chColor);
+  localStorage.setItem('doodle_ch_size', String(hudPrefs.chSize));
+  localStorage.setItem('doodle_ch_dot', hudPrefs.chDot ? '1' : '0');
+  localStorage.setItem('doodle_hud_scale', String(hudPrefs.scale));
+  localStorage.setItem('doodle_hud_opacity', String(hudPrefs.opacity));
+  localStorage.setItem('doodle_hud_kf', hudPrefs.killfeed ? '1' : '0');
+  localStorage.setItem('doodle_hud_dmg', hudPrefs.damageNums ? '1' : '0');
+}
+
 function applySettings() {
   input.mouseSens = 0.0022 * settings.sens / 100; input.padSensX = 3.4 * settings.sens / 100; input.padSensY = 2.6 * settings.sens / 100; input.invertY = settings.invert;
   localStorage.setItem('doodle_sens', String(settings.sens)); localStorage.setItem('doodle_invert', settings.invert ? '1' : '0');
+  applyHudSettings();
 }
 // ---------------- game state ----------------
 const FFA_TARGET = 20, FFA_TIME = 600, RESPAWN = 2.5;
@@ -242,6 +282,43 @@ enemies.onKill = (e, info, over) => {
   player.addCash(cash, label);
   const r = Math.random(); if (r < 0.5) spawnPickup('ammo', e.body.pos); else if (r < 0.62) spawnPickup('health', e.body.pos);
 };
+let brasiliaEventTimer = 0;
+function triggerBrasiliaManifestation() {
+  if (level.key !== 'brasilia') return;
+  ctx.protestersRiot = false;
+  ctx.playerWanted = false;
+
+  // Cidadãos manifestantes com bandeiras vermelhas do PT no gramado central
+  const protSpots = [
+    new THREE.Vector3(-4, 0, 0), new THREE.Vector3(4, 0, 2),
+    new THREE.Vector3(-6, 0, 10), new THREE.Vector3(0, 0, 12), new THREE.Vector3(6, 0, 14),
+    new THREE.Vector3(-5, 0, 22), new THREE.Vector3(2, 0, 24), new THREE.Vector3(7, 0, 26),
+    new THREE.Vector3(-7, 0, 34), new THREE.Vector3(0, 0, 36), new THREE.Vector3(5, 0, 38),
+    new THREE.Vector3(-3, 0, 46), new THREE.Vector3(4, 0, 48), new THREE.Vector3(0, 0, 52)
+  ];
+  for (const pos of protSpots) {
+    const p = enemies.spawn('protester', pos);
+    p.state = 'hunt';
+  }
+
+  // Pelotão da PMDF / Choque em linha de bloqueio
+  const polSpots = [
+    new THREE.Vector3(-8, 0, 70), new THREE.Vector3(-4, 0, 70),
+    new THREE.Vector3(0, 0, 70), new THREE.Vector3(4, 0, 70), new THREE.Vector3(8, 0, 70)
+  ];
+  for (const pos of polSpots) {
+    const pol = enemies.spawn('police', pos);
+    pol.state = 'hunt';
+  }
+  const chief = enemies.spawn('police_chief', new THREE.Vector3(0, 0, 74));
+  chief.state = 'hunt';
+
+  audio.siren(new THREE.Vector3(0, 0, 60));
+  if (hud) {
+    hud.message('🚩 MANIFESTAÇÃO NA ESPLANADA!', 'Guerra entre Manifestantes e PMDF! Não interfira ou sofrerá as consequências!', 5.0);
+  }
+}
+
 function spawnBrasiliaCivilians() {
   const civSpots = [
     new THREE.Vector3(0, 6.5, -114),    // Mezanino da Rodoviária
@@ -250,15 +327,14 @@ function spawnBrasiliaCivilians() {
     new THREE.Vector3(-24, 0, -82),     // Calçada do Museu da República
     new THREE.Vector3(24, 0, -82),      // Calçada da Catedral
     new THREE.Vector3(0, 0, -35),       // Gramado Central da Esplanada
-    new THREE.Vector3(0, 0, 10),        // Gramado Central
     new THREE.Vector3(-33, 0, -15),     // Calçada Ministério Norte
     new THREE.Vector3(33, 0, 15),       // Calçada Ministério Sul
-    new THREE.Vector3(0, 0, 60),        // Gramado perto do Congresso
   ];
   for (const pos of civSpots) {
     const c = enemies.spawn('civilian', pos);
     c.state = 'hunt';
   }
+  triggerBrasiliaManifestation();
 }
 
 ctx.onCivilianKilled = (civ, info) => {
@@ -552,12 +628,61 @@ function setStatus(t) { lobby.status = t; const el = hud.el.panel.querySelector(
 
 // ---------------- screens ----------------
 function settingsHTML() {
+  const PRESET_COLORS = [
+    { name: 'Vermelho Original', hex: '#d02030' },
+    { name: 'Verde Neon', hex: '#00ff66' },
+    { name: 'Ciano Elétrico', hex: '#00e5ff' },
+    { name: 'Amarelo Ouro', hex: '#ffea00' },
+    { name: 'Rosa Choque', hex: '#ff1493' },
+    { name: 'Branco Puro', hex: '#ffffff' },
+    { name: 'Preto Nanquim', hex: '#111111' },
+  ];
+
+  const colorSwatches = PRESET_COLORS.map(c => 
+    `<span class="ch-swatch${hudPrefs.chColor.toLowerCase() === c.hex.toLowerCase() ? ' active' : ''}" data-color="${c.hex}" title="${c.name}" style="background:${c.hex}"></span>`
+  ).join('');
+
   return `<div class="settings" id="settings">
-    <label>Sensibilidade do Mouse <input type="range" id="setSens" min="25" max="250" step="5" value="${settings.sens}"><b id="setSensV">${settings.sens}%</b></label>
-    <label><input type="checkbox" id="setInv" ${settings.invert ? 'checked' : ''}> Inverter Eixo Y (Vertical)</label>
-    <label><input type="checkbox" id="setMus" ${musicWanted ? 'checked' : ''}> Música <span class="k">(M)</span></label>
+    <div class="settings-section-title">⚙️ Controles & Som</div>
+    <div class="settings-grid">
+      <label class="settings-row">Sensibilidade do Mouse <input type="range" id="setSens" min="25" max="250" step="5" value="${settings.sens}"><b id="setSensV">${settings.sens}%</b></label>
+      <label class="settings-row"><input type="checkbox" id="setInv" ${settings.invert ? 'checked' : ''}> Inverter Eixo Y</label>
+      <label class="settings-row"><input type="checkbox" id="setMus" ${musicWanted ? 'checked' : ''}> Música de Fundo <span class="k">(M)</span></label>
+    </div>
+
+    <div class="settings-section-title">🎯 Personalizar Mira (Crosshair)</div>
+    <div class="settings-row" style="justify-content:center; gap:12px; margin-top:4px;">
+      <span>Cor da Mira:</span>
+      <div class="ch-palette">${colorSwatches}</div>
+      <input type="color" id="chColorPicker" value="${hudPrefs.chColor}" title="Cor Personalizada" style="cursor:pointer; width:30px; height:26px; border:2px solid var(--ink); border-radius:4px; padding:0; background:none;">
+    </div>
+    <div class="settings-grid" style="margin-top:6px;">
+      <label class="settings-row">Tamanho da Mira
+        <select id="setChSize" style="font-family:inherit; font-size:16px; border:2px solid var(--ink); border-radius:5px; padding:2px 8px; background:var(--paper); color:var(--ink);">
+          <option value="0.75" ${hudPrefs.chSize === 0.75 ? 'selected' : ''}>Pequena</option>
+          <option value="1" ${hudPrefs.chSize === 1 ? 'selected' : ''}>Média (Padrão)</option>
+          <option value="1.35" ${hudPrefs.chSize === 1.35 ? 'selected' : ''}>Grande</option>
+        </select>
+      </label>
+      <label class="settings-row"><input type="checkbox" id="setChDot" ${hudPrefs.chDot ? 'checked' : ''}> Ponto Central da Mira</label>
+    </div>
+
+    <div class="settings-section-title">🖥️ Editar Interface (HUD)</div>
+    <div class="settings-grid">
+      <label class="settings-row">Escala da Interface
+        <input type="range" id="setHudScale" min="75" max="125" step="5" value="${hudPrefs.scale}">
+        <b id="setHudScaleV">${hudPrefs.scale}%</b>
+      </label>
+      <label class="settings-row">Opacidade da Interface
+        <input type="range" id="setHudOpacity" min="50" max="100" step="5" value="${hudPrefs.opacity}">
+        <b id="setHudOpacityV">${hudPrefs.opacity}%</b>
+      </label>
+      <label class="settings-row"><input type="checkbox" id="setHudKf" ${hudPrefs.killfeed ? 'checked' : ''}> Exibir Feed de Eliminações</label>
+      <label class="settings-row"><input type="checkbox" id="setHudDmg" ${hudPrefs.damageNums ? 'checked' : ''}> Exibir Marcadores de Dano</label>
+    </div>
   </div>`;
 }
+
 function wireSettings() {
   const box = hud.el.panel.querySelector('#settings'); if (!box) return;
   box.addEventListener('click', (e) => e.stopPropagation()); box.addEventListener('keydown', (e) => e.stopPropagation());
@@ -565,6 +690,69 @@ function wireSettings() {
   sens.addEventListener('input', () => { settings.sens = Number(sens.value); out.textContent = settings.sens + '%'; applySettings(); });
   box.querySelector('#setInv').addEventListener('change', (e) => { settings.invert = e.target.checked; applySettings(); });
   box.querySelector('#setMus').addEventListener('change', (e) => { musicWanted = e.target.checked; localStorage.setItem('doodle_music', musicWanted ? '1' : '0'); audio.musicOn(musicWanted); });
+
+  // Cor da mira via paleta
+  box.querySelectorAll('.ch-swatch').forEach(sw => {
+    sw.addEventListener('click', (e) => {
+      e.stopPropagation();
+      box.querySelectorAll('.ch-swatch').forEach(s => s.classList.remove('active'));
+      sw.classList.add('active');
+      hudPrefs.chColor = sw.dataset.color;
+      const cp = box.querySelector('#chColorPicker');
+      if (cp) cp.value = hudPrefs.chColor;
+      applyHudSettings();
+    });
+  });
+
+  // Cor da mira via color picker
+  const cp = box.querySelector('#chColorPicker');
+  if (cp) cp.addEventListener('input', (e) => {
+    hudPrefs.chColor = e.target.value;
+    box.querySelectorAll('.ch-swatch').forEach(s => s.classList.toggle('active', s.dataset.color.toLowerCase() === hudPrefs.chColor.toLowerCase()));
+    applyHudSettings();
+  });
+
+  // Tamanho da mira
+  const chs = box.querySelector('#setChSize');
+  if (chs) chs.addEventListener('change', (e) => {
+    hudPrefs.chSize = Number(e.target.value);
+    applyHudSettings();
+  });
+
+  // Ponto central
+  const chd = box.querySelector('#setChDot');
+  if (chd) chd.addEventListener('change', (e) => {
+    hudPrefs.chDot = e.target.checked;
+    applyHudSettings();
+  });
+
+  // Escala HUD
+  const hs = box.querySelector('#setHudScale'), hsV = box.querySelector('#setHudScaleV');
+  if (hs) hs.addEventListener('input', () => {
+    hudPrefs.scale = Number(hs.value);
+    if (hsV) hsV.textContent = hudPrefs.scale + '%';
+    applyHudSettings();
+  });
+
+  // Opacidade HUD
+  const ho = box.querySelector('#setHudOpacity'), hoV = box.querySelector('#setHudOpacityV');
+  if (ho) ho.addEventListener('input', () => {
+    hudPrefs.opacity = Number(ho.value);
+    if (hoV) hoV.textContent = hudPrefs.opacity + '%';
+    applyHudSettings();
+  });
+
+  // Toggles HUD
+  const hkf = box.querySelector('#setHudKf');
+  if (hkf) hkf.addEventListener('change', (e) => {
+    hudPrefs.killfeed = e.target.checked;
+    applyHudSettings();
+  });
+  const hdmg = box.querySelector('#setHudDmg');
+  if (hdmg) hdmg.addEventListener('change', (e) => {
+    hudPrefs.damageNums = e.target.checked;
+    applyHudSettings();
+  });
 }
 function wireName(box) {
   const nb = box.querySelector('#setName'); if (!nb) return;
@@ -787,7 +975,17 @@ function step(now) {
       }
     }
     player.update(sdt); enemies.update(sdt); effects.update(sdt); updatePickups(sdt); netUpdate(dt);
-    if (st === 'play' && (!online() || net.isHost)) updateWaves(sdt);
+    if (st === 'play' && (!online() || net.isHost)) {
+      updateWaves(sdt);
+      if (level.key === 'brasilia') {
+        brasiliaEventTimer -= sdt;
+        if (brasiliaEventTimer <= 0) {
+          brasiliaEventTimer = 80;
+          const aliveProt = enemies.enemies.filter(e => e.alive && e.T.isProtester).length;
+          if (aliveProt < 3) triggerBrasiliaManifestation();
+        }
+      }
+    }
     if (online()) updateArenaPickups(dt);
     if (game.comboT > 0) { game.comboT -= sdt; if (game.comboT <= 0) { game.combo = 0; hud.setScore(game.score, 0); } }
     if (st === 'dying') {

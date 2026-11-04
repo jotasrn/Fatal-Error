@@ -43,3 +43,4 @@ export class SMG extends Gun {
     this.flash = makeFlash(g, 0, 0.015, -0.48, 0.85);
   }
 }
+

@@ -39,3 +39,4 @@ export class LaserRifle extends Gun {
     this.flash = makeFlash(g, 0, 0.025, -0.68, 1.4);
   }
 }
+
