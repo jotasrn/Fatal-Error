@@ -4,6 +4,8 @@ export { ViewModel } from './viewmodel.js';
 export { Gun, GUNS } from './gun.js';
 export { Rifle } from './rifle.js';
 export { Shotgun } from './shotgun.js';
+export { SMG } from './smg.js';
+export { LaserRifle } from './laser.js';
 export { Revolver } from './revolver.js';
 export { Sniper } from './sniper.js';
 export { Bazooka } from './bazooka.js';
