@@ -274,16 +274,64 @@ export class EnemyManager {
   // Compact per-enemy state the host sends every few frames; clients ease toward it.
   snapshot() {
     const out = [];
-    for (const e of this.enemies) { if (!e.alive) continue; const b = e.body; out.push([e.id, +b.pos.x.toFixed(2), +b.pos.y.toFixed(2), +b.pos.z.toFixed(2), +e.yaw.toFixed(2), STATE_CODES[e.state] ?? 1, Math.round(e.hp), +e.aimAmt.toFixed(2), +e.attackT.toFixed(2), e.fuseT >= 0 ? 1 : 0, e.bossAtk ? 1 : 0]); }
+    for (const e of this.enemies) {
+      if (!e.alive) continue;
+      const b = e.body;
+      out.push([
+        e.id,
+        +b.pos.x.toFixed(2),
+        +b.pos.y.toFixed(2),
+        +b.pos.z.toFixed(2),
+        +e.yaw.toFixed(2),
+        STATE_CODES[e.state] ?? 1,
+        Math.round(e.hp),
+        +e.aimAmt.toFixed(2),
+        +e.attackT.toFixed(2),
+        e.fuseT >= 0 ? 1 : 0,
+        e.bossAtk ? 1 : 0,
+        e.type
+      ]);
+    }
     return out;
   }
   applySnapshot(arr, now) {
+    const seen = new Set();
     for (const r of arr) {
-      const e = this.byId.get(r[0]); if (!e || !e.alive) continue;
-      e.snapA = e.snapB || { p: e.body.pos.clone(), yaw: e.yaw, t: now - 0.08 }; e.snapB = { p: new THREE.Vector3(r[1], r[2], r[3]), yaw: r[4], t: now };
-      const st = STATE_NAMES[r[5]] || 'hunt'; if (e.state === 'spawn' && st !== 'spawn') { e.state = st; e.root.scale.setScalar(e.T.scale); } else if (e.state !== 'spawn') e.state = st;
-      e.hp = r[6]; e.aimAmt = r[7]; e.attackT = r[8]; e.fuseT = r[9] ? 0.5 : -1; e.bossAtk = r[10] ? (e.bossAtk || { kind: 'stomp', t: 0.3 }) : null;
+      const id = r[0];
+      seen.add(id);
+      let e = this.byId.get(id);
+      // AUTO-HEAL: Se o cliente perdeu o espawn deste bot, cria-o agora mesmo com o tipo correto!
+      if ((!e || !e.alive) && r[11]) {
+        const pos = new THREE.Vector3(r[1], r[2], r[3]);
+        if (!e) e = this.spawn(r[11], pos, id);
+        else { e.alive = true; e.state = 'hunt'; }
+      }
+      if (!e || !e.alive) continue;
+      e.snapA = e.snapB || { p: e.body.pos.clone(), yaw: e.yaw, t: now - 0.08 };
+      e.snapB = { p: new THREE.Vector3(r[1], r[2], r[3]), yaw: r[4], t: now };
+      const st = STATE_NAMES[r[5]] || 'hunt';
+      if (e.state === 'spawn' && st !== 'spawn') { e.state = st; e.root.scale.setScalar(e.T.scale); }
+      else if (e.state !== 'spawn') e.state = st;
+      e.hp = r[6]; e.aimAmt = r[7]; e.attackT = r[8];
+      e.fuseT = r[9] ? 0.5 : -1;
+      e.bossAtk = r[10] ? (e.bossAtk || { kind: 'stomp', t: 0.3 }) : null;
       if (e.T.boss && this.onBoss) this.onBoss(e);
+    }
+    // Remove bots no cliente que não constam mais nos snapshots do anfitrião (evita bots fantasmas)
+    for (let i = this.enemies.length - 1; i >= 0; i--) {
+      const e = this.enemies[i];
+      if (e.alive && !seen.has(e.id)) {
+        e.ghostTicks = (e.ghostTicks || 0) + 1;
+        if (e.ghostTicks > 5) {
+          e.alive = false;
+          this.ctx.scene.remove(e.root);
+          this._disposeMesh(e.root);
+          this.byId.delete(e.id);
+          this.enemies.splice(i, 1);
+        }
+      } else {
+        e.ghostTicks = 0;
+      }
     }
   }
   _updateMirror(dt) {
@@ -308,7 +356,7 @@ export class EnemyManager {
       this._syncHit(e);
     }
     this.projectiles.update(dt);
-    for (let i = this.enemies.length - 1; i >= 0; i--) { const e = this.enemies[i]; if (!e.alive && e.deadT > 9) { this._removeLaser(e); if (!e.rootDetached) this.ctx.scene.remove(e.root); this.byId.delete(e.id); this.enemies.splice(i, 1); } }
+    for (let i = this.enemies.length - 1; i >= 0; i--) { const e = this.enemies[i]; if (!e.alive && e.deadT > 2.5) { this._removeLaser(e); if (!e.rootDetached) { this.ctx.scene.remove(e.root); this._disposeMesh(e.root); } this.byId.delete(e.id); this.enemies.splice(i, 1); } }
   }
   // the host tells us someone died; run the gore without touching scores
   killMirror(id, info) { const e = this.byId.get(id); if (!e || !e.alive) return; const cb = this.onKill; this.onKill = null; this.kill(e, { ...info, dir: info.dir ? new THREE.Vector3().fromArray(info.dir) : _up.clone(), point: info.point ? new THREE.Vector3().fromArray(info.point) : e.center.clone() }); this.onKill = cb; }

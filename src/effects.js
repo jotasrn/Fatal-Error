@@ -51,9 +51,22 @@ export class Effects {
     const c = pool.mesh.instanceColor.array; c[i * 3] = ink; c[i * 3 + 1] = fill ? 1 : 0; c[i * 3 + 2] = 0;
   }
   _alloc(pool) { const i = pool.next; pool.next = (pool.next + 1) % pool.max; pool.used = Math.min(pool.used + 1, pool.max); pool.mesh.count = pool.used; return i; }
+  _disposeObj(obj) {
+    if (!obj) return;
+    obj.traverse((c) => {
+      if (c.isMesh) {
+        if (c.geometry) try { c.geometry.dispose(); } catch (e) {}
+        if (c.material) {
+          if (Array.isArray(c.material)) c.material.forEach(m => { try { m.dispose(); } catch (e) {} });
+          else try { c.material.dispose(); } catch (e) {}
+        }
+      }
+    });
+  }
   clear() {
     this.particles.length = 0; this.growing.length = 0;
-    for (const d of this.debrisList) this.scene.remove(d.mesh); this.debrisList.length = 0;
+    for (const d of this.debrisList) { this.scene.remove(d.mesh); this._disposeObj(d.mesh); }
+    this.debrisList.length = 0;
     for (const p of [this.drops, this.strokes, this.holes, ...this.splats]) { p.next = 0; p.used = 0; p.mesh.count = 0; }
   }
 
@@ -99,7 +112,8 @@ export class Effects {
     _t1.set(normal.y, normal.z, normal.x).cross(normal);
     if (_t1.lengthSq() < 1e-6) _t1.set(1, 0, 0);
     _t1.normalize(); _t2.crossVectors(normal, _t1);
-    for (let i = 0; i < cluster; i++) {
+    const maxCluster = this.particles.length > 180 ? 1 : cluster;
+    for (let i = 0; i < maxCluster; i++) {
       const a = rand(0, TAU), r = size * rand(0.3, 1.15);
       _off.copy(_t1).multiplyScalar(Math.cos(a) * r).addScaledVector(_t2, Math.sin(a) * r);
       if (dir) _off.addScaledVector(dir, size * rand(0, 0.7));
@@ -227,7 +241,7 @@ export class Effects {
     mesh.position.copy(pos); this.scene.add(mesh);
     const d = { mesh, vel: vel.clone(), ang: angVel.clone(), life: o.life ?? 10, radius: o.radius ?? 0.18, blood: o.blood ?? false, rest: false, bloodT: 0, bounces: 0, baseScale: mesh.scale.x };
     this.debrisList.push(d); if (d.blood) this.gibsAlive++;
-    if (this.debrisList.length > 70) { const old = this.debrisList.shift(); this.scene.remove(old.mesh); if (old.blood) this.gibsAlive--; }
+    if (this.debrisList.length > 30) { const old = this.debrisList.shift(); this.scene.remove(old.mesh); this._disposeObj(old.mesh); if (old.blood) this.gibsAlive--; }
     return d;
   }
 
@@ -291,7 +305,7 @@ export class Effects {
       }
       d.life -= dt;
       if (d.life < 0.6) m.scale.setScalar(Math.max(0.001, d.life / 0.6) * d.baseScale);
-      if (d.life <= 0) { this.scene.remove(m); if (d.blood) this.gibsAlive--; ds.splice(i, 1); }
+      if (d.life <= 0) { this.scene.remove(m); this._disposeObj(m); if (d.blood) this.gibsAlive--; ds.splice(i, 1); }
     }
     this._flush();
   }
