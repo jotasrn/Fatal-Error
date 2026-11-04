@@ -59,6 +59,8 @@ class Sfx {
   // another player's gun, heard from where they stand: a bit hotter than a bot's so it cuts through
   remoteShot(kind, pos) {
     if (kind === 'bazooka') { this.bazookaFire(pos); }
+    else if (kind === 'smg') { this.smgFire(); }
+    else if (kind === 'laser') { this.laserFire(); }
     else if (kind === 'shotgun') { this.noise({ dur: 0.32, gain: 1.0, type: 'lowpass', freq: 1600, freqEnd: 150, pos }); this.tone({ freq: 95, freqEnd: 30, dur: 0.26, gain: 0.7, type: 'triangle', pos }); }
     else if (kind === 'sniper') { this.noise({ dur: 0.4, gain: 1.0, type: 'bandpass', freq: 750, freqEnd: 120, q: 0.5, pos }); this.tone({ freq: 420, freqEnd: 50, dur: 0.32, gain: 0.5, type: 'sawtooth', pos }); }
     else { this.noise({ dur: 0.16, gain: 0.85, type: 'bandpass', freq: rand(1000, 1500), freqEnd: 220, q: 0.8, pos }); this.noise({ dur: 0.05, gain: 0.4, type: 'highpass', freq: 2600, pos }); this.tone({ freq: 200, freqEnd: 50, dur: 0.12, gain: 0.45, type: 'square', pos }); }
@@ -152,6 +154,16 @@ class Sfx {
   heartbeat() { this.tone({ freq: 55, dur: 0.15, gain: 0.35, type: 'sine' }); this.tone({ freq: 50, dur: 0.12, gain: 0.25, type: 'sine', delay: 0.18 }); }
 
   // ---------- more weapons / movement ----------
+  smgFire() {
+    this.noise({ dur: 0.11, gain: 0.65, type: 'bandpass', freq: 1600, freqEnd: 300, q: 0.8 });
+    this.noise({ dur: 0.04, gain: 0.4, type: 'highpass', freq: 3500 });
+    this.tone({ freq: 280, freqEnd: 70, dur: 0.09, gain: 0.35, type: 'square' });
+  }
+  laserFire() {
+    this.tone({ freq: 920, freqEnd: 240, dur: 0.14, gain: 0.35, type: 'sawtooth' });
+    this.tone({ freq: 1840, freqEnd: 600, dur: 0.12, gain: 0.2, type: 'sine' });
+    this.noise({ dur: 0.06, gain: 0.25, type: 'highpass', freq: 4000 });
+  }
   shotgunFire() {
     this.noise({ dur: 0.32, gain: 0.9, type: 'lowpass', freq: 1800, freqEnd: 120 }); this.noise({ dur: 0.08, gain: 0.5, type: 'highpass', freq: 2500 });
     this.tone({ freq: 110, freqEnd: 30, dur: 0.28, gain: 0.7, type: 'triangle' });

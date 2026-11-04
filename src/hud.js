@@ -39,18 +39,28 @@ export class HUD {
                 <div class="bm-c-desc">10 projéteis de chumbo · Devastadora a curta distância</div>
                 <button type="button" class="bm-action">Comprar</button>
               </div>
+              <div class="bm-card" data-buy="smg">
+                <div class="bm-c-top"><span class="bm-c-name">Submetralhadora SMG (Slot 3)</span><span class="bm-c-price">$750</span></div>
+                <div class="bm-c-desc">Cadência insana de 18 tiros/s · 45 balas · Rápida em corrida</div>
+                <button type="button" class="bm-action">Comprar</button>
+              </div>
               <div class="bm-card" data-buy="rifle">
-                <div class="bm-c-top"><span class="bm-c-name">Rifle de Assalto (Slot 3)</span><span class="bm-c-price">$900</span></div>
+                <div class="bm-c-top"><span class="bm-c-name">Rifle de Assalto (Slot 4)</span><span class="bm-c-price">$900</span></div>
                 <div class="bm-c-desc">Disparo totalmente automático · 35 balas · Mira ágil</div>
                 <button type="button" class="bm-action">Comprar</button>
               </div>
               <div class="bm-card" data-buy="sniper">
-                <div class="bm-c-top"><span class="bm-c-name">Sniper (Slot 4)</span><span class="bm-c-price">$1200</span></div>
+                <div class="bm-c-top"><span class="bm-c-name">Sniper (Slot 5)</span><span class="bm-c-price">$1200</span></div>
                 <div class="bm-c-desc">Mira telescópica · Um tiro, uma eliminação garantida</div>
                 <button type="button" class="bm-action">Comprar</button>
               </div>
+              <div class="bm-card" data-buy="laser">
+                <div class="bm-c-top"><span class="bm-c-name">Fuzil de Plasma Laser (Slot 6)</span><span class="bm-c-price">$1500</span></div>
+                <div class="bm-c-desc">Feixe contínuo de energia de 50 cargas · Precisão laser cirúrgica</div>
+                <button type="button" class="bm-action">Comprar</button>
+              </div>
               <div class="bm-card" data-buy="bazooka">
-                <div class="bm-c-top"><span class="bm-c-name">Bazuca (Slot 5)</span><span class="bm-c-price">$1800</span></div>
+                <div class="bm-c-top"><span class="bm-c-name">Bazuca (Slot 7)</span><span class="bm-c-price">$1800</span></div>
                 <div class="bm-c-desc">Foguetes de alto impacto · Explosão em área e Rocket Jump</div>
                 <button type="button" class="bm-action">Comprar</button>
               </div>
