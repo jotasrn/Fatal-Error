@@ -120,6 +120,9 @@ export class EnemyManager {
     const dir = (info.dir || _d.set(0, 0.5, 0)).clone().normalize();
     if (e.T.weapon === 'bomb') { this._explodeBomber(e, 0.8); if (this.onKill) this.onKill(e, info, true); return; }
     audio.enemyDie(e.center);
+    if (e.T.isCivilian && this.ctx.onCivilianKilled) {
+      this.ctx.onCivilianKilled(e, info);
+    }
     if (e.T.flying) {
       e.root.updateWorldMatrix(true, false); scene.attach(e.root); e.rootDetached = true;
       eff.debris(e.root, e.root.position, dir.clone().multiplyScalar(4).add(_v.set(rand(-2, 2), 1, rand(-2, 2))), new THREE.Vector3(rand(-9, 9), rand(-9, 9), rand(-9, 9)), { radius: 0.5, blood: true, life: 8 });
@@ -300,6 +303,28 @@ export class EnemyManager {
     const dx = pp.x - b.pos.x, dz = pp.z - b.pos.z; const dist = Math.hypot(dx, dz); const dy = pp.y - b.pos.y;
     e.losT -= dt; if (e.losT <= 0) { e.losT = 0.12 + rand(0, 0.1); e.los = ctx.world.hasLineOfSight(this.eye(e, _eye), pc, SEE_THROUGH); }
     e.cool -= dt; const yawTo = Math.atan2(dx, dz);
+    if (T.isCivilian) {
+      e.aimAmt = 0;
+      // If injured or player/threat is close, civilian panics and flees
+      if (e.scared || dist < 20 || e.hp < T.hp) {
+        e.scared = true;
+        const fleeX = b.pos.x - dx;
+        const fleeZ = b.pos.z - dz;
+        this._steer(e, dt, fleeX, fleeZ, T.speed * 1.5, 45);
+        e.yawT = Math.atan2(-dx, -dz);
+      } else {
+        // Peaceful civilian stroll around Brasilia
+        e.walkTimer = (e.walkTimer || 0) - dt;
+        if (e.walkTimer <= 0) {
+          e.walkTimer = rand(3, 6);
+          e.walkDir = rand(0, TAU);
+        }
+        b.vel.x = Math.sin(e.walkDir) * (T.speed * 0.55);
+        b.vel.z = Math.cos(e.walkDir) * (T.speed * 0.55);
+        e.yawT = e.walkDir;
+      }
+      return;
+    }
     if (T.weapon === 'bomb') {
       if (e.fuseT >= 0) { e.fuseT -= dt; b.vel.x = damp(b.vel.x, 0, 4, dt); b.vel.z = damp(b.vel.z, 0, 4, dt); e.yawT = yawTo; e.flashT = 0.02; if (!e.flashOn) { setFill(e.mat, true); e.flashOn = true; } if (Math.floor(e.fuseT * 8) !== Math.floor((e.fuseT + dt) * 8)) audio.fuse(e.center); if (e.fuseT <= 0) this._explodeBomber(e); return; }
       if (dist < T.fuseRange && Math.abs(dy) < 2.2 && e.los) { e.fuseT = T.fuse; audio.fuse(e.center); return; }

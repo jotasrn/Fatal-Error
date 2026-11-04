@@ -128,6 +128,17 @@ class Sfx {
   bulletImpact(pos) { this.noise({ dur: 0.05, gain: 0.25, type: 'highpass', freq: 1500, pos }); }
   ricochet(pos) { this.tone({ freq: rand(2000, 3500), freqEnd: 800, dur: 0.15, gain: 0.12, type: 'sine', pos }); }
   pickup() { this.tone({ freq: 700, freqEnd: 1100, dur: 0.1, gain: 0.2, type: 'triangle' }); this.tone({ freq: 1100, freqEnd: 1500, dur: 0.15, gain: 0.2, type: 'triangle', delay: 0.09 }); }
+  siren(pos) {
+    if (!this.ctx) return;
+    for (let i = 0; i < 4; i++) {
+      this.tone({ freq: 620, freqEnd: 960, dur: 0.26, gain: 0.35, type: 'sawtooth', delay: i * 0.52, pos });
+      this.tone({ freq: 960, freqEnd: 620, dur: 0.26, gain: 0.35, type: 'sawtooth', delay: i * 0.52 + 0.26, pos });
+    }
+  }
+  horn(pos) {
+    this.tone({ freq: 430, dur: 0.35, gain: 0.3, type: 'triangle', pos });
+    this.tone({ freq: 350, dur: 0.35, gain: 0.25, type: 'triangle', pos });
+  }
   buy() {
     this.tone({ freq: 523.25, dur: 0.08, gain: 0.25, type: 'triangle' });
     this.tone({ freq: 659.25, dur: 0.08, gain: 0.28, type: 'triangle', delay: 0.06 });

@@ -55,6 +55,11 @@ export function buildWeaponProp(gun, mat, solid, T) {
     bx(0.045, 0.12, 0.05, 0, -0.05, 0.2, solid, gun);
   }
   else if (T.weapon === 'pistol' || T.weapon === 'revolver') { bx(0.055, 0.09, 0.3, 0, 0.03, 0.13, mat, gun); bx(0.045, 0.11, 0.055, 0, -0.05, 0, solid, gun); }
+  else if (T.weapon === 'none') {
+    // Maleta de servidor público de Brasília (cidadão)
+    bx(0.08, 0.22, 0.28, 0, -0.15, 0.05, solid, gun);
+    bx(0.04, 0.08, 0.14, 0, -0.01, 0.05, mat, gun);
+  }
   else if (T.weapon === 'boss') { const pen = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 2.4, 7), makeInkMaterial({ ink: INK.ORANGE, shadeScale: 0, shadeBias: 1 })); pen.position.y = 0.7; gun.add(pen); const tip = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.38, 6), solid); tip.position.y = 2.08; gun.add(tip); const er = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.26, 8), makeInkMaterial({ ink: INK.PINK, shadeScale: 0, shadeBias: 1 })); er.position.y = -0.62; gun.add(er); }
   else { bx(0.085, 0.12, 0.5, 0, 0.02, 0.16, mat, gun); const b = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.34, 6), solid); b.rotation.x = Math.PI / 2; b.position.set(0, 0.05, 0.52); gun.add(b); bx(0.05, 0.16, 0.09, 0, -0.09, 0.08, mat, gun); }
 }
