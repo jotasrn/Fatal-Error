@@ -4,7 +4,10 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 // errors from the game go to <userData>/fatal-error.log so a crash can be diagnosed afterwards
-contextBridge.exposeInMainWorld('FE_LOG', { error: (msg) => ipcRenderer.send('log:error', String(msg).slice(0, 4000)) });
+contextBridge.exposeInMainWorld('FE_LOG', {
+  error: (msg) => ipcRenderer.send('log:error', String(msg).slice(0, 4000)),
+  info: (msg) => ipcRenderer.send('log:info', String(msg).slice(0, 4000)),
+});
 
 contextBridge.exposeInMainWorld('FE_NET', {
   host: (code) => ipcRenderer.invoke('net:host', { code }),

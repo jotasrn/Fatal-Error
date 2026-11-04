@@ -697,6 +697,7 @@ function settingsHTML() {
     <div class="settings-grid">
       <label class="settings-row">Sensibilidade do Mouse <input type="range" id="setSens" min="25" max="250" step="5" value="${settings.sens}"><b id="setSensV">${settings.sens}%</b></label>
       <label class="settings-row"><input type="checkbox" id="setInv" ${settings.invert ? 'checked' : ''}> Inverter Eixo Y</label>
+      <label class="settings-row"><input type="checkbox" id="setFps" ${localStorage.getItem('doodle_fps') === '1' ? 'checked' : ''}> Mostrar FPS</label>
       <label class="settings-row"><input type="checkbox" id="setMap" ${minimap && minimap.enabled ? 'checked' : ''}> Minimapa</label>
       <label class="settings-row"><input type="checkbox" id="setMus" ${musicWanted ? 'checked' : ''}> Música de Fundo <span class="k">(M)</span></label>
     </div>
@@ -740,6 +741,7 @@ function wireSettings() {
   const sens = box.querySelector('#setSens'), out = box.querySelector('#setSensV');
   sens.addEventListener('input', () => { settings.sens = Number(sens.value); out.textContent = settings.sens + '%'; applySettings(); });
   box.querySelector('#setInv').addEventListener('change', (e) => { settings.invert = e.target.checked; applySettings(); });
+  box.querySelector('#setFps').addEventListener('change', (e) => { perf.show = e.target.checked; try { localStorage.setItem('doodle_fps', perf.show ? '1' : '0'); } catch (err) { /* ignore */ } });
   box.querySelector('#setMap').addEventListener('change', (e) => { if (minimap) minimap.setEnabled(e.target.checked); });
   box.querySelector('#setMus').addEventListener('change', (e) => { musicWanted = e.target.checked; localStorage.setItem('doodle_music', musicWanted ? '1' : '0'); audio.musicOn(musicWanted); });
 
@@ -1017,7 +1019,32 @@ showStart();
 
 // ---------------- loop ----------------
 let last = performance.now(), boardToggle = false, lockTipT = 0.5, musicHealT = 2;
-function tick(now) { requestAnimationFrame(tick); step(now); }
+function tick(now) { requestAnimationFrame(tick); perfFrame(now); step(now); }
+// ---- performance meter: an on-screen FPS readout (Settings > Mostrar FPS) and, in the desktop
+// build, a line in fatal-error.log every 15 s of play with real frame times from this machine
+const perf = { last: 0, times: [], logT: 0, show: localStorage.getItem('doodle_fps') === '1', el: null, uiT: 0 };
+function perfFrame(now) {
+  const ms = perf.last ? now - perf.last : 16.7; perf.last = now; if (ms > 1000) return;
+  perf.times.push(ms); if (perf.times.length > 1200) perf.times.splice(0, perf.times.length - 1200);
+  const playing = game.state === 'play';
+  if (perf.show) {
+    if (!perf.el) { perf.el = document.createElement('div'); perf.el.className = 'fpsmeter'; hud.root.appendChild(perf.el); }
+    perf.uiT -= ms; if (perf.uiT <= 0) { perf.uiT = 500; const n = Math.min(60, perf.times.length), recent = perf.times.slice(-n); const avg = recent.reduce((a, b) => a + b, 0) / n;
+      perf.el.textContent = Math.round(1000 / avg) + ' FPS · ' + Math.max(...recent).toFixed(0) + ' ms pior'; perf.el.hidden = false; }
+  } else if (perf.el) perf.el.hidden = true;
+  perf.logT += ms;
+  if (playing && perf.logT > 15000 && window.FE_LOG && window.FE_LOG.info) {
+    perf.logT = 0; const t = perf.times.slice(-900).sort((a, b) => a - b); const avg = t.reduce((a, b) => a + b, 0) / t.length;
+    const info = R.renderer.info.render;
+    window.FE_LOG.info(`perf map=${level.key} fps=${(1000 / avg).toFixed(1)} p50=${t[Math.floor(t.length * 0.5)].toFixed(1)}ms p95=${t[Math.floor(t.length * 0.95)].toFixed(1)}ms pior=${t[t.length - 1].toFixed(0)}ms bots=${enemies.alive} calls=${info.calls} tri=${info.triangles} ratio=${R.pixelRatio} tela=${innerWidth}x${innerHeight}`);
+  }
+}
+{ // which GPU WebGL is really drawing on (software rendering here would explain everything)
+  try { const gl = R.renderer.getContext(); const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    const gpu = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+    if (window.FE_LOG && window.FE_LOG.info) window.FE_LOG.info('webgl ' + gpu + ' | dpr=' + devicePixelRatio + ' ratio=' + R.pixelRatio);
+  } catch (e) { /* ignore */ }
+}
 // browsers starve animation frames in hidden tabs; a host that alt-tabs would freeze everyone's
 // match, so a coarse timer runs extra steps (never extra frame chains) while that happens
 setInterval(() => { if (net.active && performance.now() - last > 300) step(performance.now()); }, 250);
