@@ -143,7 +143,9 @@ export function createSurvival(ctx, deps) {
     mod.apply(); enemies.mods.damage *= 1.2; hud.setModifier(mod.name);
     const swarm = mod.name.startsWith('Enxame');
     // the crowd on screen and the wave size both keep growing with the wave number
-    game.maxAlive = Math.min(4 + Math.floor(n * 0.9) + (swarm ? 3 : 0), (swarm ? 22 : 18) + Math.floor(n / 3));
+    // hard ceiling: past ~24 wave bots on screen the frame rate collapses on modest PCs (and every
+    // bot is also streamed to each client), so late waves get longer, not denser
+    game.maxAlive = Math.min(4 + Math.floor(n * 0.9) + (swarm ? 3 : 0), (swarm ? 22 : 18) + Math.floor(n / 3), 24);
     let count = Math.round(Math.min(5 + n * 2.0, 32 + n) * (swarm ? 1.35 : 1));
     if (boss) { count = 7 + n; game.maxAlive += 2 + Math.floor(n / 5); game.queue.push(bossFor(n)); }
     const pool = ROSTER.filter((r) => n >= r.from).map((r) => ({ t: r.t, w: r.w * Math.min(1, 0.3 + 0.25 * (n - r.from)) }));
@@ -182,7 +184,8 @@ export function createSurvival(ctx, deps) {
       return;
     }
     const aliveWaveCount = enemies.waveAlive !== undefined ? enemies.waveAlive : enemies.alive;
-    if (game.queue.length && aliveWaveCount < game.maxAlive) {
+    // total budget across wave + ambient bots (protesters, police, civilians)
+    if (game.queue.length && aliveWaveCount < game.maxAlive && enemies.alive < 32) {
       game.spawnT -= dt;
       if (game.spawnT <= 0) {
         game.spawnT = Math.max(0.7, 2.9 - game.wave * 0.13); const t = game.queue.shift(); const e = enemies.spawn(t, pickSpawn(t));

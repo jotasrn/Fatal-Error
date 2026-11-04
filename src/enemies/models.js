@@ -48,6 +48,64 @@ function buildHat(headG, mat, solid, T) {
   else if (h === 'beret') { const c = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.26, 0.09, 8), mat); c.position.set(0.08, 0.22, 0); c.rotation.z = -0.32; headG.add(c); bx(0.06, 0.06, 0.04, -0.15, 0.2, 0.18, solid, headG); }
 }
 
+// ---------------- draw-call baking ----------------
+// A figure is built from dozens of small meshes; every one is a separate draw call. Once built,
+// sibling meshes that share a material and never move on their own are merged into one mesh per
+// (parent, material). Joints, hit markers, the face groups and anything animated (kept in `keep`)
+// stay separate, so animation, flashing, ragdolls and hit tests behave exactly as before.
+export function bakeStatic(root, keep = new Set()) {
+  const parents = []; root.traverse((o) => { if (o.children && o.children.length > 1) parents.push(o); });
+  for (const p of parents) {
+    const groups = new Map();
+    for (const c of p.children) {
+      if (!c.isMesh || c.isInstancedMesh || keep.has(c) || c.children.length || !c.visible || !c.geometry.index || Array.isArray(c.material)) continue;
+      const k = c.material.uuid; let l = groups.get(k); if (!l) groups.set(k, l = []); l.push(c);
+    }
+    for (const list of groups.values()) {
+      if (list.length < 2) continue;
+      const geos = list.map((m) => { m.updateMatrix(); return m.geometry.clone().applyMatrix4(m.matrix); });
+      const merged = mergeGeometries(geos, false); for (const g of geos) g.dispose();
+      if (!merged) continue;
+      for (const m of list) { p.remove(m); m.geometry.dispose(); }
+      p.add(new THREE.Mesh(merged, list[0].material));
+    }
+  }
+  return root;
+}
+export function bakeModel(model, extra = []) {
+  const keep = new Set(extra);
+  const add = (v) => { if (!v) return; if (Array.isArray(v)) v.forEach(add); else if (v.isObject3D) keep.add(v); else if (typeof v === 'object') Object.values(v).forEach((x) => { if (x && x.isObject3D) keep.add(x); }); };
+  add(Object.values(model.J || {})); add(Object.values(model.parts || {})); add(model.tip); if (model.face) { add(model.face.eyes); add(model.face.xeyes); }
+  return bakeStatic(model.root, keep);
+}
+
+// Template cache: building a kitted figure costs several ms (tubes, spheres, merging); a wave or a
+// protest spawning a dozen at once used to hitch. Each type keeps a few baked templates and new bots
+// are clones that SHARE the geometry (marked userData.shared so removal never disposes it) and only
+// get their own materials, so hit flashes stay per bot.
+const _tpl = new Map(), TPL_VARIANTS = 3;
+export function buildCached(type, T, build) {
+  let list = _tpl.get(type); if (!list) _tpl.set(type, list = []);
+  if (list.length < TPL_VARIANTS) {
+    const tmat = makeInkMaterial({ ink: T.ink ?? INK.RED, shadeScale: 0, shadeBias: 1 });
+    const tsolid = makeInkMaterial({ ink: T.ink === INK.BLACK ? INK.RED : INK.BLACK, fill: true, side: THREE.DoubleSide });
+    const m = build(tmat, tsolid); bakeModel(m);
+    m.root.traverse((o) => { o.userData = {}; if (o.geometry) o.geometry.userData.shared = true; });
+    m.tmat = tmat; m.tsolid = tsolid; list.push(m);
+  }
+  return list[Math.floor(Math.random() * list.length)];
+}
+export function cloneModel(tpl, mat, solid) {
+  const root = tpl.root.clone(true); const src = [], dst = [];
+  tpl.root.traverse((o) => src.push(o)); root.traverse((o) => dst.push(o));
+  const map = new Map(); for (let i = 0; i < src.length; i++) map.set(src[i], dst[i]);
+  for (const o of dst) if (o.isMesh) { if (o.material === tpl.tmat) o.material = mat; else if (o.material === tpl.tsolid) o.material = solid; }
+  const re = (v) => { if (!v) return v; if (v.isObject3D) return map.get(v) || v; if (Array.isArray(v)) return v.map(re); if (typeof v === 'object') { const o = {}; for (const k in v) o[k] = re(v[k]); return o; } return v; };
+  const J = {}; for (const k in tpl.J) J[k] = re(tpl.J[k]);
+  const parts = {}; for (const k in tpl.parts) parts[k] = re(tpl.parts[k]);
+  return { root, parts, J, tip: re(tpl.tip), face: tpl.face ? { eyes: re(tpl.face.eyes), xeyes: re(tpl.face.xeyes) } : tpl.face, hit: tpl.hit };
+}
+
 // ---------------- gear kit ----------------
 // Small details (belts, vests, badges, packs…) are collected per (parent, material) and merged into
 // one mesh each, so a fully kitted figure still costs only a handful of draw calls.

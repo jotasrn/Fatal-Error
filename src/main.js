@@ -107,6 +107,7 @@ const game = ctx.game = {
 };
 const online = () => game.mode === 'ffa';
 const enemies = ctx.enemies = new EnemyManager(ctx);
+enemies.prewarm(); // every bot model is built once here, while loading, instead of mid-fight
 const player = ctx.player = new Player(ctx);
 hud.onBuy = (itemKey) => {
   player.buyItem(itemKey);
@@ -346,7 +347,9 @@ ctx.onCivilianKilled = (civ, info) => {
   player.addCash(-150, 'Crime / Multa Policial');
   game.addScore(-100, 'Crime Cometido');
 
-  if (!online() || net.isHost) {
+  // cap the riot squad: every dead civilian used to add 3 more police, without limit
+  const policeAlive = enemies.enemies.filter((e) => e.alive && e.T.isPolice).length;
+  if ((!online() || net.isHost) && policeAlive < 9) {
     const cx = civ.body.pos.x, cz = civ.body.pos.z;
     for (let i = 0; i < 2; i++) {
       const pPos = new THREE.Vector3(cx + (i === 0 ? -6 : 6), 0, cz + (Math.random() - 0.5) * 8);
@@ -964,7 +967,27 @@ function tick(now) { requestAnimationFrame(tick); step(now); }
 // browsers starve animation frames in hidden tabs; a host that alt-tabs would freeze everyone's
 // match, so a coarse timer runs extra steps (never extra frame chains) while that happens
 setInterval(() => { if (net.active && performance.now() - last > 300) step(performance.now()); }, 250);
+// One bad frame must never freeze the match: errors are logged (to the app's log file in the
+// desktop build) and, when a bot's update throws, that bot is dropped so the next frame is clean.
+let errCount = 0, errLastMsg = '';
+function reportError(where, err) {
+  errCount++; const msg = where + ': ' + (err && err.stack || err);
+  if (msg !== errLastMsg || errCount % 100 === 0) { console.error(msg); if (window.FE_LOG) window.FE_LOG.error(msg.slice(0, 2000)); }
+  errLastMsg = msg;
+}
+window.addEventListener('error', (ev) => reportError('window', ev.error || ev.message));
+window.addEventListener('unhandledrejection', (ev) => reportError('promise', ev.reason));
+function safeEnemies(sdt) {
+  try { enemies.update(sdt); }
+  catch (err) {
+    reportError('enemies', err); const bad = enemies._cur; enemies._cur = null;
+    if (bad) { const i = enemies.enemies.indexOf(bad); if (i >= 0) { if (bad.alive) enemies.alive--; bad.alive = false; if (!bad.rootDetached && bad.root) ctx.scene.remove(bad.root); enemies.byId.delete(bad.id); enemies.enemies.splice(i, 1); } }
+  }
+}
 function step(now) {
+  try { stepInner(now); } catch (err) { reportError('step', err); }
+}
+function stepInner(now) {
   // never more than 50 ms a step: a bigger jump (a tab coming back) makes the springs in the view model fly apart
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   input.update(dt);
@@ -1011,7 +1034,7 @@ function step(now) {
         }
       }
     }
-    player.update(sdt); enemies.update(sdt); effects.update(sdt); updatePickups(sdt); netUpdate(dt);
+    player.update(sdt); safeEnemies(sdt); effects.update(sdt); updatePickups(sdt); netUpdate(dt);
     if (st === 'play' && (!online() || net.isHost)) {
       updateWaves(sdt);
       if (level.key === 'brasilia') {

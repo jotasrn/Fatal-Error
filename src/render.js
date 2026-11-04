@@ -229,7 +229,12 @@ export class InkRenderer {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false });
     this.renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
     this.renderer.autoClear = false;
-    this.pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
+    // dynamic resolution: the ink post pass is per pixel, so when frames run long (weak GPU, big
+    // fights) the internal resolution steps down, and climbs back when there is headroom
+    this.maxRatio = Math.min(window.devicePixelRatio || 1, 1.5); this.minRatio = Math.min(this.maxRatio, 0.55);
+    this.pixelRatio = this.maxRatio; this._ft = 16.7; this._slowT = 0; this._fastT = 0; this._lastT = 0; this.lost = false;
+    canvas.addEventListener('webglcontextlost', (ev) => { ev.preventDefault(); this.lost = true; if (window.FE_LOG) window.FE_LOG.error('webglcontextlost'); });
+    canvas.addEventListener('webglcontextrestored', () => { this.lost = false; this.pixelRatio = Math.max(this.minRatio, this.pixelRatio * 0.8); this.resize(); });
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(80, 1, 0.08, 560);
     const depthTexture = new THREE.DepthTexture(2, 2); depthTexture.format = THREE.DepthFormat; depthTexture.type = THREE.FloatType;
@@ -258,7 +263,17 @@ export class InkRenderer {
     this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
     const u = this.post.uniforms; u.uRes.value.set(rw, rh); u.uAspect.value = w / h; u.uLineSpacing.value = rh / 13.5;
   }
+  _adapt() {
+    const now = performance.now(), ms = now - this._lastT; this._lastT = now;
+    if (ms <= 0 || ms > 250) return; // a hitch from loading or alt-tab is not a trend
+    this._ft += (ms - this._ft) * 0.06;
+    if (this._ft > 22) { this._slowT += ms; this._fastT = 0; } else if (this._ft < 17.6) { this._fastT += ms; this._slowT = 0; } else { this._slowT = 0; this._fastT = 0; }
+    if (this._slowT > 1000 && this.pixelRatio > this.minRatio + 1e-3) { this.pixelRatio = Math.max(this.minRatio, this.pixelRatio * 0.85); this._slowT = 0; this.resize(); }
+    else if (this._fastT > 6000 && this.pixelRatio < this.maxRatio - 1e-3) { this.pixelRatio = Math.min(this.maxRatio, this.pixelRatio * 1.08); this._fastT = 0; this.resize(); }
+  }
   render(time, fx = {}) {
+    if (this.lost) return;
+    this._adapt();
     shared.uTime.value = time;
     this.camera.updateMatrixWorld(); this.camera.matrixWorldInverse.copy(this.camera.matrixWorld).invert();
     shared.uLightDir.value.copy(LIGHT_WORLD).transformDirection(this.camera.matrixWorldInverse);

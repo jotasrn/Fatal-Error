@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { makeInkMaterial, setFill, INK } from './render.js';
 import { buildHumanoid, buildWeaponProp } from './enemies/index.js';
+import { bakeModel } from './enemies/models.js';
 import { clamp, damp, angleLerp, wrapAngle } from './util.js';
 
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
@@ -40,7 +41,7 @@ export class RemotePlayer {
     this.hook = new THREE.Mesh(new THREE.SphereGeometry(0.12, 6, 5), makeInkMaterial({ ink: INK.BLACK, fill: true })); this.hook.visible = false; ctx.scene.add(this.hook);
   }
   _buildModel() {
-    const model = buildHumanoid(this.mat, this.solid, this.T);
+    const model = buildHumanoid(this.mat, this.solid, this.T); bakeModel(model);
     this.root = model.root; this.parts = model.parts; this.J = model.J; this.face = model.face;
     this.root.visible = false; this.ctx.scene.add(this.root); this.weaponIndex = -1;
     // a name tag: a little flag above the head so you know who is who
