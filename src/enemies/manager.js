@@ -204,13 +204,15 @@ export class EnemyManager {
     const detach = (obj, extraVel, radius) => { if (!obj || !obj.parent) return; obj.updateWorldMatrix(true, false); scene.attach(obj); _v.copy(dir).multiplyScalar(rand(3, 7)).add(extraVel); _v.y += rand(2, 5); eff.debris(obj, obj.position, _v, new THREE.Vector3(rand(-8, 8), rand(-8, 8), rand(-8, 8)), { radius, blood: true, life: rand(7, 10) }); };
     if (over) {
       audio.gib(e.center); const J = e.J;
-      if (info.crit || ((info.source === 'katana' || info.source === 'focus') && Math.random() < 0.35)) { detach(J.headG, _v2.set(rand(-2, 2), 3, rand(-2, 2)), 0.25); eff.fountain(e.parts.torso.getWorldPosition(new THREE.Vector3()).add(_v2.set(0, 0.35, 0)), _up, 0.9, inkC); }
+      const tPart = e.parts.torso || e.parts.head || e.root;
+      const hPart = e.parts.hips || e.parts.torso || e.root;
+      if (info.crit || ((info.source === 'katana' || info.source === 'focus') && Math.random() < 0.35)) { detach(J.headG, _v2.set(rand(-2, 2), 3, rand(-2, 2)), 0.25); eff.fountain(tPart.getWorldPosition(new THREE.Vector3()).add(_v2.set(0, 0.35, 0)), _up, 0.9, inkC); }
       if (info.source === 'katana' || info.source === 'focus') {
         const r = Math.random();
         if (r < 0.4) detach(J.armR, _v2.set(rand(-3, 3), 2, rand(-3, 3)), 0.12); else if (r < 0.7) detach(J.armL, _v2.set(rand(-3, 3), 2, rand(-3, 3)), 0.12);
-        else { detach(J.torso, _v2.set(rand(-2, 2), 2, rand(-2, 2)), 0.3); eff.fountain(e.parts.hips.getWorldPosition(new THREE.Vector3()), _up, 0.7, inkC); }
+        else { detach(J.torso, _v2.set(rand(-2, 2), 2, rand(-2, 2)), 0.3); eff.fountain(hPart.getWorldPosition(new THREE.Vector3()), _up, 0.7, inkC); }
       } else if (info.source === 'deflect' || info.source === 'blast' || -e.hp > e.maxHp * 0.6) {
-        const limbs = [J.armL, J.armR, J.legL, J.legR, J.torso]; const k = e.T.boss ? 5 : randInt(1, 2);
+        const limbs = [J.armL, J.armR, J.legL, J.legR, J.torso].filter(Boolean); const k = e.T.boss ? 5 : randInt(1, 2);
         for (let i = 0; i < k && limbs.length; i++) { const o = limbs.splice(randInt(0, limbs.length - 1), 1)[0]; detach(o, _v2.set(rand(-3, 3), 2, rand(-3, 3)), 0.15); }
       }
     }
@@ -363,7 +365,12 @@ export class EnemyManager {
   _syncHit(e) { e.root.updateMatrixWorld(true); for (let i = 0; i < e.hit.length; i++) e.hitSpheres[i].setFromMatrixPosition(e.parts[e.hit[i][0]].matrixWorld); e.center.setFromMatrixPosition(e.parts.torso.matrixWorld); }
   _updateDead(e, dt) {
     e.deadT += dt; const tp = e.topple; if (!tp || e.rootDetached) return;
-    if (tp.t < 1) { tp.t = Math.min(1, tp.t + dt * 2.2); const a = tp.sign * (Math.PI / 2) * (1 - Math.pow(1 - tp.t, 2)); if (tp.axis === 'x') e.J.hips.parent.rotation.x = a; else e.J.hips.parent.rotation.z = a; }
+    if (tp.t < 1) {
+      tp.t = Math.min(1, tp.t + dt * 2.2);
+      const a = tp.sign * (Math.PI / 2) * (1 - Math.pow(1 - tp.t, 2));
+      const hipParent = (e.J && e.J.hips && e.J.hips.parent) ? e.J.hips.parent : e.root;
+      if (tp.axis === 'x') hipParent.rotation.x = a; else hipParent.rotation.z = a;
+    }
     if (e.deadT > 8.3) e.root.scale.setScalar(Math.max(0.001, (9 - e.deadT) / 0.7 * e.T.scale));
     e.root.rotation.y = e.yaw;
   }
@@ -702,56 +709,105 @@ export class EnemyManager {
     const b = e.body, J = e.J, T = e.T; const sp = Math.hypot(b.vel.x, b.vel.z);
     e.walk = damp(e.walk, clamp(sp / 4, 0, 1), 10, dt); const w = e.walk;
     e.phase += dt * (sp * 2.2 + (sp > 0.4 ? 3 : 0)); const s = Math.sin(e.phase), c = Math.cos(e.phase);
-    J.legL.rotation.x = s * 0.9 * w; J.legR.rotation.x = -s * 0.9 * w; J.shinL.rotation.x = Math.max(0, c) * 1.1 * w; J.shinR.rotation.x = Math.max(0, -c) * 1.1 * w;
-    if (!b.onGround) { J.legL.rotation.x = -0.5; J.legR.rotation.x = 0.6; J.shinL.rotation.x = 1.0; J.shinR.rotation.x = 0.5; }
+
     if (T.model === 'quadruped') {
       if (J.legFL && J.legBL) {
         J.legFL.rotation.x = s * 0.9 * w; J.legFR.rotation.x = -s * 0.9 * w;
         J.legBL.rotation.x = -s * 0.9 * w; J.legBR.rotation.x = s * 0.9 * w;
       }
       if (J.tail) J.tail.rotation.y = Math.sin(e.t * 8) * 0.45;
+      if (J.headG && pc) {
+        _v.subVectors(pc, e.center); const yawTo = Math.atan2(_v.x, _v.z);
+        J.headG.rotation.y = clamp(wrapAngle(yawTo - e.yaw), -0.8, 0.8);
+      }
       return;
     }
-    if (T.model === 'spider' && J.spiderLegs) {
-      for (const leg of J.spiderLegs) {
-        const offset = leg.i * 0.78 + (leg.side > 0 ? 0 : Math.PI);
-        const wave = Math.sin(e.phase + offset) * w;
-        leg.base.rotation.x = wave * 0.4;
-        leg.base.rotation.y = leg.side * 0.2 + wave * 0.2;
+    if (T.model === 'spider') {
+      if (J.spiderLegs) {
+        for (const leg of J.spiderLegs) {
+          const offset = leg.i * 0.78 + (leg.side > 0 ? 0 : Math.PI);
+          const wave = Math.sin(e.phase + offset) * w;
+          leg.base.rotation.x = wave * 0.4;
+          leg.base.rotation.y = leg.side * 0.2 + wave * 0.2;
+        }
+      }
+      if (J.headG && pc) {
+        _v.subVectors(pc, e.center); const yawTo = Math.atan2(_v.x, _v.z);
+        J.headG.rotation.y = clamp(wrapAngle(yawTo - e.yaw), -0.6, 0.6);
       }
       return;
     }
     if (T.weapon === 'bomb' || T.model === 'blob') {
-      J.armL.rotation.x = -2.4 + Math.sin(e.t * 20) * 0.4 * w; J.armR.rotation.x = -2.4 - Math.sin(e.t * 20) * 0.4 * w; J.torso.rotation.z = Math.sin(e.phase) * 0.12 * w; J.torso.rotation.x = -0.15 * w;
-      if (J.spark) J.spark.scale.setScalar(0.7 + Math.random() * 0.8 + (e.fuseT >= 0 ? 1.5 : 0)); J.hips.position.y = 0.5 + Math.abs(c) * 0.08 * w;
-      if (e.fuseT >= 0) { J.torso.rotation.x = Math.sin(e.t * 40) * 0.15; J.headG.rotation.y = Math.sin(e.t * 30) * 0.3; }
+      if (J.legL && J.legR) { J.legL.rotation.x = s * 0.9 * w; J.legR.rotation.x = -s * 0.9 * w; }
+      if (J.shinL && J.shinR) { J.shinL.rotation.x = Math.max(0, c) * 1.1 * w; J.shinR.rotation.x = Math.max(0, -c) * 1.1 * w; }
+      if (J.armL && J.armR) { J.armL.rotation.x = -2.4 + Math.sin(e.t * 20) * 0.4 * w; J.armR.rotation.x = -2.4 - Math.sin(e.t * 20) * 0.4 * w; }
+      if (J.torso) { J.torso.rotation.z = Math.sin(e.phase) * 0.12 * w; J.torso.rotation.x = -0.15 * w; }
+      if (J.spark) J.spark.scale.setScalar(0.7 + Math.random() * 0.8 + (e.fuseT >= 0 ? 1.5 : 0));
+      if (J.hips) J.hips.position.y = 0.5 + Math.abs(c) * 0.08 * w;
+      if (e.fuseT >= 0) {
+        if (J.torso) J.torso.rotation.x = Math.sin(e.t * 40) * 0.15;
+        if (J.headG) J.headG.rotation.y = Math.sin(e.t * 30) * 0.3;
+      }
       return;
     }
+
+    if (J.legL && J.legR) {
+      J.legL.rotation.x = s * 0.9 * w; J.legR.rotation.x = -s * 0.9 * w;
+      if (!b.onGround) { J.legL.rotation.x = -0.5; J.legR.rotation.x = 0.6; }
+    }
+    if (J.shinL && J.shinR) {
+      J.shinL.rotation.x = Math.max(0, c) * 1.1 * w; J.shinR.rotation.x = Math.max(0, -c) * 1.1 * w;
+      if (!b.onGround) { J.shinL.rotation.x = 1.0; J.shinR.rotation.x = 0.5; }
+    }
     const aim = e.aimAmt;
-    if (T.weapon === 'blade') {
+    if (T.weapon === 'blade' || T.weapon === 'flag') {
       const at = e.attackT;
       const wind = at > 0.18 ? clamp((0.55 - at) / 0.37, 0, 1) : 0;      // arm goes up and back
       const strike = at > 0 && at <= 0.18 ? 1 - at / 0.18 : 0;           // then chops down
-      J.armR.rotation.x = -0.8 * (1 - w) - s * 0.9 * w - wind * 2.2 + strike * 1.5;
-      J.armR.rotation.z = -0.3 + wind * 0.7 - strike * 0.5;
-      J.foreR.rotation.x = -0.9 - wind * 0.7 + strike * 0.5;
-      J.armL.rotation.x = s * 1.1 * w - wind * 0.5; J.armL.rotation.z = 0.35 * w; J.foreL.rotation.x = -0.6 * w;
-      J.torso.rotation.x = -0.3 * w + e.flinch * 0.35 - wind * 0.25 + strike * 0.55;
-      J.torso.rotation.y = wind * 0.5 - strike * 0.6;
+      if (J.armR) {
+        J.armR.rotation.x = -0.8 * (1 - w) - s * 0.9 * w - wind * 2.2 + strike * 1.5;
+        J.armR.rotation.z = -0.3 + wind * 0.7 - strike * 0.5;
+      }
+      if (J.foreR) J.foreR.rotation.x = -0.9 - wind * 0.7 + strike * 0.5;
+      if (J.armL) { J.armL.rotation.x = s * 1.1 * w - wind * 0.5; J.armL.rotation.z = 0.35 * w; }
+      if (J.foreL) J.foreL.rotation.x = -0.6 * w;
+      if (J.torso) {
+        J.torso.rotation.x = -0.3 * w + e.flinch * 0.35 - wind * 0.25 + strike * 0.55;
+        J.torso.rotation.y = wind * 0.5 - strike * 0.6;
+      }
     } else if (T.weapon === 'boss') {
       const a = e.bossAtk; let raise = 0, slam = 0; if (a && a.kind === 'stomp') { raise = a.t < 0.75 ? clamp(a.t / 0.6, 0, 1) : 0; slam = a.t >= 0.75 ? 1 : 0; }
       if (a && a.kind === 'throw') { raise = a.t < 0.6 ? clamp(a.t / 0.5, 0, 1) : 0; }
-      J.armR.rotation.x = -0.4 - s * 0.5 * w - raise * 2.4 + slam * 0.9; J.armR.rotation.z = -0.35; J.foreR.rotation.x = -0.6 - raise * 0.4;
-      J.armL.rotation.x = s * 0.6 * w - raise * 0.8; J.armL.rotation.z = 0.35; J.foreL.rotation.x = -0.5; J.torso.rotation.x = -0.1 * w + e.flinch * 0.15 - raise * 0.3 + slam * 0.5;
+      if (J.armR) { J.armR.rotation.x = -0.4 - s * 0.5 * w - raise * 2.4 + slam * 0.9; J.armR.rotation.z = -0.35; }
+      if (J.foreR) J.foreR.rotation.x = -0.6 - raise * 0.4;
+      if (J.armL) { J.armL.rotation.x = s * 0.6 * w - raise * 0.8; J.armL.rotation.z = 0.35; }
+      if (J.foreL) J.foreL.rotation.x = -0.5;
+      if (J.torso) J.torso.rotation.x = -0.1 * w + e.flinch * 0.15 - raise * 0.3 + slam * 0.5;
     } else {
-      J.armR.rotation.x = (-s * 1.0 * w) * (1 - aim) + (-1.35 + e.flinch * 0.35) * aim; J.armR.rotation.z = -0.25 * (1 - aim); J.foreR.rotation.x = -0.35 * (1 - aim) + -0.2 * aim;
-      if (T.shield) { J.armL.rotation.x = -1.2; J.armL.rotation.y = 0.3; J.foreL.rotation.x = -0.9; }
-      else { J.armL.rotation.x = (s * 1.0 * w) * (1 - aim) + -1.2 * aim; J.armL.rotation.y = 0.6 * aim; J.armL.rotation.z = 0.25 * (1 - aim); J.foreL.rotation.x = -0.4 * (1 - aim) + -0.5 * aim; }
-      J.torso.rotation.x = -0.22 * w + e.flinch * 0.4; J.torso.rotation.y = -0.35 * aim; J.torso.rotation.z = Math.sin(e.phase) * 0.05 * w;
+      if (J.armR) { J.armR.rotation.x = (-s * 1.0 * w) * (1 - aim) + (-1.35 + e.flinch * 0.35) * aim; J.armR.rotation.z = -0.25 * (1 - aim); }
+      if (J.foreR) J.foreR.rotation.x = -0.35 * (1 - aim) + -0.2 * aim;
+      if (T.shield) {
+        if (J.armL) { J.armL.rotation.x = -1.2; J.armL.rotation.y = 0.3; }
+        if (J.foreL) J.foreL.rotation.x = -0.9;
+      } else {
+        if (J.armL) { J.armL.rotation.x = (s * 1.0 * w) * (1 - aim) + -1.2 * aim; J.armL.rotation.y = 0.6 * aim; J.armL.rotation.z = 0.25 * (1 - aim); }
+        if (J.foreL) J.foreL.rotation.x = -0.4 * (1 - aim) + -0.5 * aim;
+      }
+      if (J.torso) { J.torso.rotation.x = -0.22 * w + e.flinch * 0.4; J.torso.rotation.y = -0.35 * aim; J.torso.rotation.z = Math.sin(e.phase) * 0.05 * w; }
     }
-    J.hips.position.y = 0.86 + Math.abs(c) * 0.07 * w + (b.onGround ? 0 : -0.05);
-    _v.subVectors(pc, e.center); const yawTo = Math.atan2(_v.x, _v.z); J.headG.rotation.y = clamp(wrapAngle(yawTo - e.yaw) - (J.torso.rotation.y || 0), -1.1, 1.1);
-    J.headG.rotation.x = clamp(-Math.atan2(_v.y, Math.hypot(_v.x, _v.z)), -0.6, 0.6) * 0.8; J.headG.rotation.z = Math.sin(e.phase * 0.5) * 0.06 * w;
-    if (e.state === 'stunned') { J.torso.rotation.x = 0.6; J.armL.rotation.x = -2.5; J.armR.rotation.x = -2.5; J.legL.rotation.x = -0.8; J.legR.rotation.x = 0.9; }
+    if (J.hips) J.hips.position.y = 0.86 + Math.abs(c) * 0.07 * w + (b.onGround ? 0 : -0.05);
+    if (J.headG && pc) {
+      _v.subVectors(pc, e.center); const yawTo = Math.atan2(_v.x, _v.z);
+      J.headG.rotation.y = clamp(wrapAngle(yawTo - e.yaw) - ((J.torso && J.torso.rotation.y) || 0), -1.1, 1.1);
+      J.headG.rotation.x = clamp(-Math.atan2(_v.y, Math.hypot(_v.x, _v.z)), -0.6, 0.6) * 0.8;
+      J.headG.rotation.z = Math.sin(e.phase * 0.5) * 0.06 * w;
+    }
+    if (e.state === 'stunned') {
+      if (J.torso) J.torso.rotation.x = 0.6;
+      if (J.armL) J.armL.rotation.x = -2.5;
+      if (J.armR) J.armR.rotation.x = -2.5;
+      if (J.legL) J.legL.rotation.x = -0.8;
+      if (J.legR) J.legR.rotation.x = 0.9;
+    }
   }
 }
