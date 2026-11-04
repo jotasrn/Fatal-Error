@@ -34,8 +34,12 @@ export class EnemyManager {
   _disposeMesh(obj) {
     if (!obj) return;
     obj.traverse((child) => {
-      if (child.isMesh && child.geometry) {
-        if (!child.geometry.userData.shared) try { child.geometry.dispose(); } catch (e) {}
+      if (child.isMesh) {
+        if (child.geometry && !child.geometry.userData.shared) try { child.geometry.dispose(); } catch (e) {}
+        if (child.material) {
+          if (Array.isArray(child.material)) child.material.forEach((m) => { try { m.dispose(); } catch (e) {} });
+          else try { child.material.dispose(); } catch (e) {}
+        }
       }
     });
   }
@@ -82,7 +86,7 @@ export class EnemyManager {
   // build every type's model templates up front (during loading) so no spawn ever pays for it
   prewarm() { for (const type in TYPES) for (let i = 0; i < 3; i++) buildCached(type, TYPES[type], modelBuilder(TYPES[type])); }
   spawn(type, pos, id = null) {
-    const T = TYPES[type]; const ink = T.ink ?? INK.RED;
+    const T = TYPES[type] || TYPES.grunt; const ink = T.ink ?? INK.RED;
     const mat = makeInkMaterial({ ink, shadeScale: 0, shadeBias: 1 });
     const solid = makeInkMaterial({ ink: T.ink === INK.BLACK ? INK.RED : INK.BLACK, fill: true, side: THREE.DoubleSide });
     const tpl = buildCached(type, T, modelBuilder(T));
@@ -192,7 +196,8 @@ export class EnemyManager {
     e.hit = e.hit.filter((h) => h[0] !== 'shield'); e.hitSpheres = e.hit.map(() => new THREE.Vector3()); e.J.shieldG = null; audio.shieldHit(e.center); this.ctx.game.addScore(40, 'Escudo Destruído');
   }
   kill(e, info) {
-    e.alive = false; e.state = 'dead'; e.deadT = 0; this.alive--; e.body.vel.set(0, 0, 0); this._removeLaser(e);
+    if (!e || !e.alive) return;
+    e.alive = false; e.state = 'dead'; e.deadT = 0; this.alive = Math.max(0, this.alive - 1); this._removeLaser(e);
     const eff = this.ctx.effects, scene = this.ctx.scene; const inkC = e.T.ink === INK.BLACK ? INK.BLACK : INK.RED;
     if (e.face) { e.face.eyes.visible = false; e.face.xeyes.visible = true; }
     const dir = (info.dir || _d.set(0, 0.5, 0)).clone().normalize();
@@ -239,6 +244,7 @@ export class EnemyManager {
   eye(e, out) { return out.setFromMatrixPosition(e.parts.head.matrixWorld); }
   update(dt) {
     if (this.mirror) { this._updateMirror(dt); return; }
+    this._pathsLeft = 4;
     const ctx = this.ctx, world = ctx.world;
     for (const e of this.enemies) {
       this._cur = e; // lets the game loop drop a bot whose update throws instead of freezing every frame
@@ -357,23 +363,25 @@ export class EnemyManager {
   _updateMirror(dt) {
     const now = performance.now() / 1000, P = this.ctx.player;
     for (const e of this.enemies) {
-      e.t += dt;
-      if (!e.alive) { this._updateDead(e, dt); continue; }
-      if (e.flashT > 0) { e.flashT -= dt; if (e.flashT <= 0 && e.flashOn) { setFill(e.mat, false); e.flashOn = false; } }
-      e.flinch = damp(e.flinch, 0, 9, dt);
-      if (e.state === 'spawn') { const f = clamp(e.t / 0.6, 0, 1); e.root.scale.setScalar(Math.max(0.001, f * e.T.scale * (1 + Math.sin(e.t * 60) * 0.12 * (1 - f)))); if (e.t >= 0.6) { e.state = 'hunt'; e.root.scale.setScalar(e.T.scale); } }
-      if (e.snapA && e.snapB) {
-        // render 100 ms behind the newest snapshot so movement stays smooth between packets
-        const span = Math.max(0.02, e.snapB.t - e.snapA.t); const k = clamp((now - 0.1 - e.snapA.t) / span, 0, 1.2);
-        _v.lerpVectors(e.snapA.p, e.snapB.p, k);
-        e.body.vel.subVectors(_v, e.body.pos).divideScalar(Math.max(dt, 1e-3)).clampLength(0, 30);
-        e.body.pos.copy(_v); e.body.onGround = Math.abs(e.body.vel.y) < 0.5;
-        e.yaw = angleLerp(e.snapA.yaw, e.snapB.yaw, k);
-      }
-      e.root.position.copy(e.body.pos); e.root.rotation.y = e.yaw;
-      if (e.T.flying) this._animateFlyer(e, dt); else this._animate(e, dt, P.center);
-      if (e.T.weapon === 'sniper' && e.laser) e.laser.visible = e.aimAmt > 0.9;
-      this._syncHit(e);
+      try {
+        e.t += dt;
+        if (!e.alive) { this._updateDead(e, dt); continue; }
+        if (e.flashT > 0) { e.flashT -= dt; if (e.flashT <= 0 && e.flashOn) { setFill(e.mat, false); e.flashOn = false; } }
+        e.flinch = damp(e.flinch, 0, 9, dt);
+        if (e.state === 'spawn') { const f = clamp(e.t / 0.6, 0, 1); e.root.scale.setScalar(Math.max(0.001, f * e.T.scale * (1 + Math.sin(e.t * 60) * 0.12 * (1 - f)))); if (e.t >= 0.6) { e.state = 'hunt'; e.root.scale.setScalar(e.T.scale); } }
+        if (e.snapA && e.snapB) {
+          // render 100 ms behind the newest snapshot so movement stays smooth between packets
+          const span = Math.max(0.02, e.snapB.t - e.snapA.t); const k = clamp((now - 0.1 - e.snapA.t) / span, 0, 1.2);
+          _v.lerpVectors(e.snapA.p, e.snapB.p, k);
+          e.body.vel.subVectors(_v, e.body.pos).divideScalar(Math.max(dt, 1e-3)).clampLength(0, 30);
+          e.body.pos.copy(_v); e.body.onGround = Math.abs(e.body.vel.y) < 0.5;
+          e.yaw = angleLerp(e.snapA.yaw, e.snapB.yaw, k);
+        }
+        e.root.position.copy(e.body.pos); e.root.rotation.y = e.yaw;
+        if (e.T.flying) this._animateFlyer(e, dt); else this._animate(e, dt, P.center);
+        if (e.T.weapon === 'sniper' && e.laser) e.laser.visible = e.aimAmt > 0.9;
+        this._syncHit(e);
+      } catch (err) { /* ignore single mirror tick error */ }
     }
     this.projectiles.update(dt);
     for (let i = this.enemies.length - 1; i >= 0; i--) { const e = this.enemies[i]; if (!e.alive && e.deadT > 2.5) { this._removeLaser(e); if (!e.rootDetached) { this.ctx.scene.remove(e.root); this._disposeMesh(e.root); } this.byId.delete(e.id); this.enemies.splice(i, 1); } }
@@ -427,7 +435,8 @@ export class EnemyManager {
     const nav = this.ctx.nav, b = e.body; e.pathT -= dt;
     target = this._approachPoint(e, dt, target, _goal);
     const stale = !e.path || e.pathI >= e.path.length || (e.pathT <= 0 && (!e.pathGoal || e.pathGoal.distanceTo(target) > 3.5 || !e.path.complete));
-    if (stale && (e.pathT <= 0 || !e.path)) {
+    if (stale && (e.pathT <= 0 || !e.path) && this._pathsLeft > 0) {
+      this._pathsLeft--;
       e.pathT = 0.8 + rand(0, 0.6); const p = nav.findPath(b.pos, target);
       if (p && p.length) { e.path = p; e.pathI = 0; e.pathGoal = target.clone(); while (e.pathI < p.length - 1 && Math.hypot(p[e.pathI].x - b.pos.x, p[e.pathI].z - b.pos.z) < 0.7 && Math.abs(p[e.pathI].y - b.pos.y) < 1) e.pathI++; }
     }
