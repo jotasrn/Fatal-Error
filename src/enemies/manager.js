@@ -545,7 +545,7 @@ export class EnemyManager {
       else if (dist > T.stop * e.keepMul) { this._follow(e, dt, pp, T.speed * 0.8); this._shoot(e, dt, pc, P); e.yawT = yawTo; return; }
       // if the player is up on something, keep working the route up rather than strafing along
       // a ramp edge and falling off it; they still shoot on the way
-      else if (Math.abs(dy) > 1.2) { this._follow(e, dt, pp, T.speed * 0.85); this._shoot(e, dt, pc); e.yawT = yawTo; return; }
+      else if (Math.abs(dy) > 1.2) { this._follow(e, dt, pp, T.speed * 0.85); this._shoot(e, dt, pc, P); e.yawT = yawTo; return; }
       else if (dist < T.keep * e.keepMul) { mx = -nx; mz = -nz; }
       else if (dist > T.range * 0.7 && T.weapon === 'shotgun') { mx = nx; mz = nz; }
       else { e.strafeT -= dt; if (e.strafeT <= 0) { e.strafeT = rand(0.8, 2); e.strafeDir *= -1; } mx = -nz * e.strafeDir; mz = nx * e.strafeDir; }

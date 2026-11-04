@@ -12,12 +12,9 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const Hyperswarm = require('hyperswarm');
 
-// prefer the discrete GPU on dual-GPU laptops, and keep the game running at full speed when the
-// window is not focused (a host that alt-tabs must not stall everyone else's match)
-app.commandLine.appendSwitch('force_high_performance_gpu');
-app.commandLine.appendSwitch('disable-renderer-backgrounding');
-app.commandLine.appendSwitch('disable-background-timer-throttling');
-app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+// No GPU/compositor command-line switches: forcing the discrete GPU (1.0.4-1.0.8) made machines
+// whose monitor hangs off the integrated GPU render on one adapter and copy every frame to the
+// other, which shows up as stutter and a laggy mouse. Chromium's own adapter choice is used again.
 
 function logLine(msg) {
   try {
@@ -27,6 +24,7 @@ function logLine(msg) {
   } catch { /* logging must never crash the game */ }
 }
 ipcMain.on('log:error', (_e, msg) => logLine('renderer ' + msg));
+ipcMain.on('log:info', (_e, msg) => logLine('info ' + msg));
 process.on('uncaughtException', (err) => logLine('main ' + (err && err.stack || err)));
 
 let win = null;
@@ -121,6 +119,9 @@ function createWindow() {
 
 app.on('child-process-gone', (_e, d) => logLine('child-process-gone ' + JSON.stringify(d)));
 app.whenReady().then(() => {
+  // record which GPU(s) this machine has and what Chromium enabled, for diagnosing performance
+  app.getGPUInfo('basic').then((info) => logLine('gpu ' + JSON.stringify((info && info.gpuDevice) || info))).catch(() => {});
+  try { logLine('gpu-features ' + JSON.stringify(app.getGPUFeatureStatus())); } catch { /* ignore */ }
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
