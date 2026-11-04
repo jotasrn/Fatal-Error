@@ -1,16 +1,22 @@
-// First-person player: movement (sprint/slide/wall-jump/mantle/air dash), swing-grapple, camera feel, health, weapons.
+// First-person player core: movement (sprint/slide/wall-jump/mantle/air dash), camera feel, health,
+// weapon switching and the per-frame update loop. The shop, grenades, rockets and grapple each live
+// in their own module and are mixed onto the prototype at the bottom of this file.
 import * as THREE from 'three';
-import { makeBody } from './physics.js';
-import { makeInkMaterial, INK } from './render.js';
-import { Revolver, Shotgun, Rifle, Sniper, Bazooka, Katana } from './weapons.js';
-// the dome shell and anything else flagged this way cannot be hooked
-const NO_GRAPPLE = (b) => !!b.data.noGrapple;
-const STAM_FIRE = 0.09, STAM_DRAIN = 0.08, STAM_GROUND = 0.4, STAM_AIR = 0.2, STAM_MIN = 0.18, STAM_PAUSE = 0.5, PARRY_WINDOW = 0.55;
-import { clamp, damp, rand, Spring, alignYAxis } from './util.js';
-import { audio } from './audio.js';
+import { makeBody } from '../physics.js';
+import { makeInkMaterial, INK } from '../render.js';
+import { Revolver, Shotgun, Rifle, Sniper, Bazooka, Katana } from '../weapons/index.js';
+import { clamp, damp, rand, Spring } from '../util.js';
+import { audio } from '../audio.js';
+import {
+  G, WALK, SPRINT, CROUCH, ACCEL, FRICTION, AIR_ACCEL, AIR_CAP, JUMP,
+  STAND_H, CROUCH_H, EYE_STAND, EYE_CROUCH,
+  STAM_DRAIN, STAM_GROUND, STAM_AIR, STAM_MIN, STAM_PAUSE, PARRY_WINDOW,
+} from './constants.js';
+import { ShopMixin } from './shop.js';
+import { GrenadeMixin } from './grenades.js';
+import { RocketMixin } from './rockets.js';
+import { GrappleMixin } from './grapple.js';
 
-const G = 26, WALK = 6.6, SPRINT = 10.6, CROUCH = 3.6, ACCEL = 140, FRICTION = 8, AIR_ACCEL = 36, AIR_CAP = 7.5, JUMP = 9.6;
-const STAND_H = 1.75, CROUCH_H = 1.05, EYE_STAND = 1.6, EYE_CROUCH = 0.88;
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _d = new THREE.Vector3(), _fwd = new THREE.Vector3(), _right = new THREE.Vector3(), _down = new THREE.Vector3(0, -1, 0);
 
 export class Player {
@@ -58,8 +64,6 @@ export class Player {
     this.switchTo(0, true); this.rig.visible = true; this.eyeH = EYE_STAND; this.grenades = 3; this.clearNades(); this.clearRockets();
     if (this.ctx.hud) { this.ctx.hud.setMoney(this.money); this.ctx.hud.setArmor(0, this.maxArmor); }
   }
-  clearNades() { for (const n of this.nades) this.ctx.scene.remove(n.mesh); this.nades.length = 0; }
-  clearRockets() { for (const r of this.rockets) this.ctx.scene.remove(r.mesh); this.rockets.length = 0; }
   get isBlocking() { return this.weapon.kind === 'katana' && this.weapon.blocking; }
   aimDir(spread = 0) { const d = this.forward.clone(); if (spread > 0) { d.addScaledVector(this.right, rand(-spread, spread)); d.y += rand(-spread, spread); d.normalize(); } return d; }
   recoil(p, y) { this.pitch = clamp(this.pitch + p * 0.55, -1.5, 1.5); this.recoilPitch.kick(p * 22); this.recoilYaw.kick(y * 30); }
@@ -78,110 +82,6 @@ export class Player {
         break;
       }
     }
-  }
-  addCash(amount, reason = '') {
-    this.money += amount;
-    if (this.ctx.hud) {
-      this.ctx.hud.setMoney(this.money);
-      this.ctx.hud.flashMoney(amount, reason);
-    }
-  }
-  spendCash(amount, reason = '') {
-    if (this.money < amount) return false;
-    this.money -= amount;
-    if (this.ctx.hud) {
-      this.ctx.hud.setMoney(this.money);
-      this.ctx.hud.flashMoney(-amount, reason);
-    }
-    return true;
-  }
-  buyItem(key) {
-    const PRICES = {
-      shotgun: 600,
-      rifle: 900,
-      sniper: 1200,
-      bazooka: 1800,
-      armor_light: 300,
-      armor_heavy: 600,
-      ammo: 150,
-      grenades: 200,
-    };
-    const cost = PRICES[key];
-    if (cost == null) return false;
-    if (this.money < cost) {
-      audio.empty();
-      if (this.ctx.hud) this.ctx.hud.message('Saldo Insuficiente!', `Necessário $${cost}`, 1.2);
-      return false;
-    }
-    if (key === 'shotgun') {
-      if (this.weapons[1].owned) {
-        this.weapons[1].addAmmo(this.weapons[1].maxReserve);
-        this.spendCash(cost, 'Munição Escopeta');
-      } else {
-        this.spendCash(cost, 'Escopeta Adquirida');
-        this.weapons[1].owned = true;
-        this.switchTo(1);
-      }
-    } else if (key === 'rifle') {
-      if (this.weapons[2].owned) {
-        this.weapons[2].addAmmo(this.weapons[2].maxReserve);
-        this.spendCash(cost, 'Munição Rifle');
-      } else {
-        this.spendCash(cost, 'Rifle Adquirido');
-        this.weapons[2].owned = true;
-        this.switchTo(2);
-      }
-    } else if (key === 'sniper') {
-      if (this.weapons[3].owned) {
-        this.weapons[3].addAmmo(this.weapons[3].maxReserve);
-        this.spendCash(cost, 'Munição Sniper');
-      } else {
-        this.spendCash(cost, 'Sniper Adquirida');
-        this.weapons[3].owned = true;
-        this.switchTo(3);
-      }
-    } else if (key === 'bazooka') {
-      if (this.weapons[4].owned) {
-        this.weapons[4].addAmmo(this.weapons[4].maxReserve);
-        this.spendCash(cost, 'Foguetes Bazuca');
-      } else {
-        this.spendCash(cost, 'Bazuca Adquirida');
-        this.weapons[4].owned = true;
-        this.switchTo(4);
-      }
-    } else if (key === 'armor_light') {
-      if (this.armor >= this.maxArmor) {
-        if (this.ctx.hud) this.ctx.hud.message('Colete Cheio!', 'Sua blindagem já está no máximo', 1.2);
-        audio.empty();
-        return false;
-      }
-      this.spendCash(cost, 'Colete Leve (+50)');
-      this.armor = Math.min(this.maxArmor, this.armor + 50);
-      if (this.ctx.hud) this.ctx.hud.setArmor(this.armor, this.maxArmor);
-    } else if (key === 'armor_heavy') {
-      if (this.armor >= this.maxArmor) {
-        if (this.ctx.hud) this.ctx.hud.message('Colete Cheio!', 'Sua blindagem já está no máximo', 1.2);
-        audio.empty();
-        return false;
-      }
-      this.spendCash(cost, 'Colete Pesado (100)');
-      this.armor = this.maxArmor;
-      if (this.ctx.hud) this.ctx.hud.setArmor(this.armor, this.maxArmor);
-    } else if (key === 'ammo') {
-      this.spendCash(cost, 'Munição Completa');
-      this.addAmmoAll(1.0);
-      this.grenades = Math.min(this.maxGrenades, this.grenades + 1);
-    } else if (key === 'grenades') {
-      if (this.grenades >= this.maxGrenades) {
-        if (this.ctx.hud) this.ctx.hud.message('Mochila Cheia!', 'Você já tem o máximo de granadas', 1.2);
-        audio.empty();
-        return false;
-      }
-      this.spendCash(cost, '+2 Granadas');
-      this.grenades = Math.min(this.maxGrenades, this.grenades + 2);
-    }
-    audio.buy();
-    return true;
   }
   switchTo(i, silent = false) {
     if (i < 0 || i >= this.weapons.length) return;
@@ -383,198 +283,6 @@ export class Player {
     ctx.hud.setAds(this.weapon.isGun && this.weapon.aimAmt > 0.55);
     ctx.hud.setScope(!!this.weapon.scope && this.weapon.aimAmt > 0.62);
   }
-  // ---- grenades: a lobbed ink bomb with a short fuse and a big orange blast ----
-  // where a throw starts and how fast it leaves, for a given charge (0 = flick, 1 = full wind-up)
-  _nadeLaunch(charge, pos, vel) {
-    pos.copy(this.eye).addScaledVector(this.right, 0.25).addScaledVector(this.forward, 0.6); pos.y -= 0.15;
-    vel.copy(this.forward).multiplyScalar(9 + 20 * charge).addScaledVector(this.body.vel, 0.5); vel.y += 3.5 + 2.5 * charge;
-  }
-  throwGrenade(remote = null, charge = 0) {
-    const ctx = this.ctx; let pos, vel;
-    if (remote) { pos = new THREE.Vector3().fromArray(remote.pos); vel = new THREE.Vector3().fromArray(remote.vel); }
-    else {
-      this.grenades--; this.nadeCd = 0.55; pos = new THREE.Vector3(); vel = new THREE.Vector3(); this._nadeLaunch(charge, pos, vel);
-      this.weapon.recoil.kick(-0.4, 0.5, 1.2); this.weapon.recoilRot.kick(-3, 0, -1.5); audio.grappleFire(); ctx.input.rumble(0.2, 0.4, 50);
-      if (this.onThrow) this.onThrow({ pos: pos.toArray().map((v) => +v.toFixed(2)), vel: vel.toArray().map((v) => +v.toFixed(2)) });
-    }
-    const g = new THREE.Group();
-    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6), makeInkMaterial({ ink: INK.BLACK })));
-    const pin = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.02, 4, 8), makeInkMaterial({ ink: INK.ORANGE })); pin.position.y = 0.2; g.add(pin);
-    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.1, 6), makeInkMaterial({ ink: INK.ORANGE })); cap.position.y = 0.17; g.add(cap);
-    g.position.copy(pos); ctx.scene.add(g);
-    this.nades.push({ mesh: g, pos, vel, ang: new THREE.Vector3(rand(-6, 6), rand(-6, 6), rand(-6, 6)), fuse: 1.7, mine: !remote, rest: false, tick: 0 });
-  }
-  updateNadeArc(charge) {
-    if (!this._arc) {
-      const dots = []; const mat = makeInkMaterial({ ink: INK.BLACK, fill: true });
-      for (let i = 0; i < 26; i++) { const m = new THREE.Mesh(new THREE.SphereGeometry(0.045, 6, 5), mat); m.visible = false; this.ctx.scene.add(m); dots.push(m); }
-      const mark = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.05, 5, 18), makeInkMaterial({ ink: INK.ORANGE })); mark.rotation.x = Math.PI / 2; mark.visible = false; this.ctx.scene.add(mark);
-      this._arc = { dots, mark };
-    }
-    const A = this._arc;
-    if (charge < 0) { if (A.shown) { for (const d of A.dots) d.visible = false; A.mark.visible = false; A.shown = false; } return; }
-    A.shown = true; const world = this.ctx.world; this._nadeLaunch(charge, _ap, _av); let n = 0; const step = 1 / 30;
-    for (let i = 0; i < 52 && n < A.dots.length; i++) {
-      _av.y -= 22 * step; _aprev.copy(_ap); _ap.addScaledVector(_av, step); _ad.subVectors(_ap, _aprev); const len = _ad.length();
-      if (len > 1e-6) { _ad.divideScalar(len); const hit = world.raycast(_aprev, _ad, len + 0.16); if (hit) { _ap.copy(hit.point).addScaledVector(hit.normal, 0.16); const vn = _av.dot(hit.normal); if (vn < 0) { _av.addScaledVector(hit.normal, -1.45 * vn); _av.multiplyScalar(0.55); } if (_av.length() < 1.2 && hit.normal.y > 0.5) break; } }
-      if (i % 2 === 0 && i >= 6) { const d = A.dots[n++]; d.position.copy(_ap); d.visible = true; const k = 0.8 + charge * 0.6; d.scale.setScalar(k); }
-    }
-    for (let i = n; i < A.dots.length; i++) A.dots[i].visible = false;
-    A.mark.position.copy(_ap); A.mark.position.y += 0.02; A.mark.visible = true; A.mark.scale.setScalar(0.8 + charge * 0.5);
-  }
-  updateNades(dt) {
-    const ctx = this.ctx, world = ctx.world;
-    for (let i = this.nades.length - 1; i >= 0; i--) {
-      const n = this.nades[i]; n.fuse -= dt; n.tick += dt;
-      if (!n.rest) {
-        n.vel.y -= 22 * dt; _v2.copy(n.pos); n.pos.addScaledVector(n.vel, dt);
-        _d.subVectors(n.pos, _v2); const len = _d.length();
-        if (len > 1e-6) {
-          _d.divideScalar(len); const hit = world.raycast(_v2, _d, len + 0.16);
-          if (hit) {
-            n.pos.copy(hit.point).addScaledVector(hit.normal, 0.16);
-            const vn = n.vel.dot(hit.normal); if (vn < 0) { n.vel.addScaledVector(hit.normal, -1.45 * vn); n.vel.multiplyScalar(0.55); n.ang.multiplyScalar(0.6); audio.shell(); }
-            if (n.vel.length() < 1.2 && hit.normal.y > 0.5) { n.rest = true; n.vel.set(0, 0, 0); }
-          }
-        }
-        n.mesh.rotation.x += n.ang.x * dt; n.mesh.rotation.y += n.ang.y * dt; n.mesh.rotation.z += n.ang.z * dt;
-        n.mesh.position.copy(n.pos);
-      }
-      // the fuse sparks faster as it runs out
-      if (Math.floor(n.tick * (n.fuse < 0.8 ? 14 : 5)) !== Math.floor((n.tick - dt) * (n.fuse < 0.8 ? 14 : 5))) ctx.effects.strokeBurst(n.pos.clone().add(_v.set(0, 0.22, 0)), INK.ORANGE, 2, 2.5, { life: 0.12, size: 0.02 });
-      if (n.fuse <= 0) { this.explodeNade(n); ctx.scene.remove(n.mesh); this.nades.splice(i, 1); }
-    }
-  }
-  explodeNade(n) {
-    const ctx = this.ctx, R = 6.4, c = n.pos.clone(); c.y += 0.25;
-    ctx.effects.boom(c, R); audio.explosion(c); ctx.input.rumble(0.9, 0.9, 220);
-    // bots: the thrower's client reports the damage (host applies it; a client's report is forwarded)
-    if (n.mine) ctx.enemies.blastEnemies(c, R, 120, null);
-    if (n.mine && ctx.blastBreakables) ctx.blastBreakables(c, R);
-    // me: my own grenade, or anyone else's that went off on my screen
-    const d = this.center.distanceTo(c);
-    if (this.alive && d < R * 0.95) { this.takeDamage(10 + 34 * (1 - d / (R * 0.95)), c); this.knockback(_v.subVectors(this.center, c).normalize(), 9); }
-    // other players in a versus match, decided by the thrower only
-    if (n.mine && ctx.targets) for (const t of ctx.targets()) { if (t.isLocal || !t.alive || (ctx.canHurt && !ctx.canHurt(t))) continue; const dd = t.center.distanceTo(c); if (dd < R * 0.95) t.takeDamage(12 + 50 * (1 - dd / (R * 0.95)), c); }
-  }
-  // ---- rockets: Bazuca projectile with rocket trail, high damage and AoE splash ----
-  fireRocket(remote = null) {
-    const ctx = this.ctx;
-    let pos, dir, speed;
-    if (remote) {
-      pos = new THREE.Vector3().fromArray(remote.pos);
-      dir = new THREE.Vector3().fromArray(remote.dir);
-      speed = remote.speed || 52;
-    } else {
-      pos = new THREE.Vector3();
-      pos.copy(this.eye).addScaledVector(this.forward, 0.7).addScaledVector(this.right, 0.16);
-      pos.y -= 0.12;
-      dir = this.aimDir(0.005);
-      speed = 52;
-      if (this.onRocket) {
-        this.onRocket({
-          pos: pos.toArray().map((v) => +v.toFixed(2)),
-          dir: dir.toArray().map((v) => +v.toFixed(3)),
-          speed
-        });
-      }
-    }
-    const g = new THREE.Group();
-    const bodyGeo = new THREE.CylinderGeometry(0.048, 0.048, 0.44, 7);
-    bodyGeo.rotateX(Math.PI / 2);
-    g.add(new THREE.Mesh(bodyGeo, makeInkMaterial({ ink: INK.BLUE })));
-    const coneGeo = new THREE.ConeGeometry(0.06, 0.2, 7);
-    coneGeo.rotateX(Math.PI / 2);
-    const coneMesh = new THREE.Mesh(coneGeo, makeInkMaterial({ ink: INK.ORANGE, fill: true }));
-    coneMesh.position.z = 0.3;
-    g.add(coneMesh);
-    const finMat = makeInkMaterial({ ink: INK.BLACK, fill: true });
-    for (let i = 0; i < 4; i++) {
-      const fin = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.09, 0.14), finMat);
-      fin.rotation.z = (i * Math.PI) / 2;
-      fin.position.set(0, 0, -0.16);
-      g.add(fin);
-    }
-    g.position.copy(pos);
-    g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
-    ctx.scene.add(g);
-    this.rockets.push({ mesh: g, pos, prev: pos.clone(), dir, speed, mine: !remote, life: 5.0, trailT: 0 });
-  }
-  updateRockets(dt) {
-    const ctx = this.ctx, world = ctx.world;
-    for (let i = this.rockets.length - 1; i >= 0; i--) {
-      const r = this.rockets[i];
-      r.life -= dt;
-      r.trailT += dt;
-      if (r.life <= 0) {
-        this.explodeRocket(r.pos, r.mine);
-        ctx.scene.remove(r.mesh);
-        this.rockets.splice(i, 1);
-        continue;
-      }
-      r.prev.copy(r.pos);
-      r.pos.addScaledVector(r.dir, r.speed * dt);
-      r.mesh.position.copy(r.pos);
-      r.mesh.rotateZ(14 * dt);
-      if (r.trailT >= 0.02) {
-        r.trailT = 0;
-        _v.copy(r.pos).addScaledVector(r.dir, -0.28);
-        ctx.effects.strokeBurst(_v, INK.ORANGE, 2, 2.5, { life: 0.1, size: 0.028, gravity: 0 });
-        ctx.effects.smoke(_v, r.dir.clone().negate(), 1);
-      }
-      _d.subVectors(r.pos, r.prev);
-      const segLen = _d.length();
-      if (segLen > 1e-5) {
-        _d.divideScalar(segLen);
-        const hitW = world.raycast(r.prev, _d, segLen, (b) => !!b.data.seeThrough);
-        const hitE = ctx.enemies.raycast(r.prev, _d, segLen);
-        const hitP = ctx.raycastPlayers ? ctx.raycastPlayers(r.prev, _d, segLen) : null;
-        let hit = false, hitPoint = null;
-        if (hitE && (!hitW || hitE.dist < hitW.dist)) {
-          hit = true; hitPoint = hitE.point;
-        } else if (hitP && (!hitW || hitP.dist < hitW.dist)) {
-          hit = true; hitPoint = hitP.point;
-        } else if (hitW) {
-          hit = true; hitPoint = hitW.point;
-        }
-        if (hit) {
-          this.explodeRocket(hitPoint, r.mine);
-          ctx.scene.remove(r.mesh);
-          this.rockets.splice(i, 1);
-          continue;
-        }
-      }
-    }
-  }
-  explodeRocket(point, mine) {
-    const ctx = this.ctx, R = 6.2;
-    ctx.effects.boom(point, R);
-    audio.explosion(point);
-    ctx.effects.shakeAmt += 0.35;
-    ctx.input.rumble(0.9, 0.9, 200);
-    if (mine) {
-      ctx.enemies.blastEnemies(point, R, 220, null);
-      if (ctx.blastBreakables) ctx.blastBreakables(point, R);
-    }
-    const dist = this.center.distanceTo(point);
-    if (this.alive && dist < R) {
-      const fall = 1 - dist / R;
-      const selfDmg = Math.min(26, 65 * fall);
-      this.takeDamage(selfDmg, point);
-      _v.subVectors(this.center, point).normalize();
-      this.knockback(_v, 18 * fall);
-    }
-    if (mine && ctx.targets) {
-      for (const t of ctx.targets()) {
-        if (t.isLocal || !t.alive || (ctx.canHurt && !ctx.canHurt(t))) continue;
-        const dd = t.center.distanceTo(point);
-        if (dd < R) {
-          const fall = 1 - dd / R;
-          t.takeDamage(40 + 130 * fall, point);
-        }
-      }
-    }
-  }
   _weaponState(sprinting, aiming, hs) {
     const inp = this.ctx.input, b = this.body;
     return { fire: inp.down('fire'), firePressed: inp.pressed('fire'), aim: aiming || (inp.down('aim') && this.weapon.kind === 'katana'), reloadPressed: inp.pressed('reload'), meleePressed: inp.pressed('melee') && this.weapon.kind === 'katana',
@@ -599,97 +307,6 @@ export class Player {
     const hw = b.halfW; if (world.overlapsAABB({ x: _v2.x - hw, y: top.point.y + 0.08, z: _v2.z - hw }, { x: _v2.x + hw, y: top.point.y + CROUCH_H, z: _v2.z + hw })) return;
     b.vel.y = Math.min(11, Math.sqrt(2 * G * (dy + 0.45))); b.vel.x = fwd.x * 3.2; b.vel.z = fwd.z * 3.2; this.mantleCd = 0.7; audio.mantle(); this.landDip.kick(-2.5); this.kickFov(1.5);
   }
-  _handPos(out) { out.copy(this.eye).addScaledVector(this.right, -0.55).addScaledVector(this.forward, 0.9); out.y -= 0.42; return out; }
-  // What the crosshair is on wins. Enemies and rings only get a small amount of assist, and
-  // only when they are genuinely near the aim line and not behind whatever you are pointing at,
-  // so the hook stops jumping to rings above your head that you never aimed at.
-  _findGrappleTarget() {
-    const ctx = this.ctx, o = this.eye, d = this.forward, maxD = 75;
-    const hitW = ctx.world.raycast(o, d, maxD, NO_GRAPPLE);
-    const wallDist = hitW ? hitW.dist : maxD;
-    // exact hit on an enemy
-    const hitE = ctx.enemies.raycast(o, d, Math.min(50, wallDist + 0.5));
-    if (hitE) return { point: hitE.point.clone(), enemy: hitE.enemy, dist: hitE.dist };
-    // things that move and can be swung from (paper planes): a forgiving sphere test
-    let mBest = null, mLat = Infinity;
-    for (const mv of ctx.level.grappleMovers || []) {
-      _v.subVectors(mv.mesh.position, o); const t = _v.dot(d); if (t < 2 || t > Math.min(maxD, wallDist + 1)) continue;
-      const lat = Math.sqrt(Math.max(0, _v.lengthSq() - t * t)); if (lat < mv.radius + 0.3 + t * 0.012 && lat < mLat) { mLat = lat; mBest = { point: mv.mesh.position.clone(), mover: mv, dist: t }; }
-    }
-    if (mBest) return mBest;
-    // near miss on an enemy: forgiving, but it has to be roughly where you are pointing
-    let best = null, bestLat = Infinity;
-    for (const e of ctx.enemies.enemies) {
-      if (!e.alive || e.state === 'spawn') continue;
-      _v.subVectors(e.center, o); const t = _v.dot(d);
-      if (t < 1.5 || t > Math.min(45, wallDist + 1.5)) continue;
-      const lat = Math.sqrt(Math.max(0, _v.lengthSq() - t * t));
-      const tol = 1.1 + t * 0.06;                      // a few degrees of help, no more
-      if (lat > tol || lat >= bestLat) continue;
-      if (!ctx.world.hasLineOfSight(o, e.center)) continue;
-      best = { point: e.center.clone(), enemy: e, dist: t }; bestLat = lat;
-    }
-    if (best) return best;
-    // grapple rings: only a slim amount of magnetism, and never through a wall
-    let ring = null, ringT = Infinity, ringLat = Infinity;
-    for (const r of ctx.level.rings) {
-      _v.subVectors(r, o); const t = _v.dot(d); if (t < 2 || t > Math.min(maxD, wallDist + 1.5)) continue;
-      const lat = Math.sqrt(Math.max(0, _v.lengthSq() - t * t));
-      if (lat > 0.8 + t * 0.02) continue;
-      if (lat < ringLat) { ring = r; ringT = t; ringLat = lat; }
-    }
-    if (ring) return { point: ring.clone(), enemy: null, dist: ringT };
-    if (hitW) return { point: hitW.point.clone().addScaledVector(hitW.normal, 0.12), enemy: null, dist: hitW.dist };
-    return null;
-  }
-  _fireGrapple() {
-    if (this.grapStam < STAM_MIN) { audio.winded(); this.ctx.hud.tip('O gancho precisa respirar', 0.9); return; }
-    const t = this._findGrappleTarget(); if (!t) { audio.empty(); return; }
-    this.grapStam -= STAM_FIRE; this.stamPause = STAM_PAUSE;
-    const g = this.grapple; g.state = 'fly'; g.anchor.copy(t.point); this._handPos(g.from); g.hook.copy(g.from); g.flyT = 0; g.flyDur = clamp(t.dist / 110, 0.04, 0.6); g.enemy = t.enemy || null; g.mover = t.mover || null; g.t = 0;
-    audio.grappleFire(); this.ctx.input.rumble(0.15, 0.4, 40); this.weapon.recoil.kick(-0.3, 0.2, 0.5);
-  }
-  detachGrapple(boost) {
-    const g = this.grapple; if (g.state === 'idle') return; const was = g.state; g.state = 'idle'; g.cd = 0.12; g.enemy = null; g.mover = null; this.stamPause = STAM_PAUSE;
-    this.rope.visible = false; this.hookMesh.visible = false; audio.reelLoop(false); this.ctx.hud.grappleTarget(0);
-    if (was === 'on') { const b = this.body; if (boost) { b.vel.y = Math.max(b.vel.y, 0) + 8; b.vel.x *= 1.12; b.vel.z *= 1.12; audio.jump(); this.kickFov(3); } else { b.vel.y += 2.5; audio.grappleRelease(); } }
-  }
-  _updateGrapple(dt) {
-    const g = this.grapple, inp = this.ctx.input, b = this.body, ctx = this.ctx; g.cd -= dt;
-    if (g.state === 'idle') {
-      if (inp.pressed('grapple') && g.cd <= 0) this._fireGrapple();
-      g.t += dt; if (g.t > 0.08) { g.t = 0; ctx.hud.grappleTarget(this._findGrappleTarget() ? 1 : 0); }
-    } else if (g.state === 'fly') {
-      if (g.mover) g.anchor.copy(g.mover.mesh.position);
-      g.flyT += dt; const f = Math.min(1, g.flyT / g.flyDur); g.hook.lerpVectors(g.from, g.anchor, f);
-      if (f >= 1) {
-        if (g.enemy) { if (g.enemy.alive) { ctx.enemies.yank(g.enemy, this.center); ctx.game.addScore(30, 'Puxão'); audio.grappleHit(); ctx.input.rumble(0.5, 0.5, 90); } this.detachGrapple(false); }
-        else { g.state = 'on'; g.len = Math.max(1.5, this.center.distanceTo(g.anchor) * 0.94); g.blockedT = 0; g.t = 0; g.swingT = 0; audio.grappleHit(); audio.reelLoop(true); ctx.hud.grappleTarget(2); ctx.input.rumble(0.3, 0.6, 60); if (b.onGround) { b.vel.y = Math.max(b.vel.y, 5); b.onGround = false; } }
-      }
-    } else if (g.state === 'on') {
-      if (g.mover) g.anchor.copy(g.mover.mesh.position);
-      g.hook.copy(g.anchor); g.swingT += dt; const c = this.center; _d.subVectors(g.anchor, c); const dist = _d.length(); if (dist > 0.01) _d.divideScalar(dist);
-      const reeling = inp.down('grapple'); const vAlong = b.vel.dot(_d);
-      if (reeling) { g.len = Math.max(1.5, g.len - 14 * dt); if (vAlong < 22) b.vel.addScaledVector(_d, 42 * dt); }
-      else {
-        if (vAlong < 6) b.vel.addScaledVector(_d, 3 * dt);
-        // swing pump: holding forward adds energy along the view direction (Spider-Man style)
-        if (this._mv.y > 0.3 && c.y < g.anchor.y - 1) { _v2.copy(this.forward); _v2.y = 0; if (_v2.lengthSq() > 0.01) { _v2.normalize(); b.vel.addScaledVector(_v2, 10 * dt); } }
-      }
-      if (dist > g.len) {
-        const vn = b.vel.dot(_d); if (vn < 0) b.vel.addScaledVector(_d, -vn);
-        const excess = Math.min(dist - g.len, 0.35) * 0.85; b.pos.addScaledVector(_d, excess);
-        if (ctx.world.overlapsBody(b)) b.pos.addScaledVector(_d, -excess);
-      }
-      if (b.onGround && reeling && _d.y > 0.2) { b.vel.y = Math.max(b.vel.y, 4.5); b.onGround = false; }
-      g.t += dt; if (g.t > 0.15) { g.t = 0; if (!ctx.world.hasLineOfSight(this.eye, g.anchor)) g.blockedT += 0.15; else g.blockedT = 0; }
-      if (inp.pressed('grapple') || dist < 1.3 || g.blockedT > 0.3 || dist > 90 || (b.onGround && g.swingT > 0.6 && !reeling)) this.detachGrapple(dist < 1.3);
-    }
-    if (g.state !== 'idle') {
-      this._handPos(_v3); alignYAxis(this.rope, _v3, g.hook, 0.008); this.rope.visible = true;
-      this.hookMesh.visible = true; this.hookMesh.position.copy(g.hook); this.hookMesh.quaternion.copy(this.rope.quaternion);
-    }
-  }
   _updateCamera(dt) {
     const b = this.body, cam = this.camera, mv = this._mv;
     const targetEye = this.crouching ? EYE_CROUCH : EYE_STAND; this.eyeH = this.alive ? damp(this.eyeH, targetEye, 14, dt) : this.eyeH;
@@ -708,4 +325,7 @@ export class Player {
     this.hurtFx = damp(this.hurtFx, 0, 3, dt); this.flashFx = damp(this.flashFx, 0, 10, dt); this.speed = sp3;
   }
 }
-const _ap = new THREE.Vector3(), _av = new THREE.Vector3(), _ad = new THREE.Vector3(), _aprev = new THREE.Vector3();
+
+// The player's feature subsystems live in their own modules and are mixed onto the prototype here,
+// so every `this.buyItem(...)`, `this.throwGrenade(...)`, `this.fireRocket(...)`, `this._fireGrapple(...)` call resolves.
+Object.assign(Player.prototype, ShopMixin, GrenadeMixin, RocketMixin, GrappleMixin);

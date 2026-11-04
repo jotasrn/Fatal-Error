@@ -3,10 +3,10 @@
 =====================================================
 
 1. Link principal para seus colegas abrirem no navegador:
-   http://10.63.30.10:8910
+   http://192.168.1.4:8910
 
 2. Outros enderecos de rede disponíveis (se necessario):
-   http://172.29.128.1:8910
+   http://26.20.192.171:8910
 
 COMO JOGAR JUNTOS:
 - Você joga diretamente no aplicativo aberto no seu PC.

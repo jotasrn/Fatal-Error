@@ -4,7 +4,7 @@
 // whether it is shooting at a bot or a friend.
 import * as THREE from 'three';
 import { makeInkMaterial, setFill, INK } from './render.js';
-import { buildHumanoid, buildWeaponProp } from './enemies.js';
+import { buildHumanoid, buildWeaponProp } from './enemies/index.js';
 import { clamp, damp, angleLerp, wrapAngle } from './util.js';
 
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
