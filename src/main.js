@@ -11,7 +11,6 @@ import { Effects } from './effects.js';
 import { EnemyManager, BOSSES } from './enemies/index.js';
 import { BotBatcher } from './enemies/batch.js';
 import { Minimap } from './minimap.js';
-import { Onoma } from './onoma.js';
 import { Player } from './player/index.js';
 import { RemotePlayer, encodeLocal } from './players.js';
 import { Net } from './net.js';
@@ -28,7 +27,7 @@ let mapKey = knownMap(localStorage.getItem('doodle_map') || 'district');
 let level = buildLevel(R.scene, world, mapKey, { arena: false });
 let nav = new NavGrid(world, level.bounds, 1).build();
 let loadedKey = mapKey, arenaLoaded = false;
-let minimap = null, onoma = null; // created with the HUD below
+let minimap = null; // created with the HUD below
 audio.setTune(mapKey === 'mexico' ? 'mexico' : 'district');
 // the map in play: solo uses the picked map, a match uses the host's choice; a rebuild wipes broken props
 function setLevel(key, on, force = false) {
@@ -36,16 +35,14 @@ function setLevel(key, on, force = false) {
   for (const m of level.meshes) { R.scene.remove(m); if (m.geometry) m.geometry.dispose(); if (m.traverse) m.traverse((o) => { if (o !== m && o.geometry) o.geometry.dispose(); }); }
   level.animated.length = 0; world.clear();
   level = buildLevel(R.scene, world, key, { arena: on }); nav = new NavGrid(world, level.bounds, 1).build();
-  ctx.level = level; ctx.nav = nav; if (minimap) minimap.setLevel(level, world); if (onoma) onoma.clear(); if (window.__game) { window.__game.level = level; window.__game.nav = nav; }
+  ctx.level = level; ctx.nav = nav; if (minimap) minimap.setLevel(level, world); if (window.__game) { window.__game.level = level; window.__game.nav = nav; }
   audio.setTune(key === 'mexico' ? 'mexico' : 'district');
 }
 const setArena = (on) => setLevel(knownMap(net.active ? (lobby.map || mapKey) : mapKey), on);
 const input = new Input(canvas);
 const hud = new HUD(document.getElementById('hud'));
 minimap = new Minimap(hud.root); minimap.setLevel(level, world);
-onoma = new Onoma(hud.root, R.camera); onoma.enabled = R.style === 'hq';
 const effects = new Effects(R.scene, world);
-{ const ex = effects.explosion.bind(effects); effects.explosion = (pos, ...rest) => { if (onoma) onoma.pop('KABOOM!', pos, 1.35); return ex(pos, ...rest); }; }
 const ctx = { scene: R.scene, camera: R.camera, world, level, nav, input, hud, effects, audio, renderer: R };
 
 // ---------------- persistent bits ----------------
@@ -265,7 +262,6 @@ enemies.onClientHit = (e, amount, info) => {
   }
 };
 enemies.onKill = (e, info, over) => {
-  if (onoma && e.center) onoma.kill(e.center, info && info.crit);
   if (net.active && net.isHost) {
     net.send('ekill', {
       id: e.id,
@@ -701,7 +697,6 @@ function settingsHTML() {
     <div class="settings-grid">
       <label class="settings-row">Sensibilidade do Mouse <input type="range" id="setSens" min="25" max="250" step="5" value="${settings.sens}"><b id="setSensV">${settings.sens}%</b></label>
       <label class="settings-row"><input type="checkbox" id="setInv" ${settings.invert ? 'checked' : ''}> Inverter Eixo Y</label>
-      <label class="settings-row">Estilo Visual <select id="setStyle"><option value="hq" ${R.style === 'hq' ? 'selected' : ''}>HQ (quadrinho)</option><option value="caderno" ${R.style === 'caderno' ? 'selected' : ''}>Caderno (papel)</option></select></label>
       <label class="settings-row"><input type="checkbox" id="setMap" ${minimap && minimap.enabled ? 'checked' : ''}> Minimapa</label>
       <label class="settings-row"><input type="checkbox" id="setMus" ${musicWanted ? 'checked' : ''}> Música de Fundo <span class="k">(M)</span></label>
     </div>
@@ -745,7 +740,6 @@ function wireSettings() {
   const sens = box.querySelector('#setSens'), out = box.querySelector('#setSensV');
   sens.addEventListener('input', () => { settings.sens = Number(sens.value); out.textContent = settings.sens + '%'; applySettings(); });
   box.querySelector('#setInv').addEventListener('change', (e) => { settings.invert = e.target.checked; applySettings(); });
-  box.querySelector('#setStyle').addEventListener('change', (e) => { R.setStyle(e.target.value); if (onoma) { onoma.enabled = R.style === 'hq'; onoma.clear(); } });
   box.querySelector('#setMap').addEventListener('change', (e) => { if (minimap) minimap.setEnabled(e.target.checked); });
   box.querySelector('#setMus').addEventListener('change', (e) => { musicWanted = e.target.checked; localStorage.setItem('doodle_music', musicWanted ? '1' : '0'); audio.musicOn(musicWanted); });
 
@@ -1140,7 +1134,6 @@ function stepInner(now) {
   if (game.boss) { if (game.boss.alive) hud.setBoss(game.boss.T.name, game.boss.hp / game.boss.maxHp); else { hud.setBoss(null, null); game.boss = null; } }
   audio.setIntensity(clamp((enemies.alive + game.queue.length + remote.size * 2) / 12, 0, 1) * (game.intermission > 0 ? 0.25 : 1));
   if (minimap) minimap.update(dt, player, enemies.enemies, remote.values());
-  if (onoma) onoma.update(dt);
   R.render(game.time, { hurt: player.hurtFx, flash: player.flashFx, slow: scale < 1 ? 1 : 0, lowHp: player.alive && player.hp < 30 ? 1 - player.hp / 30 : 0 });
 }
 requestAnimationFrame(tick);
