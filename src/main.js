@@ -242,6 +242,47 @@ enemies.onKill = (e, info, over) => {
   player.addCash(cash, label);
   const r = Math.random(); if (r < 0.5) spawnPickup('ammo', e.body.pos); else if (r < 0.62) spawnPickup('health', e.body.pos);
 };
+function spawnBrasiliaCivilians() {
+  const civSpots = [
+    new THREE.Vector3(0, 6.5, -114),    // Mezanino da Rodoviária
+    new THREE.Vector3(-12, 0, -108),    // Plataforma da Rodoviária
+    new THREE.Vector3(12, 0, -108),     // Plataforma da Rodoviária
+    new THREE.Vector3(-24, 0, -82),     // Calçada do Museu da República
+    new THREE.Vector3(24, 0, -82),      // Calçada da Catedral
+    new THREE.Vector3(0, 0, -35),       // Gramado Central da Esplanada
+    new THREE.Vector3(0, 0, 10),        // Gramado Central
+    new THREE.Vector3(-33, 0, -15),     // Calçada Ministério Norte
+    new THREE.Vector3(33, 0, 15),       // Calçada Ministério Sul
+    new THREE.Vector3(0, 0, 60),        // Gramado perto do Congresso
+  ];
+  for (const pos of civSpots) {
+    const c = enemies.spawn('civilian', pos);
+    c.state = 'hunt';
+  }
+}
+
+ctx.onCivilianKilled = (civ, info) => {
+  audio.siren(civ.center);
+  hud.message('🚨 CRIME COMETIDO!', 'A Polícia foi acionada para conter o infrator!', 3.5);
+  hud.kill('🚨 Inocente Morto · Polícia Acionada!', -100);
+  player.addCash(-150, 'Crime / Multa Policial');
+  game.addScore(-100, 'Crime Cometido');
+
+  if (!online() || net.isHost) {
+    const cx = civ.body.pos.x, cz = civ.body.pos.z;
+    for (let i = 0; i < 2; i++) {
+      const pPos = new THREE.Vector3(cx + (i === 0 ? -6 : 6), 0, cz + (Math.random() - 0.5) * 8);
+      const pBot = enemies.spawn('police', pPos);
+      pBot.state = 'hunt';
+      pBot.target = player;
+    }
+    const chiefPos = new THREE.Vector3(cx, 0, cz + (cz > 0 ? -10 : 10));
+    const chief = enemies.spawn('police_chief', chiefPos);
+    chief.state = 'hunt';
+    chief.target = player;
+  }
+};
+
 enemies.onBoss = (e) => { if (!e.alive) { hud.setBoss(null, null); game.boss = null; } else { game.boss = e; hud.setBoss(e.T.name, e.hp / e.maxHp); } };
 player.onThrow = (d) => { if (net.active) net.broadcast('nade', d); };
 player.onRocket = (d) => { if (net.active) net.broadcast('rocket', d); };
@@ -639,6 +680,9 @@ function resetGame() {
   enemies.clear(); effects.clear(); survival.clearPickups();
   player.maxHp = online() ? 110 : 120; player.regenDelay = online() ? 4 : 4.5; player.regenRate = online() ? 14 : 11;
   player.reset(level.playerStart); player.name = myName; player.lastHitBy = null; player.lastHit = null; enemies.mods.speed = 1; enemies.mods.damage = 1; hud.setModifier(''); hud.setBoss(null, null); game.boss = null; endFocus(); game.katanaStreak = 0;
+  if (level.key === 'brasilia' && (!online() || net.isHost)) {
+    spawnBrasiliaCivilians();
+  }
   game.score = 0; game.kills = 0; game.combo = 0; game.wave = 0; game.intermission = 0; game.queue = []; game.time = 0; game.over = null; game.matchT = 0; hud.setScore(0, 0); hud.setTimer(''); hud.setPvpScore(null); hud.setWave(1, 0); hud.setBoard(null);
 }
 function beginCommon() { audio.init(); audio.resume(); if (!input.usingGamepad) input.requestLock(); if (musicWanted && !audio.musicPlaying) audio.musicOn(true); hud.hideScreen(); hud.setGameplayVisible(true); game.menu = false; }
@@ -726,6 +770,22 @@ function step(now) {
     game.time += sdt; if (player.shieldT > 0) player.shieldT -= dt;
     musicHealT -= dt; if (musicHealT <= 0) { musicHealT = 2; if (musicWanted && st === 'play' && !audio.musicPlaying && audio.ctx) audio.musicOn(true); if (input.anyInput) audio.resume(); }
     { const B = level.bounds, bp = player.body.pos; if (bp.x < B.minX - 8 || bp.x > B.maxX + 8 || bp.z < B.minZ - 8 || bp.z > B.maxZ + 8 || bp.y > 150) bp.y = -100; }
+    if (level.cars && playing && player.alive) {
+      for (const car of level.cars) {
+        const dx = Math.abs(player.body.pos.x - car.laneX);
+        const dz = Math.abs(player.body.pos.z - car.z);
+        if (dx < (car.w / 2 + 0.6) && dz < (car.d / 2 + 0.7) && Math.abs(player.body.pos.y) < 2.2) {
+          if (!car._hornT || performance.now() - car._hornT > 1000) {
+            car._hornT = performance.now();
+            audio.horn(car.group.position);
+          }
+          const pushDirX = car.laneX < 0 ? 1 : -1;
+          player.knockback(new THREE.Vector3(pushDirX * 0.8, 0.35, car.dir * 0.5).normalize(), 9);
+          player.takeDamage(14, car.group.position);
+          hud.kill('Impacto de Trânsito · -14 Vida', 0);
+        }
+      }
+    }
     player.update(sdt); enemies.update(sdt); effects.update(sdt); updatePickups(sdt); netUpdate(dt);
     if (st === 'play' && (!online() || net.isHost)) updateWaves(sdt);
     if (online()) updateArenaPickups(dt);
