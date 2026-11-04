@@ -90,8 +90,8 @@ export class HUD {
             </div>
           </div>
           <div class="bm-foot">
-            <span>Pressione <b>B</b> ou clique no botão para fechar a Loja</span>
-            <button type="button" class="bm-close-btn" id="bmCloseBtn">Voltar ao Jogo [B]</button>
+            <span>Pressione <b>ESC</b> ou <b>B</b> para fechar a Loja</span>
+            <button type="button" class="bm-close-btn" id="bmCloseBtn">Voltar ao Jogo [ESC / B]</button>
           </div>
         </div>
       </div>`;
@@ -108,10 +108,29 @@ export class HUD {
         if (this.onBuy) this.onBuy(itemKey);
       });
     });
+    this.onCloseBuy = null;
     this.el.bmClose.addEventListener('click', (ev) => {
       ev.stopPropagation();
       this.toggleBuyMenu(false);
+      if (this.onCloseBuy) this.onCloseBuy();
     });
+    this.el.buymenu.addEventListener('click', (ev) => {
+      if (ev.target === this.el.buymenu) {
+        this.toggleBuyMenu(false);
+        if (this.onCloseBuy) this.onCloseBuy();
+      }
+    });
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' || e.code === 'Escape') {
+        if (this.el.buymenu && !this.el.buymenu.hidden) {
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+          this.toggleBuyMenu(false);
+          if (this.onCloseBuy) this.onCloseBuy();
+        }
+      }
+    }, true);
   }
   // katana charge gauge: fills with katana kills, catches fire when a focus slash is ready
   setFocusMeter(show, frac, ready, label = 'Katana') {
