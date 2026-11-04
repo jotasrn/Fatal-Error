@@ -16,8 +16,9 @@ canvas#c { position: fixed; inset: 0; width: 100vw; height: 100vh; display: bloc
 .bar { width: 280px; height: 19px; border: 2.5px solid var(--ink); border-radius: 6px 8px 5px 7px / 8px 5px 7px 6px; overflow: hidden; transform: rotate(-1deg); }
 .fill { height: 100%; width: 100%; background: repeating-linear-gradient(-55deg, var(--ink) 0 2.5px, transparent 2.5px 6px); transition: width .15s; }
 .low .bar { border-color: var(--red); } .low .fill { background: repeating-linear-gradient(-55deg, var(--red) 0 2.5px, transparent 2.5px 6px); }
-.crosshair { position: absolute; left: 50%; top: 50%; width: 0; height: 0; --s: 10px; filter: drop-shadow(0 0 1px rgba(255,255,255,.9)); }
-.crosshair i { position: absolute; background: var(--red); border-radius: 2px; transition: top .06s, left .06s; }
+.crosshair { position: absolute; left: 50%; top: 50%; width: 0; height: 0; --s: 10px; transform: scale(var(--ch-scale, 1)); filter: drop-shadow(0 0 1px rgba(255,255,255,.9)); }
+.crosshair i { position: absolute; background: var(--ch-color, var(--red)); border-radius: 2px; transition: top .06s, left .06s; }
+.crosshair.katana i { background: var(--ch-color, var(--ink)); }
 .ch-t { width: 3px; height: 12px; left: -1.5px; top: calc(-1 * var(--s) - 12px); }
 .ch-b { width: 3px; height: 12px; left: -1.5px; top: var(--s); }
 .ch-l { width: 12px; height: 3px; top: -1.5px; left: calc(-1 * var(--s) - 12px); }
@@ -276,3 +277,24 @@ canvas#c { position: fixed; inset: 0; width: 100vw; height: 100vh; display: bloc
 .shop-hint { font-size: 20px; color: var(--ink); background: rgba(255,255,255,0.85); border: 2px dashed var(--ink); border-radius: 6px; padding: 3px 10px; margin-top: 6px; display: inline-block; cursor: pointer; pointer-events: auto; font-weight: bold; transition: all .15s; }
 .shop-hint:hover { background: var(--ink); color: var(--paper); }
 .hud-tr .timer { font-size: 36px; font-weight: bold; color: var(--red); letter-spacing: 1px; margin-top: 4px; text-shadow: 1px 1px 0 rgba(255,255,255,0.8); }
+
+/* Personalização de Mira e Interface (HUD) */
+.settings-section-title {
+  font-size: 21px; font-weight: bold; border-bottom: 2px dashed var(--ink);
+  margin: 12px 0 6px; padding-bottom: 2px; width: 100%; text-align: left;
+}
+.ch-palette {
+  display: flex; gap: 8px; align-items: center; justify-content: center; flex-wrap: wrap;
+}
+.ch-swatch {
+  width: 22px; height: 22px; border-radius: 50%; border: 2.5px solid var(--ink);
+  cursor: pointer; box-shadow: 2px 2px 0 rgba(26,48,192,0.2); transition: transform .12s, box-shadow .12s;
+}
+.ch-swatch:hover { transform: scale(1.22); }
+.ch-swatch.active { box-shadow: 0 0 0 3px var(--ink), 2px 2px 0 rgba(26,48,192,0.4); transform: scale(1.15); }
+.settings-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; width: 100%; text-align: left;
+}
+.settings-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 18px;
+}

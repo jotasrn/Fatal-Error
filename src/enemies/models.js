@@ -46,6 +46,19 @@ function buildHat(headG, mat, solid, T) {
 }
 export function buildWeaponProp(gun, mat, solid, T) {
   if (T.weapon === 'blade') { bx(0.02, 0.05, 0.95, 0, 0.04, 0.42, mat, gun); bx(0.11, 0.11, 0.03, 0, 0.04, -0.06, solid, gun); bx(0.035, 0.045, 0.24, 0, 0.04, -0.19, solid, gun); }
+  else if (T.weapon === 'flag' || T.isProtester) {
+    // Mastro da bandeira
+    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 1.45, 6), solid);
+    mast.rotation.x = Math.PI / 2.3; mast.position.set(0, 0.28, 0.38); gun.add(mast);
+    // Bandeira vermelha do PT
+    const flagGeo = new THREE.BoxGeometry(0.55, 0.38, 0.012);
+    const flagMesh = new THREE.Mesh(flagGeo, mat);
+    flagMesh.position.set(0.24, 0.52, 0.65); flagMesh.rotation.y = Math.PI / 10; gun.add(flagMesh);
+    // Estrela branca central
+    const starGeo = new THREE.BoxGeometry(0.14, 0.14, 0.02);
+    const starMesh = new THREE.Mesh(starGeo, solid);
+    starMesh.position.set(0.245, 0.52, 0.65); gun.add(starMesh);
+  }
   else if (T.weapon === 'smg') {
     bx(0.065, 0.1, 0.38, 0, 0.02, 0.12, mat, gun);
     const b = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.22, 6), solid);
