@@ -55,7 +55,7 @@ export class Effects {
     if (!obj) return;
     obj.traverse((c) => {
       if (c.isMesh) {
-        if (c.geometry) try { c.geometry.dispose(); } catch (e) {}
+        if (c.geometry && !c.geometry.userData.shared) try { c.geometry.dispose(); } catch (e) {}
         if (c.material) {
           if (Array.isArray(c.material)) c.material.forEach(m => { try { m.dispose(); } catch (e) {} });
           else try { c.material.dispose(); } catch (e) {}
@@ -234,6 +234,11 @@ export class Effects {
 
   _spawn(kind, pos, vel, o = {}) {
     const p = { kind, pos: pos.clone(), vel: vel ? vel.clone() : null, life: o.life ?? 1, maxLife: o.life ?? 1, size: o.size ?? 0.05, ink: o.ink ?? INK.RED, fill: o.fill ?? true, gravity: o.gravity ?? 20, drag: o.drag ?? 0, collide: o.collide ?? null, stretch: o.stretch ?? 0.03, len: o.len ?? 0, axis: o.axis ?? null, decalSize: o.decalSize ?? 3, shrink: o.shrink ?? true, rate: o.rate ?? 0, acc: 0, grow: o.grow ?? 0 };
+    // budget: a big fight used to pile up ~2000 live particles, each raycasting every frame.
+    // Past the cap new ones are dropped; past half of it they stop colliding (no raycast).
+    const n = this.particles.length;
+    if (n >= 900 && kind !== 'emitter') return p;
+    if (n >= 450 && kind !== 'emitter') p.collide = null;
     this.particles.push(p); return p;
   }
   // ---------- rigid debris (gibs, dropped weapons) ----------

@@ -7,8 +7,9 @@ import { makeBody, SEE_THROUGH } from '../physics.js';
 import { rand, randInt, clamp, damp, wrapAngle, angleLerp, alignYAxis, TAU } from '../util.js';
 import { audio } from '../audio.js';
 import { TYPES, STATE_CODES, STATE_NAMES } from './types.js';
-import { buildHumanoid, buildBomber, buildFlyer, buildQuadruped } from './models.js';
+import { buildHumanoid, buildBomber, buildFlyer, buildQuadruped, buildCached, cloneModel } from './models.js';
 import { Projectiles } from './projectiles.js';
+const modelBuilder = (T) => (m, s) => T.model === 'bomber' ? buildBomber(m, s, T) : T.model === 'blob' ? buildBomber(m, s, T, true) : T.model === 'flyer' ? buildFlyer(m, s, T) : (T.model === 'quadruped' || T.model === 'spider') ? buildQuadruped(m, s, T) : buildHumanoid(m, s, T);
 
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _d = new THREE.Vector3(), _q = new THREE.Quaternion(), _m = new THREE.Matrix4(), _s = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0), _eye = new THREE.Vector3(), _goal = new THREE.Vector3();
@@ -33,7 +34,7 @@ export class EnemyManager {
     if (!obj) return;
     obj.traverse((child) => {
       if (child.isMesh && child.geometry) {
-        try { child.geometry.dispose(); } catch (e) {}
+        if (!child.geometry.userData.shared) try { child.geometry.dispose(); } catch (e) {}
       }
     });
   }
@@ -77,11 +78,14 @@ export class EnemyManager {
   }
   nearestTarget(pos) { let best = null, bd = Infinity; for (const t of this.targets()) { if (!t.alive) continue; const d = t.body.pos.distanceToSquared(pos); if (d < bd) { bd = d; best = t; } } return best; }
   clear() { for (const e of this.enemies) { this._removeLaser(e); if (!e.rootDetached) this.ctx.scene.remove(e.root); } this.enemies.length = 0; this.alive = 0; this.byId.clear(); this.projectiles.clear(); }
+  // build every type's model templates up front (during loading) so no spawn ever pays for it
+  prewarm() { for (const type in TYPES) for (let i = 0; i < 3; i++) buildCached(type, TYPES[type], modelBuilder(TYPES[type])); }
   spawn(type, pos, id = null) {
     const T = TYPES[type]; const ink = T.ink ?? INK.RED;
     const mat = makeInkMaterial({ ink, shadeScale: 0, shadeBias: 1 });
     const solid = makeInkMaterial({ ink: T.ink === INK.BLACK ? INK.RED : INK.BLACK, fill: true, side: THREE.DoubleSide });
-    const model = T.model === 'bomber' ? buildBomber(mat, solid, T) : T.model === 'blob' ? buildBomber(mat, solid, T, true) : T.model === 'flyer' ? buildFlyer(mat, solid, T) : (T.model === 'quadruped' || T.model === 'spider') ? buildQuadruped(mat, solid, T) : buildHumanoid(mat, solid, T);
+    const tpl = buildCached(type, T, modelBuilder(T));
+    const model = cloneModel(tpl, mat, solid); // baked (~50 meshes -> ~17 draw calls) and geometry shared between bots
     const hw = T.flying ? 0.45 : Math.min(0.33 * T.scale, 0.9);
     const e = { type, T, mat, root: model.root, parts: model.parts, J: model.J, tip: model.tip, face: model.face, hit: model.hit, hp: T.hp, maxHp: T.hp, alive: true, state: 'spawn', t: 0,
       body: makeBody(pos, hw, (T.flying ? 0.8 : 1.85) * T.scale, T.boss ? 1.2 : 0.6), center: new THREE.Vector3(), yaw: rand(0, TAU), yawT: 0, phase: rand(0, TAU), walk: 0, aimAmt: 0, flinch: 0, flashT: 0, flashOn: false,
@@ -235,6 +239,7 @@ export class EnemyManager {
     if (this.mirror) { this._updateMirror(dt); return; }
     const ctx = this.ctx, world = ctx.world;
     for (const e of this.enemies) {
+      this._cur = e; // lets the game loop drop a bot whose update throws instead of freezing every frame
       e.t += dt;
       if (!e.alive) { this._updateDead(e, dt); continue; }
       const P = this._pickTarget(e, dt) || ctx.player; const pp = P.body.pos, pc = P.center;
@@ -272,7 +277,7 @@ export class EnemyManager {
       if (e.T.flying) this._animateFlyer(e, dt); else this._animate(e, dt, pc);
       this._syncHit(e);
     }
-    this._separate(dt); this.projectiles.update(dt);
+    this._cur = null; this._separate(dt); this.projectiles.update(dt);
     for (let i = this.enemies.length - 1; i >= 0; i--) { const e = this.enemies[i]; if (!e.alive && e.deadT > 3.5) { this._removeLaser(e); if (!e.rootDetached) { this.ctx.scene.remove(e.root); this._disposeMesh(e.root); } this.byId.delete(e.id); this.enemies.splice(i, 1); } }
   }
   // --- network mirror ---

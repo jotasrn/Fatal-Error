@@ -9,7 +9,25 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const fs = require('node:fs');
 const Hyperswarm = require('hyperswarm');
+
+// prefer the discrete GPU on dual-GPU laptops, and keep the game running at full speed when the
+// window is not focused (a host that alt-tabs must not stall everyone else's match)
+app.commandLine.appendSwitch('force_high_performance_gpu');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+
+function logLine(msg) {
+  try {
+    const file = path.join(app.getPath('userData'), 'fatal-error.log');
+    try { if (fs.statSync(file).size > 2 * 1024 * 1024) fs.renameSync(file, file + '.old'); } catch { /* no log yet */ }
+    fs.appendFileSync(file, `[${new Date().toISOString()}] v${app.getVersion()} ${msg}\n`);
+  } catch { /* logging must never crash the game */ }
+}
+ipcMain.on('log:error', (_e, msg) => logLine('renderer ' + msg));
+process.on('uncaughtException', (err) => logLine('main ' + (err && err.stack || err)));
 
 let win = null;
 // one live session at a time: { swarm, conns: Map<keyHex, socket>, selfId }
@@ -90,14 +108,18 @@ function createWindow() {
     backgroundColor: '#f9f8f5', title: 'Fatal Error',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
-      contextIsolation: true, nodeIntegration: false, sandbox: false,
+      contextIsolation: true, nodeIntegration: false, sandbox: false, backgroundThrottling: false,
     },
   });
+  // if the page or the GPU process dies, log why and bring the game back instead of a dead window
+  win.webContents.on('render-process-gone', (_e, d) => { logLine('render-process-gone ' + JSON.stringify(d)); if (win && !win.isDestroyed()) setTimeout(() => win && !win.isDestroyed() && win.reload(), 500); });
+  win.webContents.on('unresponsive', () => logLine('window unresponsive'));
   win.setMenuBarVisibility(false);
   win.loadFile(path.join(__dirname, '..', 'index.html'));
   win.on('closed', () => { win = null; });
 }
 
+app.on('child-process-gone', (_e, d) => logLine('child-process-gone ' + JSON.stringify(d)));
 app.whenReady().then(() => {
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
