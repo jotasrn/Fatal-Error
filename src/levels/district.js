@@ -1,4 +1,4 @@
-// Map 1: Doodle District. Streets, rooftops and fire escapes. Solo keeps a tight block with a
+// Map 1: Distrito Central. Streets, rooftops and fire escapes. Solo keeps a tight block with a
 // central tower; a match opens into a far wider arena under a dome with hanging grapple pads.
 import * as THREE from 'three';
 import { INK } from '../render.js';

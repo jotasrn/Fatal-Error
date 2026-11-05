@@ -1,4 +1,4 @@
-// Map 2: Doodle Mexico. A sun-baked pueblo — plaza with a fountain and a floating sombrero, a
+// Map 2: Pueblo México. A sun-baked pueblo — plaza with a fountain and a floating sombrero, a
 // bandstand of mariachis, a church with a climbable bell tower, adobe houses, a piñata market and
 // a taco cart. Pots, crates, barrels, cacti and piñatas all break.
 import * as THREE from 'three';

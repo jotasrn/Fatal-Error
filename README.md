@@ -97,9 +97,9 @@
 
 | Mapa | Chave | Descrição e Destaques |
 | --- | --- | --- |
-| **Distrito Doodle** | `district` | Quarteirões urbanos, becos estreitos, escadas de incêndio e telhados interligados para gancho e *wall-jump*. |
+| **Distrito Central** | `district` | Quarteirões urbanos, becos estreitos, escadas de incêndio e telhados interligados para gancho e *wall-jump*. |
 | **Brasília · Eixo Monumental** | `brasilia` | **Mega-mapa de ~770 m de extensão** fiel ao eixo urbano real de Brasília, com monumentos escaláveis e eventos dinâmicos de rua (detalhes abaixo). |
-| **Doodle México** | `mexico` | Praça ensolarada com fonte central, arcos coloniais, cactos, mariachis e piñatas recheadas de recompensas. |
+| **Pueblo México** | `mexico` | Praça ensolarada com fonte central, arcos coloniais, cactos, mariachis e piñatas recheadas de recompensas. |
 | **Mesa de Estudos** | `desk` | Arena em escala miniatura sobre uma mesa escolar gigante: torres de livros, pontes de réguas, trincheiras de borracha, apontadores e aviões de papel. |
 | **Torre do Relógio** | `clocktower` | Pátio gótico vertical dominado por campanário central com sino, galerias elevadas e linhas longas para Sniper. |
 | **Pico** | `peak` | Complexo vertical de prédios em múltiplos níveis, passarelas suspensas e combate aéreo sobre abismos. |

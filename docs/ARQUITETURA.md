@@ -107,8 +107,8 @@ Para suportar o mapa expandido de **Brasília (~770 m)** com dezenas de bots, pr
 | `src/levels/builder.js` | DSL geométrica procedural para erguer prédios, escadas, rampas, arcos, cúpulas, árvores e pontos de cobertura/spawn. |
 | `src/levels/index.js` | Registro oficial dos 6 mapas e despacho de construção (`buildLevel`). |
 | `src/levels/brasilia.js` | Mega-mapa **Brasília · Eixo Monumental (~770 m)**: Mané Garrincha, Torre de TV escalável, Ulysses, Pátio Brasil, Conjunto Nacional, Rodoviária, Catedral, Esplanada, Congresso e Três Poderes. |
-| `src/levels/district.js` | Mapa urbano **Distrito Doodle** com prédios, becos e telhados. |
-| `src/levels/mexico.js` | Mapa **Doodle México** com praça central, arcos, fonte e piñatas destrutíveis. |
+| `src/levels/district.js` | Mapa urbano **Distrito Central** com prédios, becos e telhados. |
+| `src/levels/mexico.js` | Mapa **Pueblo México** com praça central, arcos, fonte e piñatas destrutíveis. |
 | `src/levels/desk.js` | Mapa **Mesa de Estudos** em escala gigante com livros, réguas e material escolar. |
 | `src/levels/clocktower.js` | Mapa vertical **Torre do Relógio** com pátio gótico e campanário. |
 | `src/levels/peak.js` | Mapa aéreo **Pico** com torres em níveis e passarelas suspensas. |
@@ -140,3 +140,4 @@ Para suportar o mapa expandido de **Brasília (~770 m)** com dezenas de bots, pr
 | `tests/security.test.mjs` | Testes automatizados (`node:test`) cobrindo segurança Electron, P2P, rate-limit, XSS e autoridade de Host. |
 | `.github/workflows/ci.yml` | Pipeline de Integração Contínua + `npm audit` + análise estática **GitHub CodeQL**. |
 | `.github/workflows/release.yml` | Pipeline de empacotamento Windows, aplicação de Electron Fuses, geração de `SHA256SUMS.txt` e publicação automática no GitHub Releases. |
+

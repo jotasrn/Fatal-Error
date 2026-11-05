@@ -115,3 +115,4 @@ Para remover também logs e configurações locais, apague a pasta `%APPDATA%\fa
 | **Não encontra a sala do colega no modo Global** | Verifique se ambos permitiram o `Fatal Error` no Firewall do Windows e estão na mesma versão. Se estiverem em rede empresarial restrita, mudem para o modo **Rede Interna / Corporativa (`GDFNet`)**. |
 | **Queda de FPS em notebooks com vídeo integrado** | O jogo já possui ajuste automático de resolução; feche abas pesadas do navegador em segundo plano para liberar memória de vídeo (VRAM). |
 | **O jogo não abre ou apresenta erro inesperado** | Anexe o arquivo `%APPDATA%\fatal-error\fatal-error.log` ao abrir uma [Issue no GitHub](https://github.com/jotasrn/Fatal-Error/issues). |
+

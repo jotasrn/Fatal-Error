@@ -8,9 +8,9 @@ export class Minimap {
     this.canvas = document.createElement('canvas'); this.canvas.className = 'minimap';
     this.canvas.width = R_PX * 2; this.canvas.height = R_PX * 2; parent.appendChild(this.canvas);
     this.g = this.canvas.getContext('2d'); this.layer = null; this.k = 1; this.b = null; this.t = 0;
-    this.enabled = localStorage.getItem('doodle_minimap') !== '0'; this.canvas.hidden = !this.enabled;
+    this.enabled = localStorage.getItem('fatal_minimap') !== '0'; this.canvas.hidden = !this.enabled;
   }
-  setEnabled(on) { this.enabled = on; this.canvas.hidden = !on; try { localStorage.setItem('doodle_minimap', on ? '1' : '0'); } catch (e) { /* ignore */ } }
+  setEnabled(on) { this.enabled = on; this.canvas.hidden = !on; try { localStorage.getItem('fatal_minimap'); localStorage.setItem('fatal_minimap', on ? '1' : '0'); } catch (e) { /* ignore */ } }
   setLevel(level, world) {
     const b = level.bounds; this.b = b;
     const w = b.maxX - b.minX, h = b.maxZ - b.minZ; this.k = Math.min(1.6, 1024 / Math.max(w, h));

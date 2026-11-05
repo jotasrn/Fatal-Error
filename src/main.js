@@ -27,7 +27,7 @@ const R = new InkRenderer(canvas);
 const world = new World();
 const knownMap = (k) => (LEVELS.some((m) => m.key === k) ? k : 'district');
 const navCellFor = (b) => (Math.max(b.maxX - b.minX, b.maxZ - b.minZ) > 350 ? 2.0 : 1.0);
-let mapKey = knownMap(localStorage.getItem('doodle_map') || 'district');
+let mapKey = knownMap(localStorage.getItem('fatal_map') || 'district');
 let level = buildLevel(R.scene, world, mapKey, { arena: false });
 let nav = new NavGrid(world, level.bounds, navCellFor(level.bounds)).build();
 let loadedKey = mapKey, arenaLoaded = false;
@@ -50,25 +50,25 @@ const effects = new Effects(R.scene, world);
 const ctx = { scene: R.scene, camera: R.camera, world, level, nav, input, hud, effects, audio, renderer: R };
 
 // ---------------- persistent bits ----------------
-let best = Number(localStorage.getItem('doodle_best') || 0);
-let musicWanted = localStorage.getItem('doodle_music') !== '0';
-try { localStorage.removeItem('doodle_checkpoint'); } catch (e) { /* checkpoint removido: sempre reinicia na Onda 1 */ }
+let best = Number(localStorage.getItem('fatal_best') || 0);
+let musicWanted = localStorage.getItem('fatal_music') !== '0';
+try { localStorage.removeItem('fatal_checkpoint'); } catch (e) { /* checkpoint removido: sempre reinicia na Onda 1 */ }
 // online bank: cash you carry between online matches (solo keeps its own roguelike economy)
-let bank = Number(localStorage.getItem('doodle_bank') || 300); let bankSaveT = 0;
-const saveBank = () => { bank = Math.max(0, Math.round(player.money)); localStorage.setItem('doodle_bank', String(bank)); };
-let myName = sanitizeName(localStorage.getItem('doodle_name') || '', 'Doodle' + Math.floor(Math.random() * 90 + 10));
-const settings = { sens: Number(localStorage.getItem('doodle_sens') || 100), invert: localStorage.getItem('doodle_invert') === '1' };
+let bank = Number(localStorage.getItem('fatal_bank') || 300); let bankSaveT = 0;
+const saveBank = () => { bank = Math.max(0, Math.round(player.money)); localStorage.setItem('fatal_bank', String(bank)); };
+let myName = sanitizeName(localStorage.getItem('fatal_name') || '', 'Jogador' + Math.floor(Math.random() * 90 + 10));
+const settings = { sens: Number(localStorage.getItem('fatal_sens') || 100), invert: localStorage.getItem('fatal_invert') === '1' };
 
 const hudPrefs = {
-  gfxQuality: localStorage.getItem('doodle_gfx_quality') || 'medium',
-  notebookMode: localStorage.getItem('doodle_notebook') === '1',
-  chColor: localStorage.getItem('doodle_ch_color') || '#d02030',
-  chSize: Number(localStorage.getItem('doodle_ch_size') || '1'),
-  chDot: localStorage.getItem('doodle_ch_dot') !== '0',
-  scale: Number(localStorage.getItem('doodle_hud_scale') || '100'),
-  opacity: Number(localStorage.getItem('doodle_hud_opacity') || '100'),
-  killfeed: localStorage.getItem('doodle_hud_kf') !== '0',
-  damageNums: localStorage.getItem('doodle_hud_dmg') !== '0',
+  gfxQuality: localStorage.getItem('fatal_gfx_quality') || 'medium',
+  notebookMode: localStorage.getItem('fatal_notebook') === '1',
+  chColor: localStorage.getItem('fatal_ch_color') || '#d02030',
+  chSize: Number(localStorage.getItem('fatal_ch_size') || '1'),
+  chDot: localStorage.getItem('fatal_ch_dot') !== '0',
+  scale: Number(localStorage.getItem('fatal_hud_scale') || '100'),
+  opacity: Number(localStorage.getItem('fatal_hud_opacity') || '100'),
+  killfeed: localStorage.getItem('fatal_hud_kf') !== '0',
+  damageNums: localStorage.getItem('fatal_hud_dmg') !== '0',
 };
 R.setQuality(hudPrefs.gfxQuality);
 R.setNotebookMode(hudPrefs.notebookMode);
@@ -100,20 +100,20 @@ function applyHudSettings() {
   const dmg = document.querySelector('.dmg-ind');
   if (dmg) dmg.style.display = hudPrefs.damageNums ? 'block' : 'none';
 
-  localStorage.setItem('doodle_gfx_quality', hudPrefs.gfxQuality);
-  localStorage.setItem('doodle_notebook', hudPrefs.notebookMode ? '1' : '0');
-  localStorage.setItem('doodle_ch_color', hudPrefs.chColor);
-  localStorage.setItem('doodle_ch_size', String(hudPrefs.chSize));
-  localStorage.setItem('doodle_ch_dot', hudPrefs.chDot ? '1' : '0');
-  localStorage.setItem('doodle_hud_scale', String(hudPrefs.scale));
-  localStorage.setItem('doodle_hud_opacity', String(hudPrefs.opacity));
-  localStorage.setItem('doodle_hud_kf', hudPrefs.killfeed ? '1' : '0');
-  localStorage.setItem('doodle_hud_dmg', hudPrefs.damageNums ? '1' : '0');
+  localStorage.setItem('fatal_gfx_quality', hudPrefs.gfxQuality);
+  localStorage.setItem('fatal_notebook', hudPrefs.notebookMode ? '1' : '0');
+  localStorage.setItem('fatal_ch_color', hudPrefs.chColor);
+  localStorage.setItem('fatal_ch_size', String(hudPrefs.chSize));
+  localStorage.setItem('fatal_ch_dot', hudPrefs.chDot ? '1' : '0');
+  localStorage.setItem('fatal_hud_scale', String(hudPrefs.scale));
+  localStorage.setItem('fatal_hud_opacity', String(hudPrefs.opacity));
+  localStorage.setItem('fatal_hud_kf', hudPrefs.killfeed ? '1' : '0');
+  localStorage.setItem('fatal_hud_dmg', hudPrefs.damageNums ? '1' : '0');
 }
 
 function applySettings() {
   input.mouseSens = 0.0022 * settings.sens / 100; input.padSensX = 3.4 * settings.sens / 100; input.padSensY = 2.6 * settings.sens / 100; input.invertY = settings.invert;
-  localStorage.setItem('doodle_sens', String(settings.sens)); localStorage.setItem('doodle_invert', settings.invert ? '1' : '0');
+  localStorage.setItem('fatal_sens', String(settings.sens)); localStorage.setItem('fatal_invert', settings.invert ? '1' : '0');
   applyHudSettings();
 }
 // ---------------- game state ----------------
@@ -465,7 +465,7 @@ function applyScores(rows) {
   for (const r of rows.slice(0, 24)) {
     if (!r || typeof r.id !== 'string') continue;
     scores.set(r.id, {
-      name: sanitizeName(r.name, 'Doodle'),
+      name: sanitizeName(r.name, 'Jogador'),
       kills: Math.round(clampNum(r.kills, 0, 99999, 0)),
       deaths: Math.round(clampNum(r.deaths, 0, 99999, 0)),
     });
@@ -496,7 +496,7 @@ function endMatch(winner) {
 
 // ---------------- networking ----------------
 function addRemote(id, name) {
-  const cleanName = sanitizeName(name, 'Doodle');
+  const cleanName = sanitizeName(name, 'Jogador');
   if (remote.has(id)) { const r = remote.get(id); r.name = cleanName; return r; }
   const rp = new RemotePlayer(ctx, id, cleanName, 0, INK.PURPLE); // players are violet; bots never use it
   rp.onDamage = (t, amount, fromPos) => { if (!ctx.canHurt(t) || !t.alive) return; hud.hitmarker(false, false); net.sendTo(t.id, 'pdmg', { amount: Math.round(amount), from: fromPos ? fromPos.toArray().map((v) => +v.toFixed(1)) : null, by: net.id, src: 'grenade' }); };
@@ -541,7 +541,7 @@ async function _migrateHost() {
 net.on('refused', (d) => leaveOnline(sanitizeText(d && d.reason, 80)));
 net.hostName = myName;
 net.onPeerJoin = (from, meta) => {
-  const name = sanitizeName(meta && meta.name, 'Doodle');
+  const name = sanitizeName(meta && meta.name, 'Jogador');
   if (meta && typeof meta.prev === 'string' && meta.prev !== from && !remote.has(meta.prev)) {
     const sc = scores.get(meta.prev); if (sc) { scores.delete(meta.prev); scores.set(from, sc); }
     lobby.players.delete(meta.prev); if (lobby.order) lobby.order = lobby.order.filter((id) => id !== meta.prev);
@@ -568,7 +568,7 @@ net.on('lobby', (d) => {
     lobby.map = knownMap(d.map);
     if (game.state === 'lobby' && loadedKey !== lobby.map) { setLevel(lobby.map, true); player.reset(level.playerStart); }
   }
-  const safePlayers = d.players.slice(0, 16).filter((p) => p && typeof p.id === 'string').map((p) => ({ id: p.id, name: sanitizeName(p.name, 'Doodle') }));
+  const safePlayers = d.players.slice(0, 16).filter((p) => p && typeof p.id === 'string').map((p) => ({ id: p.id, name: sanitizeName(p.name, 'Jogador') }));
   lobby.order = safePlayers.map((p) => p.id); lobby.players.clear();
   for (const p of safePlayers) lobby.players.set(p.id, { name: p.name });
   for (const p of safePlayers) if (p.id !== net.id) addRemote(p.id, p.name);
@@ -801,7 +801,7 @@ function settingsHTML() {
     <div class="settings-grid">
       <label class="settings-row">Sensibilidade do Mouse <input type="range" id="setSens" min="25" max="250" step="5" value="${settings.sens}"><b id="setSensV">${settings.sens}%</b></label>
       <label class="settings-row"><input type="checkbox" id="setInv" ${settings.invert ? 'checked' : ''}> Inverter Eixo Y</label>
-      <label class="settings-row"><input type="checkbox" id="setFps" ${localStorage.getItem('doodle_fps') === '1' ? 'checked' : ''}> Mostrar FPS</label>
+      <label class="settings-row"><input type="checkbox" id="setFps" ${localStorage.getItem('fatal_fps') === '1' ? 'checked' : ''}> Mostrar FPS</label>
       <label class="settings-row"><input type="checkbox" id="setMap" ${minimap && minimap.enabled ? 'checked' : ''}> Minimapa</label>
       <label class="settings-row"><input type="checkbox" id="setMus" ${musicWanted ? 'checked' : ''}> Música de Fundo <span class="k">(M)</span></label>
     </div>
@@ -916,9 +916,9 @@ function wireSettings() {
   const sens = box.querySelector('#setSens'), out = box.querySelector('#setSensV');
   sens.addEventListener('input', () => { settings.sens = Number(sens.value); out.textContent = settings.sens + '%'; applySettings(); });
   box.querySelector('#setInv').addEventListener('change', (e) => { settings.invert = e.target.checked; applySettings(); });
-  box.querySelector('#setFps').addEventListener('change', (e) => { perf.show = e.target.checked; try { localStorage.setItem('doodle_fps', perf.show ? '1' : '0'); } catch (err) { /* ignore */ } });
+  box.querySelector('#setFps').addEventListener('change', (e) => { perf.show = e.target.checked; try { localStorage.setItem('fatal_fps', perf.show ? '1' : '0'); } catch (err) { /* ignore */ } });
   box.querySelector('#setMap').addEventListener('change', (e) => { if (minimap) minimap.setEnabled(e.target.checked); });
-  box.querySelector('#setMus').addEventListener('change', (e) => { musicWanted = e.target.checked; localStorage.setItem('doodle_music', musicWanted ? '1' : '0'); audio.musicOn(musicWanted); });
+  box.querySelector('#setMus').addEventListener('change', (e) => { musicWanted = e.target.checked; localStorage.setItem('fatal_music', musicWanted ? '1' : '0'); audio.musicOn(musicWanted); });
 
   const gfxQ = box.querySelector('#setGfxQ');
   if (gfxQ) gfxQ.addEventListener('change', (e) => { hudPrefs.gfxQuality = e.target.value; applyHudSettings(); });
@@ -1005,7 +1005,7 @@ function wireSettings() {
 }
 function wireName(box) {
   const nb = box.querySelector('#setName'); if (!nb) return;
-  nb.addEventListener('input', (e) => { myName = sanitizeName(e.target.value, myName); localStorage.setItem('doodle_name', myName); player.name = myName; net.hostName = myName; });
+  nb.addEventListener('input', (e) => { myName = sanitizeName(e.target.value, myName); localStorage.setItem('fatal_name', myName); player.name = myName; net.hostName = myName; });
 }
 const mapName = (k) => (LEVELS.find((m) => m.key === k) || LEVELS[0]).name;
 function mapHTML(sel, canPick) { if (LEVELS.length < 2) return ''; return `<div class="mapsel" id="mapsel">${LEVELS.map((m) => `<button type="button" class="mapbtn${m.key === sel ? ' on' : ''}" data-map="${m.key}" ${canPick ? '' : 'disabled'}><span class="mn">${m.name}</span><span class="mb">${m.blurb}</span></button>`).join('')}</div>`; }
@@ -1106,7 +1106,7 @@ function wireOnline() {
     if (net.isHost) {
       lobby.map = knownMap(k);
       mapKey = lobby.map;
-      localStorage.setItem('doodle_map', lobby.map);
+      localStorage.setItem('fatal_map', lobby.map);
       setLevel(lobby.map, true);
       player.reset(level.playerStart);
       broadcastLobby();
@@ -1127,7 +1127,7 @@ function showStart() {
   const p = hud.el.panel;
   if (screen === 'main') {
     wireSettings();
-    wireMap((k) => { mapKey = knownMap(k); lobby.map = mapKey; localStorage.setItem('doodle_map', mapKey); setLevel(mapKey, false); player.reset(level.playerStart); showStart(); });
+    wireMap((k) => { mapKey = knownMap(k); lobby.map = mapKey; localStorage.setItem('fatal_map', mapKey); setLevel(mapKey, false); player.reset(level.playerStart); showStart(); });
     p.querySelector('#soloBtn').addEventListener('click', (e) => { e.stopPropagation(); begin(); });
     p.querySelector('#onlineBtn').addEventListener('click', (e) => { e.stopPropagation(); screen = 'online'; showStart(); });
     wireTabs();
@@ -1149,7 +1149,7 @@ function showPause() {
 }
 function showClickToPlay() { hud.showScreen(`<div class="p-head"><h1>Partida iniciada</h1><h2>Mata-mata livre · ${Math.round(FFA_TIME / 60)} min · com bots</h2></div><div class="m-play"><button type="button" class="btn btn-yellow btn-xl" data-act="go"><span class="bt">Lutar!</span></button></div><div class="foot-hint"><kbd>${hud.key('confirm')}</kbd> para começar</div>`); }
 function showDead() {
-  hud.setGameplayVisible(false); const nb = game.score > best; if (nb) { best = game.score; localStorage.setItem('doodle_best', String(best)); }
+  hud.setGameplayVisible(false); const nb = game.score > best; if (nb) { best = game.score; localStorage.setItem('fatal_best', String(best)); }
   hud.showScreen(`<div class="p-head"><h1 class="t-red">Você foi apagado!</h1></div>
     <div class="statgrid"><div><b>${game.wave}</b><span>ondas</span></div><div><b>${game.kills}</b><span>eliminações</span></div><div><b>${game.score}</b><span>pontos</span></div></div>
     <div class="m-info">${nb ? '<span class="chip chip-gold">Novo recorde!</span>' : `<span class="chip">Recorde: <b>${best}</b></span>`}</div>
@@ -1246,7 +1246,7 @@ let last = performance.now(), boardToggle = false, lockTipT = 0.5, musicHealT = 
 function tick(now) { requestAnimationFrame(tick); perfFrame(now); const t0 = performance.now(); step(now); perf.js += performance.now() - t0; perf.jsN++; }
 // ---- performance meter: an on-screen FPS readout (Settings > Mostrar FPS) and, in the desktop
 // build, a line in fatal-error.log every 15 s of play with real frame times from this machine
-const perf = { last: 0, times: [], logT: 0, show: localStorage.getItem('doodle_fps') === '1', el: null, uiT: 0, js: 0, jsN: 0, rnd: 0 };
+const perf = { last: 0, times: [], logT: 0, show: localStorage.getItem('fatal_fps') === '1', el: null, uiT: 0, js: 0, jsN: 0, rnd: 0 };
 { const r0 = R.render.bind(R); R.render = (...a) => { const t = performance.now(); r0(...a); perf.rnd += performance.now() - t; }; }
 function perfFrame(now) {
   const ms = perf.last ? now - perf.last : 16.7; perf.last = now; if (ms > 1000) return;
@@ -1321,7 +1321,7 @@ function stepInner(now) {
     else { pause(); input.exitLock(); }
   }
   else if ((st === 'play' || st === 'dying') && game.menu && (input.pressed('jump') || input.pressed('confirm'))) resume();
-  if (input.pressed('music')) { musicWanted = !musicWanted; localStorage.setItem('doodle_music', musicWanted ? '1' : '0'); audio.musicOn(musicWanted); hud.tip(musicWanted ? 'Música Ligada' : 'Música Desligada', 1.5); }
+  if (input.pressed('music')) { musicWanted = !musicWanted; localStorage.setItem('fatal_music', musicWanted ? '1' : '0'); audio.musicOn(musicWanted); hud.tip(musicWanted ? 'Música Ligada' : 'Música Desligada', 1.5); }
   if (online() && playing) {
     if (input.usingGamepad && input.pressed('score')) boardToggle = !boardToggle;
     const want = ((input.down('score') && !input.usingGamepad) || boardToggle) && !game.menu; if (want !== !hud.el.board.hidden) hud.setBoard(want ? boardHTML() : null);

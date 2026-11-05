@@ -89,3 +89,4 @@ https://github.com/jotasrn/Fatal-Error/releases/latest/download/SHA256SUMS.txt
 
 - **Na nuvem (GitHub Actions)**:
   Na aba **Actions → release → Run workflow**, dispare manualmente na branch `main`. Como não há tag `v*`, o workflow compila, testa e disponibiliza o pacote como artefato de download do Actions, **sem criar Release pública** e sem disparar auto-update nos jogadores.
+

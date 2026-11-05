@@ -11,7 +11,7 @@ import { authorizeClientPacketOnHost, authorizePacketOnClient } from './security
 
 // a local dev/LAN server gets its own namespace so testing and LAN play never wander into a live public lobby
 const LOCAL = typeof location !== 'undefined' && /^(localhost|127\.0\.0\.1|\[::1\]|192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.|.*\.local)$/.test(location.hostname);
-const PREFIX = LOCAL ? 'doodledev-' : 'doodledistrict-';
+const PREFIX = LOCAL ? 'fatalerrordev-' : 'fatalerror-';
 const PUBLIC_SLOTS = 16;
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 export const makeCode = () => Array.from({ length: 5 }, () => ALPHABET[Math.floor(Math.random() * ALPHABET.length)]).join('');

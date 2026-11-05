@@ -23,7 +23,7 @@ export function sanitizeText(value, maxLen = 120) {
 }
 
 /** Sanitiza apelido de jogador (ate 14 caracteres limpos). */
-export function sanitizeName(value, fallback = 'Doodle') {
+export function sanitizeName(value, fallback = 'Jogador') {
   const clean = sanitizeText(value, 14);
   return clean || fallback;
 }

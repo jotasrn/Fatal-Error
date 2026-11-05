@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Doodle District / Doodle Shooter - Executável Nativo & Servidor LAN Seguro
+Fatal Error - Executável Nativo & Servidor LAN Seguro
 Executa o jogo diretamente em uma janela nativa (WebView2 Desktop), sem abrir navegador externo,
 enquanto mantém o servidor HTTP seguro rodando em segundo plano na rede local (LAN)
 para que seus colegas possam se conectar ao mesmo lobby.
@@ -300,7 +300,7 @@ def main():
             info_file = os.path.join(target_dir, "CONECTAR_LAN.txt")
             with open(info_file, "w", encoding="utf-8") as f:
                 f.write("=====================================================\n")
-                f.write("      DOODLE DISTRICT - COMO JOGAR COM COLEGAS (LAN) \n")
+                f.write("      FATAL ERROR - COMO JOGAR COM COLEGAS (LAN) \n")
                 f.write("=====================================================\n\n")
                 f.write("1. Link principal para seus colegas abrirem no navegador:\n")
                 f.write(f"   {primary_lan_url}\n\n")
@@ -322,7 +322,7 @@ def main():
             pass
 
     print("=" * 68)
-    print("      DOODLE DISTRICT - JOGO NATIVO & SERVIDOR LAN SEGURO")
+    print("      FATAL ERROR - JOGO NATIVO & SERVIDOR LAN SEGURO")
     print("=" * 68)
     print(" [OK] Modo Executável Nativo:             ATIVADO (Janela Desktop Própria)")
     print(" [OK] Servidor Web LAN:                   ATIVADO (Porta %d)" % actual_port)
@@ -350,7 +350,7 @@ def main():
     else:
         # Abre a janela nativa do jogo
         window = webview.create_window(
-            title="Doodle District",
+            title="Fatal Error",
             url=local_url,
             width=1280,
             height=720,
