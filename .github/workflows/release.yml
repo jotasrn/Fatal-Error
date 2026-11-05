@@ -47,17 +47,15 @@ jobs:
           VERSAO="${GITHUB_REF_NAME#v}"
           npm version "$VERSAO" --no-git-tag-version --allow-same-version
 
-      - name: Empacotar, aplicar Fuses e publicar no GitHub Releases
+      - name: Empacotar e aplicar Fuses
         if: startsWith(github.ref, 'refs/tags/v')
         run: >
           npx electron-builder --win nsis zip
-          --config.directories.output=release --publish always
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          --config.directories.output=release --publish never
 
-      # Links fixos que nunca mudam (.../releases/latest/download/Fatal-Error-Setup.exe)
-      # + hashes SHA-256 de integridade + notas automaticas do release.
-      - name: Links fixos de download, SHA256SUMS e notas do release
+      # Publica os binarios, manifestos do auto-update e notas via GitHub CLI oficial.
+      # Usar gh release e imune a falhas de timeout/draft do publisher interno do electron-builder.
+      - name: Publicar release, latest.yml e links fixos de download
         if: startsWith(github.ref, 'refs/tags/v')
         working-directory: release
         shell: bash
@@ -71,8 +69,6 @@ jobs:
           cp "Fatal-Error-Portable-${VERSAO}.zip" Fatal-Error-Portable.zip
           sha256sum Fatal-Error-Setup.exe Fatal-Error-Portable.zip \
             "Fatal-Error-Setup-${VERSAO}.exe" "Fatal-Error-Portable-${VERSAO}.zip" > SHA256SUMS.txt
-          gh release upload "$TAG" Fatal-Error-Setup.exe Fatal-Error-Portable.zip SHA256SUMS.txt \
-            --clobber --repo "$GITHUB_REPOSITORY"
 
           BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
           {
@@ -89,9 +85,28 @@ jobs:
             echo "> **Quem ja tem o Fatal Error instalado nao precisa baixar nada:** o jogo detecta e baixa esta versao em segundo plano sem interromper partidas em andamento."
             echo
             gh api -X POST "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
-              -f tag_name="$TAG" --jq .body
+              -f tag_name="$TAG" --jq .body || true
           } > notas.md
-          gh release edit "$TAG" --notes-file notas.md --repo "$GITHUB_REPOSITORY"
+
+          ARQUIVOS=(
+            "Fatal-Error-Setup-${VERSAO}.exe"
+            "Fatal-Error-Setup-${VERSAO}.exe.blockmap"
+            "Fatal-Error-Portable-${VERSAO}.zip"
+            "latest.yml"
+            "Fatal-Error-Setup.exe"
+            "Fatal-Error-Portable.zip"
+            "SHA256SUMS.txt"
+          )
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${ARQUIVOS[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$TAG" --title "Fatal Error ${TAG}" --notes-file notas.md --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" "${ARQUIVOS[@]}" \
+              --title "Fatal Error ${TAG}" \
+              --notes-file notas.md \
+              --repo "$GITHUB_REPOSITORY"
+          fi
 
       - name: Empacotar build de teste sem publicar (workflow_dispatch)
         if: "!startsWith(github.ref, 'refs/tags/v')"
