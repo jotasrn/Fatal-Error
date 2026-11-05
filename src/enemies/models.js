@@ -344,7 +344,13 @@ export function buildQuadruped(mat, solid, T) {
   const head = blob(isSpider ? 0.22 : 0.24, isSpider ? 0.18 : 0.22, isSpider ? 0.22 : 0.32, 0, 0, 0, mat, headG);
   parts.head = headG;
 
-  if (!isSpider) {
+  if (T.isPet) {
+    // vira-lata caramelo: orelhonas caídas, focinho, coleira e corpo mais curto
+    torso.children[0].scale.set(0.3, 0.28, 0.52);
+    for (const sd of [-1, 1]) { const ear = blob(0.05, 0.17, 0.11, sd * 0.2, 0.02, -0.04, solid, headG); ear.rotation.z = sd * 0.35; }
+    bx(0.17, 0.15, 0.26, 0, -0.05, 0.26, mat, headG); blob(0.05, 0.04, 0.04, 0, -0.01, 0.4, solid, headG);
+    const collar = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.035, 5, 12), solid); collar.position.set(0, 0.22, 0.5); collar.rotation.x = 1.25; torso.add(collar);
+  } else if (!isSpider) {
     const earL = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.22, 4), mat); earL.position.set(-0.14, 0.2, -0.05); earL.rotation.z = 0.3; headG.add(earL);
     const earR = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.22, 4), mat); earR.position.set(0.14, 0.2, -0.05); earR.rotation.z = -0.3; headG.add(earR);
     bx(0.16, 0.14, 0.22, 0, -0.04, 0.22, mat, headG);

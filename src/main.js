@@ -298,6 +298,7 @@ enemies.onKill = (e, info, over) => {
   if (info.source === 'katana' || info.source === 'focus') { game.katanaStreak++; player.weapons[player.katanaIndex].addBlood(0.42); if (game.katanaStreak >= KATANA_CHARGE_KILLS) enterFocus(); }
   else if (info.source !== 'blast') game.katanaStreak = 0;
   if (info.source === 'deflect') { label = 'Rebatido'; pts += 120; }
+  if (info.source === 'car') { label = 'Atropelado'; if (pts < 0) pts = 0; }
   if (info.source === 'fall') label = 'Caiu da Página';
   else if (!player.body.onGround && info.source !== 'deflect') { label += ' · Abate Aéreo'; pts += 40; }
   game.addScore(pts, label); audio.kill(!!info.crit || e.T.boss);
@@ -354,6 +355,47 @@ function triggerBrasiliaManifestation() {
   if (net.active && net.isHost) net.send('bmanif', { zone: zoneLabel });
 }
 
+// Trânsito de Brasília: os veículos empurram/ferem o jogador e atropelam os bots (o host decide os abates)
+const _carDir = new THREE.Vector3();
+function carOverlap(car, p, r, maxY) {
+  if (car.hidden || Math.abs(p.y) > maxY) return false;
+  const hw = car.axis === 'x' ? car.d / 2 : car.w / 2, hd = car.axis === 'x' ? car.w / 2 : car.d / 2;
+  return Math.abs(p.x - car.x) < hw + r && Math.abs(p.z - car.z) < hd + r;
+}
+function updateTrafficHits() {
+  const now = performance.now();
+  for (const car of level.cars) {
+    if (car.hidden) continue;
+    const moving = car.speed > 1.5;
+    const riding = player.grapple && player.grapple.state !== 'idle' && player.grapple.mover && player.grapple.mover.car === car;
+    if (player.alive && !riding && carOverlap(car, player.body.pos, 0.55, 2.4)) {
+      if (!car._hornT || now - car._hornT > 1000) { car._hornT = now; audio.horn(car.group.position); }
+      if (moving && (!car._hitT || now - car._hitT > 450)) {
+        car._hitT = now;
+        if (car.axis === 'z') _carDir.set(player.body.pos.x > car.x ? 0.9 : -0.9, 0.35, car.dir * 0.55);
+        else _carDir.set(car.dir * 0.55, 0.35, player.body.pos.z > car.z ? 0.9 : -0.9);
+        player.knockback(_carDir.normalize(), car.isBus ? 13 : 9);
+        const dmg = car.isBus ? 22 : 14; player.takeDamage(dmg, car.group.position);
+        hud.kill((car.isBus ? 'Atropelado pelo ônibus' : 'Atropelado') + ' · -' + dmg + ' Vida', 0);
+      } else if (!moving) { // parado no semáforo: só não deixa atravessar a lataria
+        if (car.axis === 'z') player.body.pos.x = car.x + Math.sign(player.body.pos.x - car.x || 1) * (car.w / 2 + 0.56);
+        else player.body.pos.z = car.z + Math.sign(player.body.pos.z - car.z || 1) * (car.w / 2 + 0.56);
+      }
+    }
+    if (!moving || (online() && !net.isHost)) continue;
+    for (const e of enemies.enemies) {
+      if (!e.alive || e.T.flying || e.state === 'spawn') continue;
+      if (!carOverlap(car, e.body.pos, e.body.halfW + 0.1, 2.6)) continue;
+      if (car.axis === 'z') _carDir.set(e.body.pos.x > car.x ? 0.6 : -0.6, 0.45, car.dir); else _carDir.set(car.dir, 0.45, e.body.pos.z > car.z ? 0.6 : -0.6);
+      _carDir.normalize();
+      if (e.T.isPet) { e.body.pos.x += _carDir.x * 1.2; e.body.pos.z += _carDir.z * 1.2; continue; } // o Orelha sai da frente
+      if (e.T.boss) { if (!e._carT || now - e._carT > 800) { e._carT = now; enemies.damage(e, 120, { source: 'car', dir: _carDir.clone(), point: e.center.clone(), part: 'torso' }); } continue; }
+      enemies.damage(e, 9999, { source: 'car', dir: _carDir.clone(), point: e.center.clone(), part: 'torso' });
+      if (!car._hornT || now - car._hornT > 700) { car._hornT = now; audio.horn(car.group.position); }
+    }
+  }
+}
+
 function spawnBrasiliaCivilians() {
   const civSpots = [
     ['civilian', -84, 0.3, -455],   // Estádio Mané Garrincha
@@ -368,17 +410,25 @@ function spawnBrasiliaCivilians() {
     ['vendor', 0, 7, -213],         // Plataforma superior da Rodoviária
     ['civilian', -28, 7, -210],     // Mezanino da Rodoviária
     ['civilian', 46, 0, -140],      // Calçada do Museu Nacional
-    ['civilian', 44, 0, -100],      // Entrada da Catedral
+    ['civilian', 44, 0, -108],      // Entrada da Catedral
+    ['civilian', 186, 0, -347],     // Comércio da W3 Sul
+    ['vendor', -186, 0, -277],      // Comércio local da Asa Norte
+    ['civilian', 192, 0, -296],     // Igrejinha (307 Sul)
+    ['civilian', -170, 0, -246],    // Superquadra Norte
     ['civilian', -46, 0, -128],     // Teatro Nacional
     ['politician', -42, 0, -24],    // Ministério Norte
     ['politician', 42, 0, 32],      // Ministério Sul
     ['politician', 0, 5, 172],      // Rampa / Salão do Congresso Nacional
     ['politician', -36, 0, 214],    // Praça dos Três Poderes / Planalto
   ];
+  // encaixa cada ponto no nó de navegação mais próximo: alguns caíam dentro de blocos e despencavam do mapa
+  const snap = (v) => { const id = nav.nearestNode(v, 4, 3); if (id >= 0) { const nd = nav.nodes[id]; v.set(nd.x, nd.y + 0.05, nd.z); } return v; };
   for (const [kind, x, y, z] of civSpots) {
-    const c = enemies.spawn(kind, new THREE.Vector3(x, y, z));
+    const c = enemies.spawn(kind, snap(new THREE.Vector3(x, y, z)));
     c.state = 'hunt';
   }
+  // Orelha: o cachorro caramelo que acompanha os jogadores pela cidade (não pode ser ferido)
+  if (!enemies.enemies.some((e) => e.alive && e.T.isPet)) { const sp = level.playerStart; const o = enemies.spawn('orelha', snap(new THREE.Vector3(sp.x + 3, sp.y, sp.z + 3))); o.state = 'hunt'; }
   triggerBrasiliaManifestation();
 }
 
@@ -390,7 +440,7 @@ ctx.onPlayerWanted = () => {
 };
 
 ctx.onCivilianKilled = (civ, info) => {
-  if (info && (info.source === 'bot' || info.source === 'fall')) return;
+  if (info && (info.source === 'bot' || info.source === 'fall' || info.source === 'car')) return;
   ctx.playerWanted = true;
   if (ctx.onPlayerWanted) ctx.onPlayerWanted();
   audio.siren(civ.center);
@@ -1341,22 +1391,7 @@ function stepInner(now) {
     game.time += sdt; if (player.shieldT > 0) player.shieldT -= dt;
     musicHealT -= dt; if (musicHealT <= 0) { musicHealT = 2; if (musicWanted && st === 'play' && !audio.musicPlaying && audio.ctx) audio.musicOn(true); if (input.anyInput) audio.resume(); }
     { const B = level.bounds, bp = player.body.pos; if (bp.x < B.minX - 8 || bp.x > B.maxX + 8 || bp.z < B.minZ - 8 || bp.z > B.maxZ + 8 || bp.y > 150) bp.y = -100; }
-    if (level.cars && playing && player.alive) {
-      for (const car of level.cars) {
-        const dx = Math.abs(player.body.pos.x - car.laneX);
-        const dz = Math.abs(player.body.pos.z - car.z);
-        if (dx < (car.w / 2 + 0.6) && dz < (car.d / 2 + 0.7) && Math.abs(player.body.pos.y) < 2.2) {
-          if (!car._hornT || performance.now() - car._hornT > 1000) {
-            car._hornT = performance.now();
-            audio.horn(car.group.position);
-          }
-          const pushDirX = car.laneX < 0 ? 1 : -1;
-          player.knockback(new THREE.Vector3(pushDirX * 0.8, 0.35, car.dir * 0.5).normalize(), 9);
-          player.takeDamage(14, car.group.position);
-          hud.kill('Impacto de Trânsito · -14 Vida', 0);
-        }
-      }
-    }
+    if (level.cars && playing) updateTrafficHits();
     player.update(sdt); safeEnemies(sdt); effects.update(sdt); updatePickups(sdt); netUpdate(dt);
     if (st === 'play' && (!online() || net.isHost)) {
       updateWaves(sdt);

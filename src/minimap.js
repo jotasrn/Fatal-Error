@@ -43,7 +43,7 @@ export class Minimap {
     for (const e of enemies) {
       if (!e.alive || !e.body) continue; const ex = e.body.pos.x, ez = e.body.pos.z;
       if (Math.abs(ex - px) > lim || Math.abs(ez - pz) > lim) continue;
-      const T = e.T; const col = T.isPolice ? '#2f6fe0' : T.isCivilian ? '#9a9a9a' : T.isProtester ? '#ff5a3c' : '#e3242b';
+      const T = e.T; const col = T.isPet ? '#f0a020' : T.isPolice ? '#2f6fe0' : T.isCivilian ? '#9a9a9a' : T.isProtester ? '#ff5a3c' : '#e3242b';
       dot(ex, ez, T.boss ? 6 : 3.4, col);
     }
     if (remotes) for (const r of remotes) { if (!r.alive || !r.root || r.away) continue; dot(r.body.pos.x, r.body.pos.z, 4.2, '#8a3ce0'); }

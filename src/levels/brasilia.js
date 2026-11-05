@@ -9,9 +9,9 @@
 // - Esplanada dos Ministérios (12 blocos + anexos), Itamaraty, Palácio da Justiça, Congresso Nacional e Praça dos Três Poderes
 // - Trânsito contínuo em todo o Eixo Monumental (36 veículos instanciados)
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { INK, makeInkMaterial } from '../render.js';
 import { rand, TAU } from '../util.js';
+import { buildTraffic } from './traffic.js';
 
 export function buildBrasilia(B, arena = false) {
   const { L, box, slab, stairs, rail, cyl, sphere, ring, spawn, sniper, pickup, planes, addGeo, collider, scene } = B;
@@ -22,7 +22,7 @@ export function buildBrasilia(B, arena = false) {
   const MIN_Z = -520, MAX_Z = 250;
   const CZ = (MIN_Z + MAX_Z) / 2, HZ = (MAX_Z - MIN_Z) / 2;
   const T = 6, PH = 28;
-  L.bounds.minX = -P; L.bounds.maxX = P; L.bounds.minZ = MIN_Z; L.bounds.maxZ = MAX_Z;
+  L.bounds.minZ = MIN_Z; L.bounds.maxZ = MAX_Z;
   // Nasce no coração central entre Fonte da Torre de TV, Conjunto Nacional, Pátio Brasil e Rodoviária
   L.playerStart.set(0, 0, -252);
 
@@ -38,38 +38,55 @@ export function buildBrasilia(B, arena = false) {
   }
 
   // ---------------- Chão e limites ----------------
-  box(0, -1, CZ, 2 * P + T, 1, 2 * HZ + T, { ink: BK });
+  // O mapa tem forma de cruz: o Eixo Monumental (|x| <= P) de ponta a ponta e, entre a W3 e a L2,
+  // as Asas Norte (-X) e Sul (+X) abertas até WING (superquadras, comércio da W3, 700s, Eixão).
+  const WING = 250, WZ1 = -440, WZ2 = -50; // faixa das asas no eixo Z
+  L.bounds.minX = -WING; L.bounds.maxX = WING;
+  box(0, -0.85, CZ, 2 * P + T, 0.85, 2 * HZ + T, { ink: BK });
+  for (const s of [-1, 1]) box(s * (P + WING) / 2, -0.85, (WZ1 + WZ2) / 2, WING - P + T, 0.85, WZ2 - WZ1 + T, { ink: BK });
   box(0, 0, MIN_Z, 2 * P + T, PH, T, { ink: BK });
   box(0, 0, MAX_Z, 2 * P + T, PH, T, { ink: BK });
-  box(-P, 0, CZ, T, PH, 2 * HZ + T, { ink: BK });
-  box(P, 0, CZ, T, PH, 2 * HZ + T, { ink: BK });
-  collider(0, 82, CZ, 2 * P + 40, 8, 2 * HZ + 40, { noNav: true, noGrapple: true });
+  for (const s of [-1, 1]) {
+    box(s * P, 0, (MIN_Z + WZ1) / 2, T, PH, WZ1 - MIN_Z + T, { ink: BK }); // Eixo, trecho oeste
+    box(s * P, 0, (WZ2 + MAX_Z) / 2, T, PH, MAX_Z - WZ2 + T, { ink: BK }); // Eixo, trecho leste
+    box(s * WING, 0, (WZ1 + WZ2) / 2, T, PH, WZ2 - WZ1 + T, { ink: BK }); // fundo da asa
+    box(s * (P + WING) / 2, 0, WZ1, WING - P + T, PH, T, { ink: BK });
+    box(s * (P + WING) / 2, 0, WZ2, WING - P + T, PH, T, { ink: BK });
+  }
+  collider(0, 82, CZ, 2 * WING + 40, 8, 2 * HZ + 40, { noNav: true, noGrapple: true });
+  // vias que cruzam o Eixo (W3 e L2): centro em Z e meia-largura
+  const W3Z = -363, L2Z = -91, XR = 7, EIXAO_Z = -213;
+  const CROSS = [[W3Z - XR, W3Z + XR], [L2Z - XR, L2Z + XR]];
+  const crossFree = (z, pad = 0) => !CROSS.some(([a, b]) => z > a - pad && z < b + pad);
+  // segmentos de [z1, z2] fora dos cruzamentos
+  const segs = (z1, z2, pad = 0) => { let out = [[z1, z2]]; for (const [a, b] of CROSS) { const n = []; for (const [p, q] of out) { if (b + pad <= p || a - pad >= q) { n.push([p, q]); continue; } if (a - pad > p) n.push([p, a - pad]); if (b + pad < q) n.push([b + pad, q]); } out = n; } return out; };
 
   // ---------------- Eixo Monumental Contínuo (Oeste -516 → Congresso +150) ----------------
   const ROAD_START = MIN_Z + 4, ROAD_END = 150;
   // Gramado central dividido em trechos limpos entre os monumentos do eixo
-  for (const [z1, z2] of [[-510, -432], [-372, -360], [-280, -228], [-198, 142]]) {
+  for (const [z1, z2] of [[-510, -432], [-280, -228], ...segs(-198, 142)]) {
     box(0, 0, (z1 + z2) / 2, 44, 0.22, z2 - z1, { ink: GN });
   }
   for (const s of [-1, 1]) {
     const rx = s * 30, rz1 = ROAD_START, rz2 = ROAD_END + 4;
     box(rx, 0, (rz1 + rz2) / 2, 16, 0.12, rz2 - rz1, { ink: BK, noNav: false }); // Vias N1 / S1 (3 faixas cada)
-    for (let z = rz1 + 10; z < rz2 - 4; z += 13) for (const lx of [rx - 2.6, rx + 2.6]) box(lx, 0.13, z, 0.3, 0.04, 4.8, { ink: OR, noCollide: true });
-    box(s * 22.3, 0, (rz1 + rz2) / 2, 0.5, 0.3, rz2 - rz1, { ink: BK }); // meio-fio interno
-    box(s * 40, 0, CZ, 4, 0.25, 2 * HZ - 8, { ink: GN }); // calçada / canteiro externo
+    for (let z = rz1 + 10; z < rz2 - 4; z += 13) if (crossFree(z, 6)) for (const lx of [rx - 2.6, rx + 2.6]) box(lx, 0.13, z, 0.3, 0.04, 4.8, { ink: OR, noCollide: true });
+    for (const [a, b] of segs(rz1, rz2)) box(s * 22.3, 0, (a + b) / 2, 0.5, 0.3, b - a, { ink: BK }); // meio-fio interno
+    for (const [a, b] of segs(CZ - HZ + 4, CZ + HZ - 4)) box(s * 40, 0, (a + b) / 2, 4, 0.25, b - a, { ink: GN }); // calçada / canteiro externo
     // Túnel sob o Congresso
     box(s * 21.7, 0, ROAD_END + 2, 1.2, 6, 4, { ink: BK }); box(s * 38.3, 0, ROAD_END + 2, 1.2, 6, 4, { ink: BK });
     box(s * 30, 6, ROAD_END + 2, 18, 1.6, 4, { ink: BK });
     box(s * 30, 0.1, ROAD_END + 4, 16, 5.9, 0.4, { ink: BK });
   }
   // Faixas de pedestre ao longo de todo o Eixo
-  for (const z of [-440, -366, -274, -234, -140, -38, 18, 84]) for (const s of [-1, 1]) {
+  for (const z of [-440, W3Z - XR - 3, W3Z + XR + 3, -274, -234, -140, L2Z - XR - 3, L2Z + XR + 3, -38, 18, 84]) for (const s of [-1, 1]) {
     for (let i = 0; i < 7; i++) box(s * (23.5 + i * 2.1), 0.13, z, 1.1, 0.04, 4, { ink: OR, noCollide: true });
   }
 
   // Postes de iluminação ao longo do Eixo Monumental
   for (let z = -496; z <= 130; z += 30) for (const s of [-1, 1]) {
     if (z > -228 && z < -198) continue;
+    if (!crossFree(z, 2)) continue;
     const x = s * 21.2; cyl(x, 0, z, 0.13, 9, { ink: BK, seg: 6 });
     box(x - s * 1.1, 8.8, z, 2.2, 0.16, 0.2, { ink: BK, noCollide: true }); box(x - s * 2.1, 8.4, z, 0.6, 0.4, 0.5, { ink: OR, noCollide: true });
   }
@@ -80,12 +97,12 @@ export function buildBrasilia(B, arena = false) {
     deco(new THREE.TubeGeometry(c, 5, 0.22, 5, false), BK); collider(x, 0, z, 0.7, h, 0.7, { noNav: false });
     for (let i = 0; i < 4; i++) { const g = new THREE.SphereGeometry(1, 7, 5); g.scale(rand(1.6, 2.3), rand(0.8, 1.1), rand(1.6, 2.3)); g.translate(x + rand(-1.4, 1.4), h + rand(-0.3, 0.8), z + rand(-1.4, 1.4)); deco(g, ink); }
   }
-  const busyZ = (z, s) => [-336, -322, -276, -242, -214, -150, -80, -52, -24, 4, 32, 60, -370, -260, -104, -10, 74].some((b) => Math.abs(z - b) < 9) || (s > 0 && Math.abs(z + 154) < 6);
+  const busyZ = (z, s) => !crossFree(z, 6) || [-336, -322, -276, -242, -214, -150, -72, -44, -16, 12, 40, 68, -386, -260, -112, -10, 74].some((b) => Math.abs(z - b) < 9) || (s > 0 && Math.abs(z + 154) < 6);
   for (let z = -492; z <= 136; z += 22) for (const s of [-1, 1]) {
     if (!busyZ(z, s)) ipe(s * 40 + rand(-0.6, 0.6), z + rand(-3, 3), (Math.floor(z / 22) + (s > 0 ? 1 : 0)) % 3 === 0 ? PK : (Math.floor(z / 22) % 2 ? OR : GN), rand(4.5, 6));
   }
   for (const [x, z, ink] of [[-14, -470, OR], [14, -448, PK], [-12, -264, GN], [12, -244, OR], [-12, -120, OR], [10, -96, PK], [-8, -64, GN], [14, -6, OR], [-15, 46, PK], [9, 98, GN], [-4, 112, OR]]) {
-    ipe(x, z, ink, rand(5, 6.5));
+    if (crossFree(z, 3)) ipe(x, z, ink, rand(5, 6.5));
   }
 
   // Bancos e muretas de cobertura ao longo dos gramados
@@ -93,7 +110,7 @@ export function buildBrasilia(B, arena = false) {
     box(x, 0.22, z, 4.2, 0.9, 1.6, { ink: BK }); box(x, 1.12, z, 3.6, 0.5, 1.0, { ink: GN, noCollide: true });
   }
   // Paradas de ônibus ao longo das vias N1 e S1
-  for (const z of [-370, -260, -104, -10, 74]) for (const s of [-1, 1]) {
+  for (const z of [-386, -260, -112, -10, 74]) for (const s of [-1, 1]) {
     const x = s * 41; box(x + s * 1.3, 0.25, z, 0.25, 2.7, 6, { ink: BL }); box(x, 2.95, z, 3.2, 0.2, 6.6, { ink: BK });
     box(x + s * 0.6, 0.25, z, 0.6, 0.5, 4.5, { ink: BK, noCollide: true }); cyl(x - s * 1.3, 0.25, z - 3.4, 0.08, 3.2, { ink: BK, seg: 5 });
   }
@@ -470,8 +487,8 @@ export function buildBrasilia(B, arena = false) {
 
   // ---------------- 4. Catedral Metropolitana (Sul) ----------------
   {
-    const cx = 64, cz = -112, R = 10.5, H = 21;
-    cyl(cx, 0, cz, R + 7, 0.3, { ink: BL, seg: 28, noCollide: true }); collider(cx, 0, cz, 2, 0.3, 2);
+    const cx = 64, cz = -114, R = 10.5, H = 21;
+    cyl(cx, 0, cz, R + 4, 0.3, { ink: BL, seg: 28, noCollide: true }); collider(cx, 0, cz, 2, 0.3, 2);
     box(cx, 0.3, cz, 2 * R * 0.95, 0.1, 2 * R * 0.95, { ink: BK, noCollide: true });
     for (let i = 0; i < 16; i++) {
       const a = (i / 16) * TAU, ca = Math.cos(a), sa = Math.sin(a);
@@ -490,7 +507,7 @@ export function buildBrasilia(B, arena = false) {
   }
 
   // ---------------- 5. Os Ministérios (6 por lado + Anexos e Edifícios Complementares) ----------------
-  const zMinistries = [-80, -52, -24, 4, 32, 60];
+  const zMinistries = [-72, -44, -16, 12, 40, 68];
   const MW = 34, MH = 20, MD = 12;
   for (const s of [-1, 1]) for (let idx = 0; idx < zMinistries.length; idx++) {
     const mz = zMinistries[idx];
@@ -593,80 +610,229 @@ export function buildBrasilia(B, arena = false) {
     L.arenaSpawns.push(new THREE.Vector3(-54, 3, 222), new THREE.Vector3(54, 1.2, 222), new THREE.Vector3(0, 0, 218));
   }
 
-  // ---------------- 9. Trânsito Contínuo no Eixo Monumental (36 veículos instanciados) ----------------
-  const cars = [];
-  const carGeos = new Map();
-  function makeCar(type, ink) {
-    const g = new THREE.Object3D(); const isBus = type === 'bus';
-    const w = isBus ? 2.8 : 1.95, h = isBus ? 2.7 : 1.15, d = isBus ? 10 : type === 'beetle' ? 3.6 : 4.5;
-    if (carGeos.has(type)) return { group: g, w, h, d, isBus, type, ink };
-    const body = [], dark = [], light = [];
-    const add = (arr, geo, x, y, z) => { geo.translate(x, y, z); arr.push(geo); };
-    if (type === 'beetle') { const s = new THREE.SphereGeometry(1, 12, 8); s.scale(w / 2, h * 1.05, d / 2); add(body, s, 0, 0.5, 0); add(dark, new THREE.BoxGeometry(w * 0.7, 0.5, d * 0.35), 0, 1.25, -0.1); }
-    else {
-      add(body, new THREE.BoxGeometry(w, h, d), 0, h / 2 + 0.38, 0);
-      if (isBus) { for (let i = -3; i <= 3; i++) add(dark, new THREE.BoxGeometry(w + 0.04, 0.8, 1.05), 0, h * 0.72 + 0.4, i * 1.3); add(light, new THREE.BoxGeometry(w + 0.06, 0.3, d + 0.06), 0, h * 0.42 + 0.38, 0); add(dark, new THREE.BoxGeometry(w * 0.9, 0.5, 0.05), 0, h + 0.1, d / 2 + 0.02); }
-      else { add(dark, new THREE.BoxGeometry(w * 0.86, 0.75, d * 0.5), 0, h + 0.75, -0.2); add(dark, new THREE.BoxGeometry(w + 0.04, 0.22, 0.25), 0, 0.55, d / 2); add(dark, new THREE.BoxGeometry(w + 0.04, 0.22, 0.25), 0, 0.55, -d / 2); }
-      if (type === 'taxi') add(light, new THREE.BoxGeometry(0.8, 0.3, 0.4), 0, h + 1.3, -0.2);
-      if (type === 'police') { add(light, new THREE.BoxGeometry(0.5, 0.25, 0.35), -0.35, h + 1.25, -0.2); add(dark, new THREE.BoxGeometry(0.5, 0.25, 0.35), 0.35, h + 1.25, -0.2); add(light, new THREE.BoxGeometry(w + 0.05, 0.18, d * 0.6), 0, h * 0.55 + 0.38, 0); }
-    }
-    const rR = isBus ? 0.55 : 0.36, wZ = d * 0.32;
-    for (const sx of [-w / 2 - 0.06, w / 2 + 0.06]) for (const sz of [-wZ, wZ]) { const c = new THREE.CylinderGeometry(rR, rR, 0.22, 10); c.rotateZ(Math.PI / 2); add(dark, c, sx, rR, sz); }
-    for (const sx of [-w * 0.33, w * 0.33]) { add(light, new THREE.BoxGeometry(0.32, 0.2, 0.08), sx, 0.75, d / 2 + 0.04); add(dark, new THREE.BoxGeometry(0.3, 0.18, 0.08), sx, 0.75, -d / 2 - 0.04); }
-    const parts = [];
-    for (const [arr, part] of [[body, 'body'], [dark, 'dark'], [light, 'light']]) { if (!arr.length) continue; const merged = mergeGeometries(arr, false); for (const x of arr) x.dispose(); parts.push({ part, geo: merged }); }
-    carGeos.set(type, parts);
-    return { group: g, w, h, d, isBus, type, ink };
+  // =========================================================================
+  // ASAS NORTE (-X) E SUL (+X): W3, L2, EIXÃO, SUPERQUADRAS, COMÉRCIO E 700s
+  // Ordem real de oeste para leste: 700s | W3 | 500s | 300s | comércio local | 100s | EIXÃO |
+  // 200s | comércio local | 400s | L2 | 600s (Setor de Grandes Áreas)
+  // =========================================================================
+  const darkMat = makeInkMaterial({ ink: BK, fill: true });
+  const darkBox = (x, y, z, w, h, d) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), darkMat); m.position.set(x, y + h / 2, z); m.matrixAutoUpdate = false; m.updateMatrix(); scene.add(m); L.meshes.push(m); };
+  // boca de túnel com o fundo escuro (onde os carros entram/saem)
+  function tunnelMouth(x, zc, width, inward) {
+    const t = 1.2, hgt = 6.2;
+    box(x, 0, zc - width / 2 - t / 2, 10, hgt, t, { ink: BK }); box(x, 0, zc + width / 2 + t / 2, 10, hgt, t, { ink: BK });
+    slab(x - 5, zc - width / 2 - t, x + 5, zc + width / 2 + t, hgt + 1.2, 1.2, { ink: BK });
+    box(x + inward * 4.6, hgt - 0.6, zc, 0.6, 0.8, width + 2.4, { ink: OR, noCollide: true }); // faixa de concreto pintada
+    darkBox(x - inward * 4.2, 0.1, zc, 1.4, hgt - 0.2, width);
+    collider(x - inward * 4.2, 0, zc, 1.4, hgt, width, { noNav: true });
   }
-  const kinds = ['sedan', 'bus', 'beetle', 'taxi', 'sedan', 'police', 'beetle', 'sedan', 'bus'];
-  const inks = [BL, GN, RD, OR, PK, BL];
-  const routeA = ROAD_START - 10, routeB = ROAD_END + 10, routeLen = routeB - routeA;
-  let k = 0;
-  for (const s of [-1, 1]) for (const lane of [25, 30, 35]) for (let i = 0; i < 6; i++) {
-    const type = kinds[k % kinds.length]; const ink = type === 'police' ? BK : type === 'taxi' ? BL : inks[k % inks.length]; k++;
-    const c = makeCar(type, ink);
-    c.laneX = s * lane; c.dir = s < 0 ? 1 : -1; c.z = routeA + ((i + (lane - 25) / 15) / 6) * routeLen + rand(-8, 8);
-    c.speed = (type === 'bus' ? 12 : lane === 35 ? 16 : lane === 30 ? 20 : 24) + rand(-1.5, 1.5);
-    c.group.rotation.y = c.dir > 0 ? 0 : Math.PI; c.group.position.set(c.laneX, 0, c.z);
-    cars.push(c);
-  }
-  const carMat = makeInkMaterial({ ink: BK, fill: true, side: THREE.DoubleSide });
-  const carPools = [];
-  for (const [type, parts] of carGeos) {
-    const list = cars.filter((c) => c.type === type);
-    for (const { part, geo } of parts) {
-      const im = new THREE.InstancedMesh(geo, carMat, list.length); im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(list.length * 3), 3);
-      list.forEach((c, i) => im.instanceColor.setXYZ(i, part === 'body' ? c.ink : part === 'dark' ? BK : OR, 1, 0));
-      im.frustumCulled = false; scene.add(im); L.meshes.push(im); carPools.push({ im, list });
-    }
-  }
-  const syncCars = () => { for (const c of cars) c.group.updateMatrix(); for (const p of carPools) { p.list.forEach((c, i) => p.im.setMatrixAt(i, c.group.matrix)); p.im.instanceMatrix.needsUpdate = true; } };
-  syncCars();
-  let lastCarT = 0;
-  L.animated.push({
-    mesh: null,
-    update: (t) => {
-      const dt = lastCarT ? Math.min(0.05, Math.max(0, t - lastCarT)) : 0.016;
-      lastCarT = t;
-      for (const car of cars) {
-        car.z += car.speed * car.dir * dt;
-        if (car.dir > 0 && car.z > routeB) car.z = routeA;
-        if (car.dir < 0 && car.z < routeA) car.z = routeB;
-        car.group.position.set(car.laneX, 0, car.z);
+  // via de duas pistas paralela ao eixo X (W3, L2): segmentos fora das pistas do Eixo
+  function crossRoad(zc, name) {
+    for (const [a, b] of [[-WING + 3, -38], [-22, 22], [38, WING - 3]]) {
+      box((a + b) / 2, 0, zc, b - a, 0.12, 2 * XR, { ink: BK });
+      if (Math.abs(a) > 30 || Math.abs(b) > 30) {
+        const [m1, m2] = a < 0 ? [a, Math.min(b, -42)] : [Math.max(a, 42), b];
+        if (m2 > m1) { box((m1 + m2) / 2, 0, zc, m2 - m1, 0.25, 0.7, { ink: BK }); for (const s of [-1, 1]) box((m1 + m2) / 2, 0, zc + s * (XR + 0.3), m2 - m1, 0.3, 0.6, { ink: BK }); }
       }
-      syncCars();
+      for (let x = a + 4; x < b - 3; x += 9) for (const dz of [-3.8, 3.8]) box(x, 0.13, zc + dz, 4.2, 0.04, 0.25, { ink: OR, noCollide: true });
     }
-  });
-  L.cars = cars;
+    for (const xs of [-41, -19, 19, 41]) for (let i = 0; i < 6; i++) box(xs, 0.13, zc - XR + 1.2 + i * 2.3, 3.2, 0.04, 1.1, { ink: OR, noCollide: true }); // faixas de pedestre
+    for (const s of [-1, 1]) tunnelMouth(s * (WING - 5), zc, 2 * XR, -s); // a via continua além do limite do mapa
+    // placas verdes de via
+    for (const s of [-1, 1]) {
+      const px = s * 48; cyl(px, 0, zc - s * (XR + 1.6), 0.15, 5.4, { ink: BK, seg: 6 });
+      box(px, 5.0, zc - s * (XR + 1.6), 5.6, 1.6, 0.18, { ink: GN, noCollide: true });
+      box(px, 5.35, zc - s * (XR + 1.6) - 0.1, 4.2, 0.35, 0.05, { ink: BK, noCollide: true });
+    }
+    void name;
+  }
+  crossRoad(W3Z, 'W3'); crossRoad(L2Z, 'L2');
+
+  // bloco residencial de superquadra: pilotis, 6 andares, brises e caixa d'água
+  function slabBlock(x, z, along, ink, trim, opts = {}) {
+    const Lg = opts.len ?? 28, Dp = 10, PIL = 3.2, H = opts.h ?? 16.8;
+    const w = along ? Lg : Dp, d = along ? Dp : Lg;
+    for (let i = 0; i <= 4; i++) for (const sd of [-1, 1]) {
+      const u = -Lg / 2 + 1 + i * (Lg - 2) / 4, v = sd * (Dp / 2 - 1);
+      box(x + (along ? u : v), 0, z + (along ? v : u), 0.6, PIL, 0.6, { ink: BK });
+    }
+    box(x, 0, z, along ? 4 : 3, PIL, along ? 3 : 4, { ink: BL }); // portaria de vidro
+    box(x, PIL, z, w, H, d, { ink });
+    for (let y = PIL + 2.8; y < PIL + H - 0.5; y += 2.8) box(x, y - 0.1, z, w + 0.3, 0.2, d + 0.3, { ink: trim, noCollide: true });
+    for (let u = -Lg / 2 + 1.5; u < Lg / 2; u += 3) for (const sd of [-1, 1]) {
+      const px = x + (along ? u : sd * (Dp / 2 + 0.12)), pz = z + (along ? sd * (Dp / 2 + 0.12) : u);
+      box(px, PIL + 0.3, pz, along ? 0.18 : 0.22, H - 0.6, along ? 0.22 : 0.18, { ink: trim === BK ? BL : BK, noCollide: true });
+    }
+    box(x, PIL + H, z, along ? 6 : 4, 2.4, along ? 4 : 6, { ink: BK }); // caixa d'água
+    return PIL + H;
+  }
+  // comércio da W3 (500s): lojas de 2 andares com marquise voltada para a via
+  function shopBlock(x, z, ink, sign, faceZ) {
+    const Lg = 24, Dp = 12, H = 7.5;
+    box(x, 0, z, Lg, H, Dp, { ink });
+    for (let y = 3.6; y < H; y += 3.6) box(x, y - 0.1, z, Lg + 0.3, 0.2, Dp + 0.3, { ink: BK, noCollide: true });
+    const fz = z + faceZ * (Dp / 2);
+    box(x, 3.3, fz + faceZ * 1.3, Lg, 0.35, 2.6, { ink: BK, noCollide: true }); // marquise
+    for (const dx of [-10, 0, 10]) box(x + dx, 0, fz + faceZ * 2.4, 0.35, 3.3, 0.35, { ink: BK });
+    for (let i = 0; i < 4; i++) box(x - 9 + i * 6, 4.6, fz + faceZ * 0.15, 4.6, 1.2, 0.25, { ink: [sign, OR, PK, BL][i % 4], noCollide: true }); // letreiros
+    return H;
+  }
+  // casa geminada das 700s com telhado de duas águas
+  function house(x, z, ink, roof) {
+    box(x, 0, z, 7, 4.2, 7, { ink });
+    const r = new THREE.CylinderGeometry(4.6, 4.6, 7.4, 3, 1); r.rotateZ(Math.PI / 2); r.scale(1, 0.55, 1.1); r.translate(x, 4.2 + 1.2, z); deco(r, roof);
+    collider(x, 4.2, z, 7, 1.6, 7, { noNav: true });
+    box(x, 0, z + 3.6, 1.2, 2.3, 0.15, { ink: BK, noCollide: true }); // porta
+  }
+  // comércio local (CLS/CLN): barzinhos, padaria e bancas
+  function localShops(x, z, ink) {
+    box(x, 0, z, 26, 4.4, 10, { ink });
+    for (const sd of [-1, 1]) box(x, 2.9, z + sd * 6.2, 26, 0.3, 2.4, { ink: [OR, PK, GN][(Math.abs(Math.round(x)) / 34 | 0) % 3], noCollide: true });
+    for (const dx of [-9, -3, 3, 9]) { cyl(x + dx, 0, z + 9, 0.5, 0.9, { ink: BK, seg: 8 }); }
+    slab(x - 13, z - 5, x + 13, z + 5, 4.6, 0.2, { ink: BK });
+  }
+
+  const SQ_COLORS = [[BK, OR], [BK, BL], [OR, BK], [BK, GN], [PK, BK], [BK, RD], [BL, BK], [GN, BK]];
+  let sqi = 0;
+  for (const s of [-1, 1]) {
+    const X = (v) => s * v; // distância a partir do centro do Eixo
+    const asa = s < 0 ? 'Norte' : 'Sul'; void asa;
+    // gramado das superquadras
+    for (const [z1, z2] of [[-334, -290], [-266, -226], [-200, -160], [-142, -100]]) box(X(193), 0, (z1 + z2) / 2, 112, 0.12, z2 - z1, { ink: GN });
+    // --- 300s, 100s, 200s e 400s ---
+    for (const [zc, label] of [[-312, 300], [-246, 100], [-180, 200], [-122, 400]]) {
+      for (const [row, dz] of [[0, -10], [1, 10]]) for (const [ci, cx] of [[0, 152], [1, 186], [2, 220]]) {
+        const x = X(cx + (row ? 6 : 0)), z = zc + dz;
+        if (s > 0 && label === 300 && row === 1 && ci === 1) continue; // lugar da Igrejinha (307 Sul)
+        const [ink, trim] = SQ_COLORS[sqi++ % SQ_COLORS.length];
+        const top = slabBlock(x, z, true, ink, trim);
+        if ((ci + row) % 2 === 0) { ring(x, top + 5, z, 'y'); sniper(x + 6, top, z); }
+        if (row === 0) { spawn(x, 0, z + 10); pickup(X(cx + 11), 0, zc); }
+      }
+      // ipês entre os blocos
+      for (const cx of [135, 169, 203, 238]) ipe(X(cx), zc, [OR, PK, GN][(cx + zc) & 1 ? 0 : 1], 5.5);
+      L.arenaSpawns.push(new THREE.Vector3(X(169), 0, zc));
+    }
+    // --- comércio local entre as quadras ---
+    for (const [zc] of [[-277], [-151]]) for (const cx of [152, 186, 220]) localShops(X(cx), zc, [BL, GN, PK][(cx / 34 | 0) % 3]);
+    // --- 500s: comércio da W3 (lado leste da via) ---
+    for (const [i, cx] of [150, 178, 206, 234].entries()) shopBlock(X(cx), W3Z + XR + 9, [BL, GN, OR, PK][(i + (s > 0 ? 1 : 0)) % 4], RD, -1);
+    // --- 700s: casas geminadas (lado oeste da W3) ---
+    for (const [zr, dir] of [[W3Z - XR - 12, 1], [W3Z - XR - 29, -1]]) for (let cx = 141; cx < 246; cx += 9.5) {
+      if (s > 0 && zr < W3Z - 20 && cx > 168 && cx < 216) continue; // Santuário Dom Bosco
+      house(X(cx), zr, [BK, OR, PK, GN, BL][Math.round(cx) % 5], [RD, OR, RD, BL][Math.round(cx) % 4]); void dir;
+    }
+    // --- paradas de ônibus da W3 e da L2 ---
+    for (const zc of [W3Z, L2Z]) for (const cx of [160, 214]) for (const sd of [-1, 1]) {
+      const z = zc + sd * (XR + 1.8), x = X(cx);
+      box(x, 0.25, z + sd * 1.2, 6, 2.7, 0.25, { ink: BL }); box(x, 2.95, z, 6.6, 0.2, 3.2, { ink: BK });
+      box(x, 0.25, z + sd * 0.5, 4.5, 0.5, 0.6, { ink: BK, noCollide: true });
+    }
+    // --- Eixão (Eixo Rodoviário): 3 faixas por sentido, entra em túnel sob a Rodoviária ---
+    {
+      const a = P + 3, b = WING - 3, zc = EIXAO_Z, half = 11;
+      box(X((a + b) / 2), 0, zc, b - a, 0.12, 2 * half, { ink: BK });
+      box(X((a + b) / 2), 0, zc, b - a, 0.3, 0.8, { ink: BK });
+      for (let x = a + 12; x < b - 10; x += 9) for (const dz of [-7.4, -3.8, 3.8, 7.4]) box(X(x), 0.13, zc + dz, 4.2, 0.04, 0.25, { ink: OR, noCollide: true });
+      tunnelMouth(X(P + 6), zc, 2 * half, s); tunnelMouth(X(WING - 5), zc, 2 * half, -s);
+      // passarela de pedestres sobre o Eixão
+      const px = X(192), e = s; // escadas descem para o lado de fora (longe do Eixo)
+      slab(px - 2, zc - half - 4, px + 2, zc + half + 4, 6.5, 0.5);
+      rail(px - e * 2, zc - half - 4, px - e * 2, zc + half + 4, 6.5); rail(px + e * 2, zc - half + 0.4, px + e * 2, zc + half - 0.4, 6.5);
+      for (const zz of [zc - half - 2.2, zc + half + 2.2]) stairs(px + e * (2 + 13 * 0.55), 0, zz, e > 0 ? '-x' : '+x', 13, 3.4, { rise: 6.5 / 13, run: 0.55 });
+      ring(px, 11, zc, 'y');
+    }
+  }
+  // --- Igrejinha Nossa Senhora de Fátima (307 Sul): o "chapéu de freira" de Niemeyer ---
+  {
+    const x = 192, z = -302;
+    box(x, 0, z, 8, 3.6, 8, { ink: BL }); // paredes de azulejos azuis e brancos
+    for (let i = 0; i < 5; i++) box(x - 3.2 + i * 1.6, 0.6, z + 4.1, 0.8, 0.8, 0.1, { ink: BK, noCollide: true });
+    const hat = new THREE.ConeGeometry(8.5, 7, 3, 1, true); hat.rotateY(Math.PI / 6); hat.translate(x, 3.6 + 3.5, z); deco(hat, BK);
+    for (let i = 0; i < 3; i++) { const a = (i / 3) * TAU + Math.PI / 6; cyl(x + Math.cos(a) * 7.2, 0, z + Math.sin(a) * 7.2, 0.3, 3.6, { ink: BK, seg: 5 }); }
+    collider(x, 3.6, z, 9, 3.2, 9); ring(x, 14, z, 'y'); pickup(x, 0, z + 8);
+  }
+  // --- Santuário Dom Bosco (702 Sul): caixa de arcos góticos com vitrais azuis ---
+  {
+    const x = 192, z = -412, W = 24, H = 15;
+    box(x, 0, z, W - 3, H - 1, W - 3, { ink: BL });
+    const n = 6, st = W / n;
+    for (const sd of [-1, 1]) for (let i = 0; i <= n; i++) {
+      for (const [px, pz] of [[x - W / 2 + i * st, z + sd * W / 2], [x + sd * W / 2, z - W / 2 + i * st]]) box(px, 0, pz, 0.7, H, 0.7, { ink: BK });
+      if (i < n) for (const along of [true, false]) {
+        const arch = new THREE.ConeGeometry(st / 2, 3.2, 4, 1, true); arch.rotateY(Math.PI / 4); arch.scale(along ? 1 : 0.12, 1, along ? 0.12 : 1);
+        arch.translate(along ? x - W / 2 + (i + 0.5) * st : x + sd * W / 2, H - 3.6, along ? z + sd * W / 2 : z - W / 2 + (i + 0.5) * st); deco(arch, BK);
+      }
+    }
+    slab(x - W / 2 - 0.5, z - W / 2 - 0.5, x + W / 2 + 0.5, z + W / 2 + 0.5, H + 0.6, 0.6, { ink: BK });
+    box(x, H + 0.6, z, 0.4, 4, 0.4, { ink: OR, noCollide: true }); box(x, H + 3.4, z, 2, 0.4, 0.4, { ink: OR, noCollide: true });
+    ring(x, H + 7, z, 'y'); sniper(x, H + 0.6, z); spawn(x - W / 2 - 5, 0, z); pickup(x + W / 2 + 4, 0, z);
+  }
+  // --- 600s (L2, Setor de Grandes Áreas): Templo da Boa Vontade (Sul) e Hospital Universitário (Norte) ---
+  {
+    const x = 200, z = -67;
+    box(x, 0, z, 30, 0.3, 26, { ink: BK });
+    const pyr = new THREE.ConeGeometry(12, 15, 7); pyr.translate(x, 0.3 + 7.5, z); deco(pyr, BK);
+    for (let i = 0; i < 5; i++) { const r = 10.5 * (1 - i / 5); collider(x, 0.3 + i * 3, z, r * 1.5, 3, r * 1.5); }
+    sphere(x, 16.2, z, 1.2, { ink: BL, seg: 8 }); ring(x, 20, z, 'y');
+    for (const sx of [150, 236]) { box(sx, 0, z, 24, 7, 14, { ink: BK }); facade(sx, z, 24, 14, 7, 3.5, OR, 3); } // escolas-classe
+    spawn(170, 0, z); pickup(226, 0, z - 10);
+  }
+  {
+    const x = -190, z = -68;
+    box(x, 0, z, 48, 8, 20, { ink: BK }); facade(x, z, 48, 20, 8, 4, BL, 3);
+    box(x + 10, 8, z, 18, 18, 14, { ink: BK }); facade(x + 10, z, 18, 14, 26, 3.2, BL, 2.6);
+    box(x + 10, 20, z + 7.2, 4.5, 1.4, 0.3, { ink: RD, noCollide: true }); box(x + 10, 18.95, z + 7.2, 1.4, 3.5, 0.3, { ink: RD, noCollide: true }); // cruz do hospital
+    slab(x - 24, z - 10, x - 2, z + 10, 8.4, 0.4); stairs(x - 26, 0, z - 8 - 14 * 0.55 + 8, '+z', 14, 2.6, { rise: 8 / 14, run: 0.55 });
+    ring(x + 10, 31, z, 'y'); sniper(x - 12, 8, z); spawn(x - 30, 0, z + 6); pickup(x, 0, z + 14);
+    for (const sx of [-148, -236]) { box(sx, 0, z, 22, 6, 14, { ink: GN }); facade(sx, z, 22, 14, 6, 3, BK, 3); }
+  }
+  // --- Conic (Setor de Diversões Sul), em frente ao Conjunto Nacional ---
+  {
+    box(81, 0, -214, 38, 4, 18, { ink: BK });
+    for (const [x, z, w, h, d, ink] of [[69, -214, 13, 17, 15, PK], [83, -211, 10, 27, 11, OR], [95, -216, 11, 13, 14, BL]]) {
+      box(x, 4, z, w, h, d, { ink }); facade(x, z, w, d, h + 4, 3, BK, 2.4); ring(x, h + 8, z, 'y');
+    }
+    slab(62, -223, 100, -205, 4.2, 0.2, { ink: BK }); stairs(64, 0, -203 + 8 * 0.55, '-z', 8, 2.4, { rise: 4.2 / 8, run: 0.55 });
+    sniper(95, 17, -216); spawn(81, 4.2, -207);
+  }
+
+  // ---------------- 9. Trânsito: Eixo Monumental, W3, L2 e Eixão, com semáforos nos cruzamentos ----------------
+  const cyc = (t, off) => ((t + off) % 30 + 30) % 30;
+  const eixoSig = (off) => (t) => { const c = cyc(t, off); return c < 14 ? 'g' : c < 16.5 ? 'y' : 'r'; };
+  const crossSig = (off) => (t) => { const c = cyc(t, off); return c >= 17 && c < 27 ? 'g' : c >= 27 && c < 29.5 ? 'y' : 'r'; };
+  const signals = { eW3: eixoSig(0), w3: crossSig(0), eL2: eixoSig(11), l2: crossSig(11) };
+  const MIX_FAST = [['gol', 4], ['byd', 2], ['sedan', 2], ['golbaixo', 1.2], ['uno', 1.5], ['pmdf', 0.5]];
+  const MIX_MID = [['gol', 3], ['uno', 2], ['sedan', 2], ['byd', 1.5], ['bus', 1.5], ['golbaixo', 1]];
+  const MIX_BUS = [['bus', 4], ['brt', 1.2], ['gol', 1.5], ['uno', 1]];
+  const MIX_W3 = [['bus', 3], ['zebrinha', 2], ['gol', 1.5], ['uno', 1]];
+  const lanes = [];
+  const eixoStops = [{ lo: W3Z - XR, hi: W3Z + XR, group: 'eW3' }, { lo: L2Z - XR, hi: L2Z + XR, group: 'eL2' }];
+  for (const s of [-1, 1]) for (const [lx, mix, vmax] of [[25, MIX_FAST, 22], [30, MIX_MID, 19], [35, MIX_BUS, 17]]) {
+    lanes.push({ axis: 'z', c: s * lx, dir: s < 0 ? 1 : -1, from: ROAD_START - 6, to: ROAD_END + 8, vmax, mix, count: 6, stops: eixoStops });
+  }
+  for (const [zc, group] of [[W3Z, 'w3'], [L2Z, 'l2']]) for (const dir of [1, -1]) for (const [off, mix, vmax] of [[2.2, MIX_MID, 16], [5.4, zc === W3Z ? MIX_W3 : MIX_BUS, 14]]) {
+    lanes.push({ axis: 'x', c: zc + dir * off, dir, from: -WING + 6, to: WING - 6, vmax, mix, count: 6, stops: [{ lo: -38, hi: 38, group }] });
+  }
+  for (const s of [-1, 1]) for (const dir of [1, -1]) for (const [off, mix] of [[2.0, MIX_FAST], [5.6, MIX_FAST], [9.2, MIX_MID]]) {
+    const a = s * (P + 7), b = s * (WING - 6);
+    lanes.push({ axis: 'x', c: EIXAO_Z + dir * off, dir, from: Math.min(a, b), to: Math.max(a, b), vmax: 25, mix, count: 2 });
+  }
+  const traffic = buildTraffic(B, lanes, signals);
+  for (const [zc, g, eg] of [[W3Z, 'w3', 'eW3'], [L2Z, 'l2', 'eL2']]) {
+    traffic.lightPole(-21.2, zc - XR - 1.4, eg); traffic.lightPole(21.2, zc + XR + 1.4, eg);
+    traffic.lightPole(-40.5, zc + XR + 1.4, g); traffic.lightPole(40.5, zc - XR - 1.4, g);
+  }
+  L.animated.push({ mesh: null, update: (t) => traffic.update(t) });
+  L.cars = traffic.cars;
 
   // ---------------- 10. Spawns e Pickups distribuídos por todo o Eixo Monumental ----------------
   for (let z = -485; z <= 130; z += 36) {
     if (z > -428 && z < -376) continue;
     if (z > -328 && z < -285) continue;
     if (z > -226 && z < -200) continue;
-    spawn(rand(-12, 12), 0.25, z);
-    pickup(rand(-9, 9), 0.25, z + 14);
+    if (crossFree(z, 2)) spawn(rand(-12, 12), 0.25, z);
+    if (crossFree(z + 14, 2)) pickup(rand(-9, 9), 0.25, z + 14);
   }
   for (const z of [-450, -365, -260, -60, 20, 100]) L.arenaSpawns.push(new THREE.Vector3(0, 0.25, z));
 

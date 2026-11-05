@@ -27,7 +27,7 @@ export class EnemyManager {
   get waveAlive() {
     let c = 0;
     for (const e of this.enemies) {
-      if (e.alive && !e.T.isCivilian && !e.T.isProtester && !e.T.isPolice) c++;
+      if (e.alive && !e.T.isCivilian && !e.T.isProtester && !e.T.isPolice && !e.T.isPet) c++;
     }
     return c;
   }
@@ -117,13 +117,13 @@ export class EnemyManager {
   }
   nearestVisible(from, forward, cosHalf, maxDist) {
     let best = null, bestD = maxDist;
-    for (const e of this.enemies) { if (!e.alive) continue; _v.subVectors(e.center, from); const d = _v.length(); if (d > bestD || d < 0.01) continue; if (_v.divideScalar(d).dot(forward) < cosHalf) continue; if (!this.ctx.world.hasLineOfSight(from, e.center, SEE_THROUGH)) continue; best = e; bestD = d; }
+    for (const e of this.enemies) { if (!e.alive || e.T.isPet) continue; _v.subVectors(e.center, from); const d = _v.length(); if (d > bestD || d < 0.01) continue; if (_v.divideScalar(d).dot(forward) < cosHalf) continue; if (!this.ctx.world.hasLineOfSight(from, e.center, SEE_THROUGH)) continue; best = e; bestD = d; }
     return best;
   }
   raycast(o, d, maxDist, ignore = null) {
     let best = null;
     for (const e of this.enemies) {
-      if (!e.alive || e === ignore) continue;
+      if (!e.alive || e === ignore || e.T.isPet) continue;
       for (let i = 0; i < e.hit.length; i++) {
         const c = e.hitSpheres[i], r = e.hit[i][1] * e.T.scale;
         _v.subVectors(c, o); const tca = _v.dot(d); if (tca < 0 || tca > maxDist) continue;
@@ -136,11 +136,11 @@ export class EnemyManager {
   }
   inArc(pos, dir, range, cosHalf) {
     const out = [];
-    for (const e of this.enemies) { if (!e.alive) continue; _v.subVectors(e.center, pos); const d = _v.length() - (e.T.boss ? 1.2 : 0); if (d > range + 0.3) continue; if (d > 0.3 && _v.normalize().dot(dir) < cosHalf) continue; out.push({ enemy: e, dist: d }); }
+    for (const e of this.enemies) { if (!e.alive || e.T.isPet) continue; _v.subVectors(e.center, pos); const d = _v.length() - (e.T.boss ? 1.2 : 0); if (d > range + 0.3) continue; if (d > 0.3 && _v.normalize().dot(dir) < cosHalf) continue; out.push({ enemy: e, dist: d }); }
     return out.sort((a, b) => a.dist - b.dist);
   }
   blastEnemies(point, radius, dmg, except) {
-    for (const e of this.enemies) { if (!e.alive || e === except) continue; const d = e.center.distanceTo(point); if (d > radius) continue; _d.subVectors(e.center, point).normalize(); this.damage(e, dmg * (1 - d / radius * 0.6), { point: e.center.clone(), dir: _d.clone(), part: 'torso', source: 'blast', crit: false }); }
+    for (const e of this.enemies) { if (!e.alive || e === except || e.T.isPet) continue; const d = e.center.distanceTo(point); if (d > radius) continue; _d.subVectors(e.center, point).normalize(); this.damage(e, dmg * (1 - d / radius * 0.6), { point: e.center.clone(), dir: _d.clone(), part: 'torso', source: 'blast', crit: false }); }
   }
   yank(e, target) {
     if (!e.alive) return; if (e.T.boss) { e.flinch = 1; return; }
@@ -150,7 +150,7 @@ export class EnemyManager {
     this.ctx.effects.blood(e.center, _d, 0.4);
   }
   damage(e, amount, info) {
-    if (!e.alive) return;
+    if (!e.alive || e.T.invulnerable) return;
     if (this.mirror) {
       // show the hit right away, let the host decide what it did
       if (info.part !== 'shield') { e.flinch = 1; e.flashT = 0.07; if (!e.flashOn) { setFill(e.mat, true); e.flashOn = true; } this.ctx.effects.blood(info.point || e.center, info.dir || _up, clamp(0.5 + amount / 70, 0.5, 2.2), { ink: e.T.ink === INK.BLACK ? INK.BLACK : INK.RED }); this.ctx.hud.hitmarker(false, info.crit); }
@@ -166,7 +166,7 @@ export class EnemyManager {
     e.hp -= amount; e.flinch = 1; e.flashT = 0.07; if (!e.flashOn) { setFill(e.mat, true); e.flashOn = true; }
 
     // Reação de facção apenas quando atacado por um JOGADOR (nunca por dano colateral de outro bot ou queda):
-    if (info && info.source !== 'bot' && info.source !== 'fall') {
+    if (info && info.source !== 'bot' && info.source !== 'fall' && info.source !== 'car') {
       const culprit = (info.by && this.ctx.remote && this.ctx.remote.get(info.by)) || this.ctx.player;
       if ((e.T.isProtester || e.T.isCivilian) && !this.ctx.protestersRiot) {
         this.ctx.protestersRiot = true;
@@ -215,7 +215,7 @@ export class EnemyManager {
     const dir = (info.dir || _d.set(0, 0.5, 0)).clone().normalize();
     if (e.T.weapon === 'bomb') { this._explodeBomber(e, 0.8); if (this.onKill) this.onKill(e, info, true); return; }
     audio.enemyDie(e.center);
-    if (e.T.isCivilian && this.ctx.onCivilianKilled && info && info.source !== 'bot' && info.source !== 'fall') {
+    if (e.T.isCivilian && this.ctx.onCivilianKilled && info && info.source !== 'bot' && info.source !== 'fall' && info.source !== 'car') {
       this.ctx.onCivilianKilled(e, info);
     }
     if (e.T.flying) {
@@ -291,7 +291,10 @@ export class EnemyManager {
         } else this._wander(e, dt);
         e.body.vel.y -= 24 * dt; world.moveBody(e.body, dt);
       }
-      if (e.body.pos.y < -6) { this.kill(e, { source: 'fall', dir: _up.clone() }); continue; }
+      if (e.body.pos.y < -6) {
+        if (e.T.isPet) { const tp = this.nearestTarget(e.body.pos) || ctx.player; e.body.pos.copy(tp.body.pos); e.body.pos.y += 0.5; e.body.vel.set(0, 0, 0); }
+        else { this.kill(e, { source: 'fall', dir: _up.clone() }); continue; }
+      }
       e.yaw = angleLerp(e.yaw, e.yawT, 1 - Math.exp(-10 * dt));
       e.root.position.copy(e.body.pos); e.root.rotation.y = e.yaw;
       // never let a body occupy the same space as the player
@@ -511,11 +514,24 @@ export class EnemyManager {
     b.vel.z = damp(b.vel.z, Math.cos(e.walkDir) * spd, 6, dt);
     e.yawT = e.walkDir;
   }
+  // Orelha: segue o jogador mais perto, cheira por perto quando chega e corre atrás quando fica longe
+  _thinkPet(e, dt, pp, dist, dx, dz) {
+    const b = e.body; e.aimAmt = 0;
+    if (dist > 70) { b.pos.set(pp.x + 2, pp.y + 0.4, pp.z + 2); b.vel.set(0, 0, 0); e.path = null; return; }
+    if (dist > 7) { this._follow(e, dt, pp, dist > 20 ? e.T.speed * 1.25 : e.T.speed); return; }
+    if (dist < 2.2) { this._steer(e, dt, b.pos.x - dx, b.pos.z - dz, 2.5, 20); e.yawT = Math.atan2(dx, dz); return; }
+    e.walkTimer = (e.walkTimer || 0) - dt;
+    if (e.walkTimer <= 0 || b.hitWall) { e.walkTimer = rand(1.2, 2.8); e.walkDir = Math.atan2(dx, dz) + rand(-1.4, 1.4); e.sniff = Math.random() < 0.4; }
+    const spd = e.sniff ? 0 : 2.2;
+    b.vel.x = damp(b.vel.x, Math.sin(e.walkDir) * spd, 6, dt); b.vel.z = damp(b.vel.z, Math.cos(e.walkDir) * spd, 6, dt);
+    e.yawT = e.sniff ? Math.atan2(dx, dz) : e.walkDir;
+  }
   _think(e, dt, pp, pc, P) {
     const T = e.T, b = e.body, ctx = this.ctx;
     const dx = pp.x - b.pos.x, dz = pp.z - b.pos.z; const dist = Math.hypot(dx, dz); const dy = pp.y - b.pos.y;
     e.losT -= dt; if (e.losT <= 0) { e.losT = 0.12 + rand(0, 0.1); e.los = ctx.world.hasLineOfSight(this.eye(e, _eye), pc, SEE_THROUGH); }
     e.cool -= dt; const yawTo = Math.atan2(dx, dz);
+    if (T.isPet) { this._thinkPet(e, dt, pp, dist, dx, dz); return; }
     if (T.isCivilian && !e.enraged) {
       e.aimAmt = 0;
       // If injured or player/threat is close, civilian panics and flees

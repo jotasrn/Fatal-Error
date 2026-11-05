@@ -29,7 +29,7 @@ export const GrappleMixin = {
     // near miss on an enemy: forgiving, but it has to be roughly where you are pointing
     let best = null, bestLat = Infinity;
     for (const e of ctx.enemies.enemies) {
-      if (!e.alive || e.state === 'spawn') continue;
+      if (!e.alive || e.state === 'spawn' || e.T.isPet) continue;
       _v.subVectors(e.center, o); const t = _v.dot(d);
       if (t < 1.5 || t > Math.min(45, wallDist + 1.5)) continue;
       const lat = Math.sqrt(Math.max(0, _v.lengthSq() - t * t));
@@ -85,6 +85,14 @@ export const GrappleMixin = {
         // swing pump: holding forward adds energy along the view direction (Spider-Man style)
         if (this._mv.y > 0.3 && c.y < g.anchor.y - 1) { _v2.copy(this.forward); _v2.y = 0; if (_v2.lengthSq() > 0.01) { _v2.normalize(); b.vel.addScaledVector(_v2, 10 * dt); } }
       }
+      // preso num ônibus: o veículo arrasta o jogador (corda esticada ou "surfando" no chão)
+      const drag = g.mover && g.mover.drag && g.mover.vel;
+      if (drag) {
+        const mv = g.mover.vel, k = 1 - Math.exp(-(dist > g.len * 0.97 || b.onGround ? 5 : 1.2) * dt);
+        b.vel.x += (mv.x - b.vel.x) * k; b.vel.z += (mv.z - b.vel.z) * k;
+        if (b.onGround && mv.lengthSq() > 4) { g.dragFx = (g.dragFx || 0) - dt; if (g.dragFx <= 0) { g.dragFx = 0.12; ctx.effects.sparks(_v2.copy(b.pos).setY(b.pos.y + 0.05), _v3.set(-mv.x, 2, -mv.z).normalize(), 3, 4, 3); } }
+        if (g.mover.car && g.mover.car.hidden) { this.detachGrapple(false); return; }
+      }
       if (dist > g.len) {
         const vn = b.vel.dot(_d); if (vn < 0) b.vel.addScaledVector(_d, -vn);
         const excess = Math.min(dist - g.len, 0.35) * 0.85; b.pos.addScaledVector(_d, excess);
@@ -92,7 +100,7 @@ export const GrappleMixin = {
       }
       if (b.onGround && reeling && _d.y > 0.2) { b.vel.y = Math.max(b.vel.y, 4.5); b.onGround = false; }
       g.t += dt; if (g.t > 0.15) { g.t = 0; if (!ctx.world.hasLineOfSight(this.eye, g.anchor)) g.blockedT += 0.15; else g.blockedT = 0; }
-      if (inp.pressed('grapple') || dist < 1.3 || g.blockedT > 0.3 || dist > 90 || (b.onGround && g.swingT > 0.6 && !reeling)) this.detachGrapple(dist < 1.3);
+      if (inp.pressed('grapple') || dist < 1.3 || g.blockedT > 0.3 || dist > 90 || (!drag && b.onGround && g.swingT > 0.6 && !reeling)) this.detachGrapple(dist < 1.3);
     }
     if (g.state !== 'idle') {
       this._handPos(_v3); alignYAxis(this.rope, _v3, g.hook, 0.008); this.rope.visible = true;
