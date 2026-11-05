@@ -1,20 +1,23 @@
-// Ink renderer: scene is drawn into a data buffer (shade, inkId, normal.xy) + depth, then a
-// full-screen "pen on lined paper" pass draws outlines, hatching, paper grain and ruled lines.
+// Stylized HD Cel-Shaded + Ink Outline renderer.
+// Scene renders into a compact G-buffer (shade, inkId, viewNormal.xy) + depth, then a fast,
+// ultra-crisp full-screen pass applies 3-band cel-shading, anti-aliased ink silhouettes, and sky gradient
+// (with an optional classic notebook mode and configurable quality presets).
 import * as THREE from 'three';
 
 // PURPLE and TEAL are reserved for human players, so no bot ever shares their colour
 export const INK = { BLUE: 0, RED: 1, BLACK: 2, ORANGE: 3, GREEN: 4, PINK: 5, PURPLE: 6, TEAL: 7 };
 export const INK_COLORS = [
-  new THREE.Vector3(0.10, 0.19, 0.76), // blue ballpoint
-  new THREE.Vector3(0.86, 0.12, 0.20), // red pen
-  new THREE.Vector3(0.18, 0.20, 0.26), // graphite
-  new THREE.Vector3(0.92, 0.55, 0.08), // orange highlighter
-  new THREE.Vector3(0.12, 0.60, 0.30), // green
-  new THREE.Vector3(0.90, 0.40, 0.66), // pink eraser
-  new THREE.Vector3(0.52, 0.16, 0.86), // violet gel pen (players)
-  new THREE.Vector3(0.00, 0.62, 0.70), // teal marker (player accents)
+  new THREE.Vector3(0.14, 0.32, 0.84), // 0: cobalt blue
+  new THREE.Vector3(0.88, 0.14, 0.21), // 1: crimson red
+  new THREE.Vector3(0.18, 0.20, 0.26), // 2: slate / architectural concrete
+  new THREE.Vector3(0.96, 0.62, 0.10), // 3: golden amber
+  new THREE.Vector3(0.16, 0.66, 0.32), // 4: vibrant emerald / grass
+  new THREE.Vector3(0.92, 0.38, 0.66), // 5: rose / ipê-roxo
+  new THREE.Vector3(0.56, 0.18, 0.90), // 6: violet (players)
+  new THREE.Vector3(0.04, 0.68, 0.76), // 7: cyan-teal (player accents)
 ];
 export const LIGHT_WORLD = new THREE.Vector3(0.38, 0.82, 0.42).normalize();
+const UP_WORLD = new THREE.Vector3(0, 1, 0);
 export const shared = { uLightDir: { value: new THREE.Vector3(0, 1, 0) }, uTime: { value: 0 } };
 
 const inkVert = /* glsl */`
@@ -90,208 +93,339 @@ uniform float uFar;
 uniform float uHurt;
 uniform float uFlash;
 uniform float uSlow;
-uniform float uLineSpacing;
 uniform float uLowHp;
+uniform float uNotebook;
+uniform float uFastEdge;
+uniform float uLineSpacing;
 uniform vec3 uPaper;
+uniform vec3 uLightView;
+uniform vec3 uUpView;
+uniform vec3 uCamFwd;
 uniform vec3 uInks[8];
-uniform mat4 uInvProj;
-uniform mat4 uInvView;
 
-float hash21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
-float vnoise(vec2 p) {
-  vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
-  float a = hash21(i), b = hash21(i + vec2(1.0, 0.0)), c = hash21(i + vec2(0.0, 1.0)), d = hash21(i + vec2(1.0, 1.0));
-  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+float linDepth(float z) {
+  float zn = z * 2.0 - 1.0;
+  return 2.0 * uNear * uFar / (uFar + uNear - zn * (uFar - uNear));
 }
-float linDepth(float z) { float zn = z * 2.0 - 1.0; return 2.0 * uNear * uFar / (uFar + uNear - zn * (uFar - uNear)); }
-vec3 inkColor(float id) {
-  int i = int(id + 0.5);
-  if (i <= 0) return uInks[0]; if (i == 1) return uInks[1]; if (i == 2) return uInks[2];
-  if (i == 3) return uInks[3]; if (i == 4) return uInks[4]; if (i == 5) return uInks[5];
-  if (i == 6) return uInks[6]; return uInks[7];
+
+vec3 baseInk(int i) {
+  if (i <= 0) return uInks[0];
+  if (i == 1) return uInks[1];
+  if (i == 2) return uInks[2];
+  if (i == 3) return uInks[3];
+  if (i == 4) return uInks[4];
+  if (i == 5) return uInks[5];
+  if (i == 6) return uInks[6];
+  return uInks[7];
 }
-float stripes(vec2 p, vec2 dir, float spacing, float width) {
-  float t = dot(p, vec2(-dir.y, dir.x));
-  float f = abs(fract(t / spacing) - 0.5) * spacing;
-  float soft = width * 0.6;
-  return 1.0 - smoothstep(width * 0.5 - soft, width * 0.5 + soft, f);
+
+vec3 surfaceCelColor(int id, float shade, float ndl, float upAmt) {
+  float lit = (shade >= 0.0 && shade <= 0.995) ? shade : ndl;
+  float b1 = smoothstep(0.28, 0.36, lit);
+  float b2 = smoothstep(0.64, 0.74, lit);
+  float cel = clamp(0.24 + 0.46 * b1 + 0.30 * b2 + max(0.0, upAmt) * 0.07, 0.0, 1.0);
+  vec3 p = baseInk(id);
+
+  // Solid filled accents (vehicles, vests, flags, decals, blood, hit-flash)
+  if (shade < 0.0) {
+    float fCel = 0.72 + 0.24 * b1 + 0.14 * b2;
+    return clamp(p * fCel, 0.0, 1.0);
+  }
+
+  // Characters (bots & remote players use shadeScale=0, shadeBias=1 -> shade == 1.0)
+  if (shade > 0.995) {
+    vec3 darkC = p * 0.58 + vec3(0.03);
+    vec3 litC = min(vec3(1.0), p * 1.15 + vec3(0.16));
+    return mix(darkC, litC, cel);
+  }
+
+  // World architecture, grass, roads, monuments & first-person weapons
+  if (id == 2) {
+    // Architectural white concrete / stone (Niemeyer monuments, slabs, curbs)
+    return mix(vec3(0.58, 0.62, 0.70), vec3(0.95, 0.95, 0.96), cel);
+  }
+  if (id == 0) {
+    // Cobalt / architectural glass & sky-blue structures
+    return mix(vec3(0.30, 0.46, 0.78), vec3(0.76, 0.86, 0.98), cel);
+  }
+  if (id == 4) {
+    // Vibrant grass & southern ministries emerald glass
+    return mix(vec3(0.18, 0.48, 0.26), vec3(0.42, 0.78, 0.45), cel);
+  }
+  if (id == 3) {
+    // Golden amber / ipê-amarelo / crosswalks / lights
+    return mix(vec3(0.74, 0.43, 0.09), vec3(0.99, 0.80, 0.26), cel);
+  }
+  if (id == 1) {
+    // Crimson / terracotta
+    return mix(vec3(0.60, 0.14, 0.19), vec3(0.95, 0.34, 0.36), cel);
+  }
+  if (id == 5) {
+    // Rose / ipê-roxo / kiosks
+    return mix(vec3(0.66, 0.27, 0.49), vec3(0.96, 0.58, 0.78), cel);
+  }
+  return mix(p * 0.55, min(vec3(1.0), p * 1.12 + vec3(0.14)), cel);
 }
+
 void main() {
   vec2 px = 1.0 / uRes;
-  float sc = uRes.y / 900.0;
-  vec2 nuv = vUv * vec2(uAspect, 1.0);
-  vec2 wob = vec2(vnoise(nuv * 6.0 + 11.3), vnoise(nuv * 6.0 + 37.0)) - 0.5;
-  vec2 suv = vUv + wob * 2.0 * sc * px;
-  vec4 s = texture2D(tScene, suv);
-  float z = texture2D(tDepth, suv).x;
-  float d = linDepth(z);
-  float o = 1.15 * sc;
-  vec2 ox = vec2(o, 0.0) * px, oy = vec2(0.0, o) * px;
-  float zl = texture2D(tDepth, suv - ox).x, zr = texture2D(tDepth, suv + ox).x;
-  float zu = texture2D(tDepth, suv + oy).x, zd = texture2D(tDepth, suv - oy).x;
-  vec4 sl = texture2D(tScene, suv - ox), sr = texture2D(tScene, suv + ox);
-  vec4 su = texture2D(tScene, suv + oy), sd = texture2D(tScene, suv - oy);
-  // Edge test in inverse depth (1/d). For ANY plane - including ones seen at a
-  // grazing angle, like the floor - 1/d is affine across the screen, so its second
-  // difference is zero there and only real silhouettes register. Comparing it against
-  // 1/d itself makes the test scale invariant, so distant outlines stay as crisp as near ones.
+  float sc = clamp(uRes.y / 900.0, 0.75, 2.0);
+
+  // Sample directly at exact pixel center (no UV wobble = zero shimmer & razor-sharp edges!)
+  vec4 s = texture2D(tScene, vUv);
+  float z = texture2D(tDepth, vUv).x;
+  bool sky = z >= 0.99999;
+
+  // Sky / background
+  float skyY = clamp(uCamFwd.y * 0.65 + (vUv.y - 0.45) * 0.95, 0.0, 1.0);
+  vec3 skyCol;
+  if (uNotebook > 0.5) {
+    vec2 pp = gl_FragCoord.xy;
+    float ls = uLineSpacing;
+    float ly = mod(pp.y + ls * 0.5, ls);
+    float rule = 1.0 - smoothstep(0.5 * sc, 1.6 * sc, abs(ly - ls * 0.5));
+    skyCol = mix(uPaper, vec3(0.64, 0.75, 0.93), rule * 0.38);
+  } else {
+    skyCol = mix(vec3(0.87, 0.93, 0.99), vec3(0.46, 0.72, 0.97), smoothstep(0.0, 0.85, skyY));
+  }
+
+  // Edge detection (depth silhouette + normal crease)
+  float o = 1.05 * sc;
+  vec2 ox = vec2(o * px.x, 0.0), oy = vec2(0.0, o * px.y);
+  float zl = texture2D(tDepth, vUv - ox).x;
+  float zr = texture2D(tDepth, vUv + ox).x;
+  float zu = texture2D(tDepth, vUv + oy).x;
+  float zd = texture2D(tDepth, vUv - oy).x;
+
+  float d = sky ? uFar : linDepth(z);
   float iw = 1.0 / d;
   float lap = abs(1.0 / linDepth(zl) + 1.0 / linDepth(zr) - 2.0 * iw)
             + abs(1.0 / linDepth(zu) + 1.0 / linDepth(zd) - 2.0 * iw);
-  float edge = smoothstep(0.07, 0.30, lap / (iw + 1e-7));
-  float nEdge = length(sl.ba - sr.ba) + length(su.ba - sd.ba);
-  edge = max(edge, smoothstep(0.42, 0.85, nEdge));
-  // ink colour of the front-most sample around the edge
-  float zmin = z; float inkId = s.g;
-  if (zl < zmin) { zmin = zl; inkId = sl.g; }
-  if (zr < zmin) { zmin = zr; inkId = sr.g; }
-  if (zu < zmin) { zmin = zu; inkId = su.g; }
-  if (zd < zmin) { zmin = zd; inkId = sd.g; }
-  float dFront = linDepth(zmin);
-  bool sky = z >= 0.99999;
+  float edge = smoothstep(0.065, 0.24, lap / (iw + 1e-7));
 
-  // Hatching is anchored to the surface itself, not to the screen. The fragment's world position
-  // is rebuilt from depth and the strokes are laid out in world units on whichever pair of axes
-  // faces away from the surface normal, so the pattern stays put on a wall as you move past it.
-  // Line spacing steps in powers of two with distance, which keeps the on-screen density roughly
-  // constant instead of collapsing into moire on far geometry.
-  float shade = s.r;
-  float hatch = 0.0;
-  if (!sky) {
-    if (shade < 0.0) hatch = 1.0;
-    else {
-      vec2 hp; float sp, w;
-      if (d < 2.0) {
-        // the held weapon rides with the camera, so for it the screen is the stable frame
-        hp = gl_FragCoord.xy + wob * 5.0 * sc;
-        sp = 8.5 * sc; w = 1.5 * sc;
-      } else {
-        vec4 clip = vec4(vUv * 2.0 - 1.0, z * 2.0 - 1.0, 1.0);
-        vec4 vpos = uInvProj * clip; vpos /= vpos.w;
-        vec3 wpos = (uInvView * vec4(vpos.xyz, 1.0)).xyz;
-        vec2 nxy = s.ba;
-        vec3 nView = vec3(nxy, sqrt(max(0.0, 1.0 - dot(nxy, nxy))));
-        vec3 wn = normalize(mat3(uInvView) * nView);
-        vec3 an = abs(wn);
-        // project onto the plane the surface most faces, so strokes lie flat along it
-        hp = an.y > max(an.x, an.z) ? wpos.xz : (an.x > an.z ? wpos.zy : wpos.xy);
-        // pick the world spacing whose projected width is about nine pixels, quantised to powers
-        // of two so the pattern only changes density in steps and never crawls as you walk
-        float lod = exp2(floor(log2(max(1e-4, (0.0165 * d) / 0.16))));
-        sp = 0.16 * lod; w = sp * 0.17;
-        hp += (vnoise(hp * (2.5 / sp)) - 0.5) * sp * 0.4; // hand-drawn waver, fixed to the surface
-      }
-      const vec2 d1 = vec2(0.7071, 0.7071);
-      const vec2 d2 = vec2(-0.7071, 0.7071);
-      const vec2 d3 = vec2(0.2588, 0.9659);
-      float h1 = stripes(hp, d1, sp, w);
-      float h2 = stripes(hp, d2, sp * 1.15, w);
-      float h3 = stripes(hp, d3, sp * 0.7, w);
-      hatch = h1 * smoothstep(0.64, 0.5, shade);
-      hatch = max(hatch, h2 * smoothstep(0.42, 0.32, shade));
-      hatch = max(hatch, h3 * smoothstep(0.24, 0.14, shade));
-      hatch = max(hatch, smoothstep(0.12, 0.0, shade) * 0.9);
-    }
+  float zmin = z;
+  float inkId = s.g;
+  if (uFastEdge < 0.5) {
+    vec4 sl = texture2D(tScene, vUv - ox);
+    vec4 sr = texture2D(tScene, vUv + ox);
+    vec4 su = texture2D(tScene, vUv + oy);
+    vec4 sd = texture2D(tScene, vUv - oy);
+    float nEdge = length(sl.ba - sr.ba) + length(su.ba - sd.ba);
+    edge = max(edge, smoothstep(0.48, 0.88, nEdge) * 0.85);
+    // Ink ID discontinuities (e.g. crosswalks, window frames, flags) get crisp borders too
+    float idEdge = abs(sl.g - sr.g) + abs(su.g - sd.g);
+    edge = max(edge, smoothstep(0.2, 0.8, idEdge) * 0.55);
+    if (zl < zmin) { zmin = zl; inkId = sl.g; }
+    if (zr < zmin) { zmin = zr; inkId = sr.g; }
+    if (zu < zmin) { zmin = zu; inkId = su.g; }
+    if (zd < zmin) { zmin = zd; inkId = sd.g; }
   }
-  float fade = mix(1.0, 0.28, smoothstep(14.0, 110.0, d));
-  float fadeE = mix(1.0, 0.45, smoothstep(30.0, 220.0, dFront));
+  float dFront = linDepth(zmin);
 
-  // paper with grain, ruled lines and a red margin
-  vec2 pp = gl_FragCoord.xy;
-  float grain = vnoise(pp * 0.8) * 0.6 + vnoise(pp * 0.17) * 0.4;
-  vec3 paper = uPaper * (0.95 + 0.06 * grain);
-  float ls = uLineSpacing;
-  float ly = mod(pp.y + ls * 0.5, ls);
-  float rule = 1.0 - smoothstep(0.5 * sc, 1.7 * sc, abs(ly - ls * 0.5));
-  paper = mix(paper, vec3(0.58, 0.70, 0.92), rule * 0.5);
-  float margin = 1.0 - smoothstep(0.9 * sc, 2.3 * sc, abs(pp.x - uRes.x * 0.07));
-  paper = mix(paper, vec3(0.92, 0.48, 0.55), margin * 0.55);
+  vec3 col = skyCol;
+  if (!sky) {
+    vec2 nxy = s.ba;
+    vec3 nView = vec3(nxy, sqrt(max(0.0, 1.0 - dot(nxy, nxy))));
+    float ndl = dot(nView, uLightView) * 0.5 + 0.5;
+    float upAmt = dot(nView, uUpView);
+    int surfId = int(s.g + 0.5);
+    vec3 surf = surfaceCelColor(surfId, s.r, ndl, upAmt);
+    if (uNotebook > 0.5 && s.r >= 0.0 && s.r <= 0.995) {
+      surf = mix(uPaper, surf, 0.68);
+    }
+    // Gentle atmospheric aerial perspective on distant buildings (> 110 m) so Brasília stays crisp
+    float haze = smoothstep(110.0, 420.0, d) * 0.30;
+    col = mix(surf, skyCol, haze);
+  }
 
-  vec3 col = paper;
-  col = mix(col, inkColor(s.g), hatch * 0.72 * fade);
-  float ew = 0.75 + 0.35 * vnoise(pp * 0.35);
-  col = mix(col, inkColor(inkId) * 0.92, clamp(edge * ew, 0.0, 1.0) * fadeE);
+  // Crisp dark ink outline (tinted subtly by the front object's ink colour)
+  int eId = int(inkId + 0.5);
+  vec3 outlineCol = baseInk(eId) * 0.22 + vec3(0.05, 0.06, 0.09);
+  float fadeE = mix(1.0, 0.42, smoothstep(45.0, 280.0, dFront));
+  col = mix(col, outlineCol, clamp(edge, 0.0, 1.0) * fadeE);
 
-  // hurt: red scribble vignette; low hp: pulsing
+  // Hurt / low-HP vignette, flash & slow-motion tint
   vec2 vc = (vUv - 0.5) * vec2(uAspect, 1.0);
-  float vig = smoothstep(0.32, 0.9, length(vc));
-  float scr = 0.55 + 0.45 * stripes(pp + wob * 8.0, normalize(vec2(1.0, 0.8)), 7.0 * sc, 2.2 * sc);
+  float vig = smoothstep(0.36, 0.92, length(vc));
   float hurt = clamp(uHurt + uLowHp * (0.35 + 0.25 * sin(uTime * 6.0)), 0.0, 1.0);
-  col = mix(col, uInks[1] * 0.9, hurt * vig * scr);
-  col = mix(col, uPaper, uFlash);
+  col = mix(col, uInks[1] * 0.88, hurt * vig * 0.78);
+  col = mix(col, vec3(1.0, 0.99, 0.96), uFlash);
   float lum = dot(col, vec3(0.3, 0.5, 0.2));
-  col = mix(col, vec3(lum) * vec3(0.8, 0.86, 1.0), uSlow * 0.55);
+  col = mix(col, vec3(lum) * vec3(0.80, 0.88, 1.0), uSlow * 0.55);
+
   gl_FragColor = vec4(col, 1.0);
 }`;
 
-
-
 export class InkRenderer {
   constructor(canvas) {
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false });
+    this.renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: false,
+      powerPreference: 'high-performance',
+      stencil: false,
+      depth: false,
+    });
     this.renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
     this.renderer.autoClear = false;
-    // dynamic resolution: the ink post pass is per pixel, so when frames run long (weak GPU, big
-    // fights) the internal resolution steps down, and climbs back when there is headroom
-    this.maxRatio = Math.min(window.devicePixelRatio || 1, 1.5); this.minRatio = Math.min(this.maxRatio, 0.55);
-    this.pixelRatio = this.maxRatio; this._ft = 16.7; this._slowT = 0; this._fastT = 0; this._lastT = 0; this.lost = false;
+
+    this.quality = 'medium';
+    this.notebookMode = false;
+    this.autoRes = true;
+    const dpr = window.devicePixelRatio || 1;
+    this.maxRatio = Math.min(dpr, 1.35);
+    this.minRatio = Math.min(this.maxRatio, 0.85);
+    this.pixelRatio = this.maxRatio;
+    this._ft = 16.7; this._slowT = 0; this._fastT = 0; this._lastT = 0; this.lost = false;
+
     canvas.addEventListener('webglcontextlost', (ev) => { ev.preventDefault(); this.lost = true; if (window.FE_LOG) window.FE_LOG.error('webglcontextlost'); });
-    canvas.addEventListener('webglcontextrestored', () => { this.lost = false; this.pixelRatio = Math.max(this.minRatio, this.pixelRatio * 0.8); this.resize(); });
+    canvas.addEventListener('webglcontextrestored', () => { this.lost = false; this.resize(); });
+
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(80, 1, 0.08, 560);
-    const depthTexture = new THREE.DepthTexture(2, 2); depthTexture.format = THREE.DepthFormat; depthTexture.type = THREE.FloatType;
-    this.rt = new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType, format: THREE.RGBAFormat, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthTexture, depthBuffer: true, stencilBuffer: false, generateMipmaps: false });
+    const depthTexture = new THREE.DepthTexture(2, 2);
+    depthTexture.format = THREE.DepthFormat;
+    depthTexture.type = THREE.FloatType;
+    this.rt = new THREE.WebGLRenderTarget(2, 2, {
+      type: THREE.HalfFloatType,
+      format: THREE.RGBAFormat,
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter,
+      depthTexture,
+      depthBuffer: true,
+      stencilBuffer: false,
+      generateMipmaps: false,
+    });
     this.post = new THREE.ShaderMaterial({
       uniforms: {
-        tScene: { value: this.rt.texture }, tDepth: { value: depthTexture }, uRes: { value: new THREE.Vector2(2, 2) }, uAspect: { value: 1 },
-        uTime: { value: 0 }, uNear: { value: this.camera.near }, uFar: { value: this.camera.far }, uHurt: { value: 0 }, uFlash: { value: 0 }, uSlow: { value: 0 },
-        uLowHp: { value: 0 }, uLineSpacing: { value: 60 }, uPaper: { value: new THREE.Vector3(0.965, 0.955, 0.905) }, uInks: { value: INK_COLORS },
-        uInvProj: { value: new THREE.Matrix4() }, uInvView: { value: new THREE.Matrix4() },
+        tScene: { value: this.rt.texture },
+        tDepth: { value: depthTexture },
+        uRes: { value: new THREE.Vector2(2, 2) },
+        uAspect: { value: 1 },
+        uTime: { value: 0 },
+        uNear: { value: this.camera.near },
+        uFar: { value: this.camera.far },
+        uHurt: { value: 0 },
+        uFlash: { value: 0 },
+        uSlow: { value: 0 },
+        uLowHp: { value: 0 },
+        uNotebook: { value: 0 },
+        uFastEdge: { value: 0 },
+        uLineSpacing: { value: 60 },
+        uPaper: { value: new THREE.Vector3(0.965, 0.955, 0.905) },
+        uLightView: { value: new THREE.Vector3(0, 1, 0) },
+        uUpView: { value: new THREE.Vector3(0, 1, 0) },
+        uCamFwd: { value: new THREE.Vector3(0, 0, -1) },
+        uInks: { value: INK_COLORS },
       },
-      vertexShader: postVert, fragmentShader: postFrag, depthTest: false, depthWrite: false,
+      vertexShader: postVert,
+      fragmentShader: postFrag,
+      depthTest: false,
+      depthWrite: false,
     });
-    this.postScene = new THREE.Scene(); this.postCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-    this.postQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.post); this.postScene.add(this.postQuad);
-    this.beforeRender = null; // hook run after world matrices are fresh, before drawing (bot batching)
+    this.postScene = new THREE.Scene();
+    this.postCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    this.postQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.post);
+    this.postScene.add(this.postQuad);
+    this.beforeRender = null;
 
     this._clear = new THREE.Color(1, 0, 0);
-    this._ld = new THREE.Vector3();
+    this._camDir = new THREE.Vector3();
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
+
+  setQuality(q) {
+    this.quality = q || 'medium';
+    const dpr = window.devicePixelRatio || 1;
+    // Keep pixelRatio fixed per preset so Chromium never reallocates the D3D11 swapchain mid-combat
+    this.autoRes = false;
+    if (this.quality === 'high') {
+      this.maxRatio = Math.min(Math.max(dpr, 1.25), 1.75);
+      this.minRatio = this.maxRatio;
+      this.post.uniforms.uFastEdge.value = 0;
+    } else if (this.quality === 'low') {
+      this.maxRatio = 0.85;
+      this.minRatio = 0.85;
+      this.post.uniforms.uFastEdge.value = 1;
+    } else {
+      this.maxRatio = Math.min(Math.max(dpr, 1.0), 1.25);
+      this.minRatio = this.maxRatio;
+      this.post.uniforms.uFastEdge.value = 0;
+    }
+    this.pixelRatio = this.maxRatio;
+    this.resize();
+  }
+
+  setNotebookMode(on) {
+    this.notebookMode = !!on;
+    this.post.uniforms.uNotebook.value = this.notebookMode ? 1 : 0;
+  }
+
   resize() {
     const w = Math.max(2, window.innerWidth), h = Math.max(2, window.innerHeight);
-    this.renderer.setPixelRatio(this.pixelRatio); this.renderer.setSize(w, h, false);
-    const rw = Math.floor(w * this.pixelRatio), rh = Math.floor(h * this.pixelRatio);
+    this.renderer.setPixelRatio(this.pixelRatio);
+    this.renderer.setSize(w, h, false);
+    const rw = Math.max(2, Math.floor(w * this.pixelRatio)), rh = Math.max(2, Math.floor(h * this.pixelRatio));
     this.rt.setSize(rw, rh);
-    this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
-    const u = this.post.uniforms; u.uRes.value.set(rw, rh); u.uAspect.value = w / h; u.uLineSpacing.value = rh / 13.5;
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+    const u = this.post.uniforms;
+    u.uRes.value.set(rw, rh);
+    u.uAspect.value = w / h;
+    u.uLineSpacing.value = rh / 13.5;
   }
+
   _adapt() {
     const now = performance.now(), ms = now - this._lastT; this._lastT = now;
-    if (ms <= 0 || ms > 250) return; // a hitch from loading or alt-tab is not a trend
+    if (ms <= 0 || ms > 250) return;
     this._ft += (ms - this._ft) * 0.06;
-    if (this._ft > 22) { this._slowT += ms; this._fastT = 0; } else if (this._ft < 17.6) { this._fastT += ms; this._slowT = 0; } else { this._slowT = 0; this._fastT = 0; }
-    if (!this.autoRes) return; // off: the downscale blurred the notebook lines, quality first
-    if (now - (this._lastChange || 0) < 4000) return;
-    if (this._slowT > 1500 && this.pixelRatio > this.minRatio + 1e-3) { this.pixelRatio = Math.max(this.minRatio, this.pixelRatio * 0.8); this._slowT = 0; this._lastChange = now; this.resize(); }
-    else if (this._fastT > 15000 && this.pixelRatio < this.maxRatio - 1e-3) { this.pixelRatio = Math.min(this.maxRatio, this.pixelRatio * 1.1); this._fastT = 0; this._lastChange = now; this.resize(); }
+    if (!this.autoRes) return;
+    if (this._ft > 21.5) { this._slowT += ms; this._fastT = 0; }
+    else if (this._ft < 17.2) { this._fastT += ms; this._slowT = 0; }
+    else { this._slowT = 0; this._fastT = 0; }
+    if (now - (this._lastChange || 0) < 3500) return;
+    if (this._slowT > 1400 && this.pixelRatio > this.minRatio + 1e-3) {
+      this.pixelRatio = Math.max(this.minRatio, +(this.pixelRatio * 0.88).toFixed(2));
+      this._slowT = 0; this._lastChange = now; this.resize();
+    } else if (this._fastT > 8000 && this.pixelRatio < this.maxRatio - 1e-3) {
+      this.pixelRatio = Math.min(this.maxRatio, +(this.pixelRatio * 1.1).toFixed(2));
+      this._fastT = 0; this._lastChange = now; this.resize();
+    }
   }
+
   render(time, fx = {}) {
     if (this.lost) return;
     this._adapt();
     shared.uTime.value = time;
-    this.camera.updateMatrixWorld(); this.camera.matrixWorldInverse.copy(this.camera.matrixWorld).invert();
+    this.camera.updateMatrixWorld();
+    this.camera.matrixWorldInverse.copy(this.camera.matrixWorld).invert();
     shared.uLightDir.value.copy(LIGHT_WORLD).transformDirection(this.camera.matrixWorldInverse);
+    const u = this.post.uniforms;
+    u.uLightView.value.copy(shared.uLightDir.value);
+    u.uUpView.value.copy(UP_WORLD).transformDirection(this.camera.matrixWorldInverse);
+    this.camera.getWorldDirection(this._camDir);
+    u.uCamFwd.value.copy(this._camDir);
+
     const r = this.renderer;
-    r.setRenderTarget(this.rt); r.setClearColor(this._clear, 0); r.clear(true, true, false);
-    if (this.beforeRender) { this.scene.updateMatrixWorld(); this.beforeRender(this.camera); this.scene.matrixWorldAutoUpdate = false; }
+    r.setRenderTarget(this.rt);
+    r.setClearColor(this._clear, 0);
+    r.clear(true, true, false);
+    if (this.beforeRender) {
+      this.scene.updateMatrixWorld();
+      this.beforeRender(this.camera);
+      this.scene.matrixWorldAutoUpdate = false;
+    }
     r.render(this.scene, this.camera);
     this.scene.matrixWorldAutoUpdate = true;
     r.setRenderTarget(null);
-    const u = this.post.uniforms; u.uTime.value = time; u.uNear.value = this.camera.near; u.uFar.value = this.camera.far;
-    u.uInvProj.value.copy(this.camera.projectionMatrixInverse); u.uInvView.value.copy(this.camera.matrixWorld);
-    u.uHurt.value = fx.hurt || 0; u.uFlash.value = fx.flash || 0; u.uSlow.value = fx.slow || 0; u.uLowHp.value = fx.lowHp || 0;
+
+    u.uTime.value = time;
+    u.uNear.value = this.camera.near;
+    u.uFar.value = this.camera.far;
+    u.uHurt.value = fx.hurt || 0;
+    u.uFlash.value = fx.flash || 0;
+    u.uSlow.value = fx.slow || 0;
+    u.uLowHp.value = fx.lowHp || 0;
     r.render(this.postScene, this.postCam);
   }
 }

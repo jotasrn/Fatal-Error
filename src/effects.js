@@ -36,7 +36,7 @@ export class Effects {
     this.splats = [0, 1, 2, 3, 4].map((i) => this._pool(splatGeometry(i), 300, true));
     this.holes = this._pool(new THREE.CircleGeometry(0.5, 8), 260, true);
     this.particles = []; this.debrisList = []; this.growing = []; this.shakeAmt = 0;
-    this.gibsAlive = 0;
+    this.gibsAlive = 0; this.maxParticles = 240; this._prevDrops = 0; this._prevStrokes = 0;
   }
   _pool(geo, max, double = false) {
     const mat = makeInkMaterial({ ink: INK.RED, fill: true, side: double ? THREE.DoubleSide : THREE.FrontSide });
@@ -235,8 +235,8 @@ export class Effects {
   _spawn(kind, pos, vel, o = {}) {
     const p = { kind, pos: pos.clone(), vel: vel ? vel.clone() : null, life: o.life ?? 1, maxLife: o.life ?? 1, size: o.size ?? 0.05, ink: o.ink ?? INK.RED, fill: o.fill ?? true, gravity: o.gravity ?? 20, drag: o.drag ?? 0, collide: o.collide ?? null, stretch: o.stretch ?? 0.03, len: o.len ?? 0, axis: o.axis ?? null, decalSize: o.decalSize ?? 3, shrink: o.shrink ?? true, rate: o.rate ?? 0, acc: 0, grow: o.grow ?? 0 };
     const n = this.particles.length;
-    if (n >= 350 && kind !== 'emitter') return p;
-    if (n >= 120 && kind !== 'emitter') p.collide = null;
+    if (n >= this.maxParticles && kind !== 'emitter') return p;
+    if (n >= (this.maxParticles >> 1) && kind !== 'emitter') p.collide = null;
     this.particles.push(p); return p;
   }
   // ---------- rigid debris (gibs, dropped weapons) ----------
@@ -330,7 +330,15 @@ export class Effects {
       }
     }
     drops.mesh.count = di; strokes.mesh.count = si;
-    drops.mesh.instanceMatrix.needsUpdate = true; drops.mesh.instanceColor.needsUpdate = true;
-    strokes.mesh.instanceMatrix.needsUpdate = true; strokes.mesh.instanceColor.needsUpdate = true;
+    if (di > 0 || this._prevDrops > 0) {
+      drops.mesh.instanceMatrix.needsUpdate = true;
+      drops.mesh.instanceColor.needsUpdate = true;
+      this._prevDrops = di;
+    }
+    if (si > 0 || this._prevStrokes > 0) {
+      strokes.mesh.instanceMatrix.needsUpdate = true;
+      strokes.mesh.instanceColor.needsUpdate = true;
+      this._prevStrokes = si;
+    }
   }
 }

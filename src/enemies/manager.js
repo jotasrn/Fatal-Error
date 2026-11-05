@@ -82,7 +82,11 @@ export class EnemyManager {
     e.target = best; return best;
   }
   nearestTarget(pos) { let best = null, bd = Infinity; for (const t of this.targets()) { if (!t.alive) continue; const d = t.body.pos.distanceToSquared(pos); if (d < bd) { bd = d; best = t; } } return best; }
-  clear() { for (const e of this.enemies) { this._removeLaser(e); if (!e.rootDetached) this.ctx.scene.remove(e.root); } this.enemies.length = 0; this.alive = 0; this.byId.clear(); this.projectiles.clear(); }
+  clear() {
+    for (const e of this.enemies) { this._removeLaser(e); if (!e.rootDetached) this.ctx.scene.remove(e.root); }
+    this.enemies.length = 0; this.alive = 0; this.byId.clear(); this.projectiles.clear();
+    if (this.ctx.batcher) this.ctx.batcher.clear();
+  }
   // build every type's model templates up front (during loading) so no spawn ever pays for it
   prewarm() { for (const type in TYPES) for (let i = 0; i < 3; i++) buildCached(type, TYPES[type], modelBuilder(TYPES[type])); }
   spawn(type, pos, id = null) {
@@ -188,7 +192,10 @@ export class EnemyManager {
     if (info.source !== 'deflect') this.ctx.input.rumble(0.1, 0.3, 30);
     if (e.state === 'spawn') { e.state = 'hunt'; e.root.scale.setScalar(e.T.scale); }
     if (e.T.boss && this.onBoss) this.onBoss(e);
-    if (e.hp <= 0) { this.ctx.game.hitstop(info.crit ? 0.05 : 0.025, 0.25); this.kill(e, info); }
+    if (e.hp <= 0) {
+      if (info.source === 'katana' || info.source === 'focus') this.ctx.game.hitstop(0.035, 0.3);
+      this.kill(e, info);
+    }
   }
   _breakShield(e) {
     const g = e.J.shieldG; if (!g || !g.parent) return; g.updateWorldMatrix(true, false); this.ctx.scene.attach(g);
@@ -243,9 +250,10 @@ export class EnemyManager {
   }
   eye(e, out) { return out.setFromMatrixPosition(e.parts.head.matrixWorld); }
   update(dt) {
+    this._lodTick = ((this._lodTick || 0) + 1) % 3;
     if (this.mirror) { this._updateMirror(dt); return; }
     this._pathsLeft = 4;
-    const ctx = this.ctx, world = ctx.world;
+    const ctx = this.ctx, world = ctx.world, lp = ctx.player.body.pos;
     for (const e of this.enemies) {
       this._cur = e; // lets the game loop drop a bot whose update throws instead of freezing every frame
       e.t += dt;
@@ -288,8 +296,15 @@ export class EnemyManager {
           if (world.overlapsBody(e.body)) { e.body.pos.x -= ox / od * push; e.body.pos.z -= oz / od * push; }
         }
       }
-      if (e.T.flying) this._animateFlyer(e, dt); else this._animate(e, dt, pc);
-      this._syncHit(e);
+      const ldx = e.body.pos.x - lp.x, ldz = e.body.pos.z - lp.z;
+      const farBot = ldx * ldx + ldz * ldz > 58 * 58;
+      if (!farBot || ((e.id + this._lodTick) % 3) === 0) {
+        const animDt = farBot ? dt * 3 : dt;
+        if (e.T.flying) this._animateFlyer(e, animDt); else this._animate(e, animDt, pc);
+        this._syncHit(e);
+      } else {
+        e.center.set(e.body.pos.x, e.body.pos.y + 1.0 * e.T.scale, e.body.pos.z);
+      }
     }
     this._cur = null; this._separate(dt); this.projectiles.update(dt);
     for (let i = this.enemies.length - 1; i >= 0; i--) { const e = this.enemies[i]; if (!e.alive && e.deadT > 3.5) { this._removeLaser(e); if (!e.rootDetached) { this.ctx.scene.remove(e.root); this._disposeMesh(e.root); } this.byId.delete(e.id); this.enemies.splice(i, 1); } }
@@ -378,9 +393,16 @@ export class EnemyManager {
           e.yaw = angleLerp(e.snapA.yaw, e.snapB.yaw, k);
         }
         e.root.position.copy(e.body.pos); e.root.rotation.y = e.yaw;
-        if (e.T.flying) this._animateFlyer(e, dt); else this._animate(e, dt, P.center);
+        const mdx = e.body.pos.x - P.body.pos.x, mdz = e.body.pos.z - P.body.pos.z;
+        const farMirror = mdx * mdx + mdz * mdz > 58 * 58;
+        if (!farMirror || ((e.id + this._lodTick) % 3) === 0) {
+          const animDt = farMirror ? dt * 3 : dt;
+          if (e.T.flying) this._animateFlyer(e, animDt); else this._animate(e, animDt, P.center);
+          this._syncHit(e);
+        } else {
+          e.center.set(e.body.pos.x, e.body.pos.y + 1.0 * e.T.scale, e.body.pos.z);
+        }
         if (e.T.weapon === 'sniper' && e.laser) e.laser.visible = e.aimAmt > 0.9;
-        this._syncHit(e);
       } catch (err) { /* ignore single mirror tick error */ }
     }
     this.projectiles.update(dt);
