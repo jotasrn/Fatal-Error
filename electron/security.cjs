@@ -13,8 +13,100 @@ const { pathToFileURL } = require('node:url');
 /** Limite maximo de um quadro JSON P2P (256 KB — pacotes reais tem < 8 KB). */
 const MAX_FRAME_BYTES = 256 * 1024;
 
-/** Limite de conexoes P2P simultaneas na sessao Hyperswarm. */
+/** Limite de conexoes P2P simultaneas na sessao Hyperswarm / LAN. */
 const MAX_PEERS = 16;
+
+/** Portas padrao da rede interna corporativa (GDFNet / LAN). */
+const LAN_DISCOVERY_PORT = 41229;
+const LAN_PORT_BASE = 41230;
+const LAN_PORT_COUNT = 8;
+const LAN_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+/**
+ * Permite conexoes diretas LAN apenas para enderecos IPv4 privados RFC1918 ou loopback,
+ * impedindo SSRF contra IPs publicos da internet, link-local ou multicast.
+ */
+function isValidPrivateLanIp(ip) {
+  if (typeof ip !== 'string') return false;
+  const parts = ip.trim().split('.');
+  if (parts.length !== 4) return false;
+  const nums = parts.map((p) => (/^\d{1,3}$/.test(p) ? Number(p) : -1));
+  if (nums.some((n) => n < 0 || n > 255)) return false;
+  const [a, b, c, d] = nums;
+  if (d === 0 || d === 255) {
+    // Rejeita enderecos de rede/broadcast tipicos /24 como destino TCP unicast
+    if (a !== 10 && !(a === 172 && b >= 16 && b <= 31)) return false;
+  }
+  if (a === 10) return true; // 10.0.0.0/8 (ex.: GDFNet 10.63.30.x)
+  if (a === 192 && b === 168) return true; // 192.168.0.0/16
+  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+  if (a === 127 && b === 0 && c === 0 && d === 1) return true; // loopback de teste
+  return false;
+}
+
+/**
+ * Codifica IPv4 privado + offset de porta (0..7) num codigo curto de 8 letras (`G` + 7 Base32)
+ * para conectar direto entre VLANs corporativas sem precisar de broadcast nem DNS/mDNS.
+ */
+function encodeLanCode(ip, portOffset = 0) {
+  if (!isValidPrivateLanIp(ip)) return null;
+  const off = Number(portOffset);
+  if (!Number.isInteger(off) || off < 0 || off >= LAN_PORT_COUNT) return null;
+  const [a, b, c, d] = ip.trim().split('.').map(Number);
+  const ipBits = (((BigInt(a) << 24n) | (BigInt(b) << 16n) | (BigInt(c) << 8n) | BigInt(d)) << 3n) | BigInt(off);
+  let out = 'G';
+  for (let shift = 30n; shift >= 0n; shift -= 5n) {
+    const idx = Number((ipBits >> shift) & 31n);
+    out += LAN_ALPHABET[idx];
+  }
+  return out;
+}
+
+/**
+ * Decodifica um codigo de 8 letras (`Gxxxxxxx` ou `GDF-xxxxxxx`) de volta para `{ ip, port, portOffset }`.
+ */
+function decodeLanCode(raw) {
+  if (typeof raw !== 'string') return null;
+  const clean = raw.trim().toUpperCase().replace(/^(GDF-|LAN-|G-)/, '');
+  const body = clean.length === 8 && clean.startsWith('G') ? clean.slice(1) : clean.length === 7 ? clean : null;
+  if (!body) return null;
+  let bits = 0n;
+  for (let i = 0; i < 7; i++) {
+    const idx = LAN_ALPHABET.indexOf(body[i]);
+    if (idx < 0) return null;
+    bits = (bits << 5n) | BigInt(idx);
+  }
+  const portOffset = Number(bits & 7n);
+  const addr = bits >> 3n;
+  const a = Number((addr >> 24n) & 255n);
+  const b = Number((addr >> 16n) & 255n);
+  const c = Number((addr >> 8n) & 255n);
+  const d = Number(addr & 255n);
+  const ip = `${a}.${b}.${c}.${d}`;
+  if (!isValidPrivateLanIp(ip)) return null;
+  return { ip, port: LAN_PORT_BASE + portOffset, portOffset, code: 'G' + body };
+}
+
+/**
+ * Aceita codigo GDFNet (`Gxxxxxxx`) ou `IP[:Porta]` privado dentro da faixa de portas do jogo.
+ */
+function parseLanTarget(raw) {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  const decoded = decodeLanCode(trimmed);
+  if (decoded) return decoded;
+
+  const m = /^(\d{1,3}(?:\.\d{1,3}){3})(?::(\d{4,5}))?$/.exec(trimmed);
+  if (!m) return null;
+  const ip = m[1];
+  if (!isValidPrivateLanIp(ip)) return null;
+  const port = m[2] ? Number(m[2]) : LAN_PORT_BASE;
+  if (!Number.isInteger(port) || port < LAN_PORT_BASE || port >= LAN_PORT_BASE + LAN_PORT_COUNT) {
+    return null;
+  }
+  const portOffset = port - LAN_PORT_BASE;
+  return { ip, port, portOffset, code: encodeLanCode(ip, portOffset) };
+}
 
 /** Chaves proibidas em JSON vindo da rede para impedir prototype pollution. */
 const FORBIDDEN_JSON_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
@@ -235,10 +327,17 @@ class PeerRateLimiter {
 module.exports = {
   MAX_FRAME_BYTES,
   MAX_PEERS,
+  LAN_DISCOVERY_PORT,
+  LAN_PORT_BASE,
+  LAN_PORT_COUNT,
   frame,
   makeDecoder,
   isValidLobbyCode,
   isValidPeerKey,
+  isValidPrivateLanIp,
+  encodeLanCode,
+  decodeLanCode,
+  parseLanTarget,
   sanitizeLog,
   isAllowedExternalUrl,
   isTrustedAppUrl,

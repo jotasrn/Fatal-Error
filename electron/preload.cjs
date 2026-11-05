@@ -35,6 +35,33 @@ contextBridge.exposeInMainWorld('FE_NET', Object.freeze({
   onDisconnect: bindSingleChannel('net:peer-disconnect', (cb, d) => d && cb(d.key)),
 }));
 
+contextBridge.exposeInMainWorld('FE_LAN', Object.freeze({
+  host: (opts = {}) => ipcRenderer.invoke('lan:host', {
+    hostName: String(opts.hostName ?? '').slice(0, 24),
+    isPublic: opts.isPublic !== false,
+  }),
+  join: (target, timeoutMs = 2200) => ipcRenderer.invoke('lan:join', {
+    target: String(target ?? '').slice(0, 32),
+    timeoutMs: Number(timeoutMs) || 2200,
+  }),
+  discover: (timeoutMs = 450) => ipcRenderer.invoke('lan:discover', {
+    timeoutMs: Number(timeoutMs) || 450,
+  }),
+  updateMeta: (meta = {}) => ipcRenderer.send('lan:meta', {
+    hostName: typeof meta.hostName === 'string' ? meta.hostName.slice(0, 24) : undefined,
+    isPublic: typeof meta.isPublic === 'boolean' ? meta.isPublic : undefined,
+    inMatch: typeof meta.inMatch === 'boolean' ? meta.inMatch : undefined,
+    accepting: typeof meta.accepting === 'boolean' ? meta.accepting : undefined,
+    maxPlayers: Number.isFinite(meta.maxPlayers) ? Number(meta.maxPlayers) : undefined,
+  }),
+  leave: () => ipcRenderer.invoke('lan:leave'),
+  send: (key, msg) => ipcRenderer.send('lan:send', { key: String(key ?? ''), msg }),
+  closePeer: (key) => ipcRenderer.send('lan:close-peer', { key: String(key ?? '') }),
+  onConnect: bindSingleChannel('lan:peer-connect', (cb, d) => d && cb(d.key)),
+  onData: bindSingleChannel('lan:peer-data', (cb, d) => d && cb(d.key, d.msg)),
+  onDisconnect: bindSingleChannel('lan:peer-disconnect', (cb, d) => d && cb(d.key)),
+}));
+
 contextBridge.exposeInMainWorld('FE_UPDATE', Object.freeze({
   getInfo: () => ipcRenderer.invoke('app:info'),
   getStatus: () => ipcRenderer.invoke('update:get-status'),

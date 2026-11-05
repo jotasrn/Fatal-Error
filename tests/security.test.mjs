@@ -18,16 +18,22 @@ import {
 const require = createRequire(import.meta.url);
 const {
   MAX_FRAME_BYTES,
+  LAN_PORT_BASE,
   frame,
   makeDecoder,
   isValidLobbyCode,
   isValidPeerKey,
+  isValidPrivateLanIp,
+  encodeLanCode,
+  decodeLanCode,
+  parseLanTarget,
   sanitizeLog,
   isAllowedExternalUrl,
   isTrustedAppUrl,
   filterSafeGpuFlags,
   PeerRateLimiter,
 } = require('../electron/security.cjs');
+const { createLanManager } = require('../electron/lan.cjs');
 
 test('framing P2P: round-trip de pacotes fragmentados e multiplos por chunk', () => {
   const received = [];
@@ -205,5 +211,102 @@ test('anti-spoofing e autoridade do Host no protocolo multiplayer', () => {
     allowed: true,
     from: attackerId,
   });
+});
+
+test('GDFNet / LAN: codificacao de codigo 8 letras e bloqueio anti-SSRF de IPs publicos/portas', () => {
+  assert.equal(isValidPrivateLanIp('10.63.30.10'), true);
+  assert.equal(isValidPrivateLanIp('192.168.1.42'), true);
+  assert.equal(isValidPrivateLanIp('172.20.5.9'), true);
+  assert.equal(isValidPrivateLanIp('8.8.8.8'), false);
+  assert.equal(isValidPrivateLanIp('169.254.10.20'), false);
+  assert.equal(isValidPrivateLanIp('224.0.0.251'), false);
+
+  const gdfCode = encodeLanCode('10.63.30.10', 2);
+  assert.equal(typeof gdfCode, 'string');
+  assert.equal(gdfCode.length, 8);
+  assert.equal(gdfCode.startsWith('G'), true);
+  assert.equal(isValidLobbyCode(gdfCode), true);
+
+  const decoded = decodeLanCode(gdfCode);
+  assert.deepEqual(decoded, {
+    ip: '10.63.30.10',
+    port: LAN_PORT_BASE + 2,
+    portOffset: 2,
+    code: gdfCode,
+  });
+
+  // Bloqueia SSRF para IP publico ou porta sensivel fora da faixa do jogo (ex.: SMB 445 / SSH 22)
+  assert.equal(encodeLanCode('8.8.8.8', 0), null);
+  assert.equal(parseLanTarget('8.8.8.8:41230'), null);
+  assert.equal(parseLanTarget('10.63.30.10:445'), null);
+  assert.equal(parseLanTarget('10.63.30.10:22'), null);
+  assert.equal(parseLanTarget(`10.63.30.10:${LAN_PORT_BASE + 1}`).port, LAN_PORT_BASE + 1);
+});
+
+test('GDFNet / LAN: conexao real Host <-> Cliente via TCP direto e descoberta UDP', async () => {
+  const hostEvents = [];
+  const clientEvents = [];
+  const testDiscoveryPort = 41929;
+
+  const hostMgr = createLanManager({
+    onEvent: (ch, payload) => hostEvents.push({ ch, payload }),
+  });
+  const clientMgr = createLanManager({
+    onEvent: (ch, payload) => clientEvents.push({ ch, payload }),
+  });
+
+  try {
+    const hostInfo = await hostMgr.host({
+      hostName: 'HostGDF',
+      isPublic: true,
+      discoveryPort: testDiscoveryPort,
+    });
+    assert.equal(hostInfo.code.startsWith('G'), true);
+
+    const rooms = await clientMgr.discover({
+      timeoutMs: 400,
+      discoveryPort: testDiscoveryPort,
+    });
+    assert.equal(rooms.some((r) => r.code === hostInfo.code && r.hostName === 'HostGDF'), true);
+
+    const clientDataPromise = new Promise((resolve) => {
+      const check = setInterval(() => {
+        const hit = clientEvents.find((e) => e.ch === 'lan:peer-data' && e.payload.msg.t === 'welcome');
+        if (hit) {
+          clearInterval(check);
+          resolve(hit);
+        }
+      }, 15);
+    });
+
+    const joinInfo = await clientMgr.join({
+      target: hostInfo.code,
+      timeoutMs: 2000,
+      discoveryPort: testDiscoveryPort,
+    });
+    assert.equal(joinInfo.code, hostInfo.code);
+
+    // Cliente envia hello para o selfId autenticado do Host e recebe welcome de volta
+    clientMgr.send(hostInfo.selfId, { t: 'hello', d: { name: 'ColegaGDF' } });
+
+    await new Promise((resolve) => {
+      const check = setInterval(() => {
+        const hit = hostEvents.find((e) => e.ch === 'lan:peer-data' && e.payload.msg.t === 'hello');
+        if (hit) {
+          clearInterval(check);
+          assert.equal(hit.payload.key, joinInfo.selfId);
+          hostMgr.send(joinInfo.selfId, { t: 'welcome', d: { hostId: hostInfo.selfId, code: hostInfo.code } });
+          resolve();
+        }
+      }, 15);
+    });
+
+    const welcomeEvt = await clientDataPromise;
+    assert.equal(welcomeEvt.payload.key, hostInfo.selfId);
+    assert.equal(welcomeEvt.payload.msg.d.code, hostInfo.code);
+  } finally {
+    await clientMgr.leave();
+    await hostMgr.leave();
+  }
 });
 

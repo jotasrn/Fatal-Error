@@ -87,6 +87,8 @@ Implementado no processo principal (`electron/main.cjs`) e em `electron/security
   - Todo JSON recebido passa por `safeJsonParse`, que remove chaves perigosas (`__proto__`, `constructor`, `prototype`) contra ataques de *Prototype Pollution*.
 - **Rate-Limiting por Peer (`PeerRateLimiter`)**:
   - Algoritmo *token-bucket* individual por peer desconecta automaticamente conexões que disparem rajadas abusivas de pacotes acima da taxa máxima de simulação do jogo.
+- **Proteção Anti-SSRF no Modo Corporativo (`electron/lan.cjs` + `isValidPrivateLanIp`)**:
+  - Conexões TCP/UDP diretas de rede interna aceitam exclusivamente endereços IPv4 privados RFC1918 (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) e apenas dentro da faixa restrita de portas do jogo (`41230–41237`), bloqueando qualquer tentativa de varredura de portas do sistema ou IPs públicos.
 
 ---
 

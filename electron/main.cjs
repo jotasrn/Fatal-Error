@@ -35,6 +35,7 @@ const {
   noteMatchActive,
   stopUpdater,
 } = require('./updater.cjs');
+const { createLanManager } = require('./lan.cjs');
 
 const APP_HTML_PATH = path.join(__dirname, '..', 'index.html');
 
@@ -44,6 +45,12 @@ const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 }
+
+// Em redes corporativas (ex.: GDFNet 10.x.x.x), switches e firewalls de dominio bloqueiam
+// Multicast DNS (.local / UDP 5353). Desativar o ofuscamento mDNS permite que o fallback
+// WebRTC troque candidatos ICE diretos com o IP interno da placa de rede local.
+// Seguro porque o BrowserWindow e estritamente isolado no index.html local (sem sites externos).
+app.commandLine.appendSwitch('disable-features', 'WebRtcHideLocalIpsWithMdns');
 
 // Permite ao Chromium escolher a GPU nativa do monitor; overrides opcionais em
 // <userData>/gpu-flags.txt passam por lista branca estrita (nunca aceita --no-sandbox etc.).
@@ -239,6 +246,55 @@ ipcMain.on('net:close-peer', (event, payload) => {
   }
 });
 
+// ---- IPC de Rede Interna / Corporativa (GDFNet / LAN direta TCP + UDP) ----
+const lanManager = createLanManager({
+  onEvent: (channel, payload) => send(win, channel, payload),
+  logLine,
+});
+
+ipcMain.handle('lan:host', async (event, payload) => {
+  if (!isTrustedSender(event)) throw new Error('Origem IPC nao autorizada');
+  return lanManager.host({
+    hostName: payload && payload.hostName,
+    isPublic: !payload || payload.isPublic !== false,
+  });
+});
+
+ipcMain.handle('lan:join', async (event, payload) => {
+  if (!isTrustedSender(event)) throw new Error('Origem IPC nao autorizada');
+  return lanManager.join({
+    target: payload && payload.target,
+    timeoutMs: payload && payload.timeoutMs,
+  });
+});
+
+ipcMain.handle('lan:discover', async (event, payload) => {
+  if (!isTrustedSender(event)) throw new Error('Origem IPC nao autorizada');
+  return lanManager.discover({
+    timeoutMs: payload && payload.timeoutMs,
+  });
+});
+
+ipcMain.on('lan:meta', (event, payload) => {
+  if (!isTrustedSender(event) || !payload || typeof payload !== 'object') return;
+  lanManager.updateMeta(payload);
+});
+
+ipcMain.handle('lan:leave', async (event) => {
+  if (!isTrustedSender(event)) throw new Error('Origem IPC nao autorizada');
+  await lanManager.leave();
+});
+
+ipcMain.on('lan:send', (event, payload) => {
+  if (!isTrustedSender(event) || !payload) return;
+  lanManager.send(payload.key, payload.msg);
+});
+
+ipcMain.on('lan:close-peer', (event, payload) => {
+  if (!isTrustedSender(event) || !payload) return;
+  lanManager.closePeer(payload.key);
+});
+
 // ---- IPC de versao e auto-update (modelo Concord) ----
 ipcMain.handle('app:info', (event) => {
   if (!isTrustedSender(event)) throw new Error('Origem IPC nao autorizada');
@@ -393,7 +449,7 @@ app.on('before-quit', () => {
 
 app.on('window-all-closed', () => {
   stopUpdater();
-  destroySession().finally(() => {
+  Promise.allSettled([destroySession(), lanManager.leave()]).finally(() => {
     if (process.platform !== 'darwin') app.quit();
   });
 });

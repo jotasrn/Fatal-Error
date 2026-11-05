@@ -39,7 +39,7 @@ Para garantir conectividade tanto na internet aberta quanto dentro de redes corp
 | Modo | Transporte | Como descobre e conecta |
 | --- | --- | --- |
 | **Global P2P** | `Hyperswarm` (via IPC `electron/main.cjs`) | Deriva um tópico criptográfico SHA-256 de 32 bytes a partir do código da sala (ou lobby público), anuncia na DHT Kademlia distribuída e negocia conexão direta cifrada com **Noise Protocol + UDP Hole-Punching**. |
-| **Rede Interna / Corporativa (`GDFNet`)** | `PeerJS` / `WebRTC DataChannel` (`vendor/peerjs/`) | Sinalização compatível com ambientes onde portas UDP da DHT são bloqueadas pelo firewall corporativo, mantendo canais de dados `SCTP/DTLS` de baixa latência. |
+| **Rede Interna / Corporativa (`GDFNet`)** | Híbrido `LanNet` (`electron/lan.cjs` TCP/UDP) + `PeerNet` (`WebRTC` IP local sem mDNS/TURN) | Prioriza conexão TCP direta (`41230–41237`) na rede `10.x.x.x`/`192.168.x.x` via código de 8 letras (`Gxxxxxxx`) ou descoberta UDP (`41229`), com fallback imediato para WebRTC ICE direto por IP local caso o Firewall de Domínio bloqueie TCP de entrada. |
 
 ### Modelo Host-Autoritativo com Migração Automática
 - **Sincronização de Jogadores**: cada jogador simula o próprio movimento localmente a `60+ Hz` (zero *input lag*) e envia snapshots compactos de posição/rotação/arma; os demais interpolam suavemente em `src/players.js`.
@@ -78,7 +78,8 @@ Para suportar o mapa expandido de **Brasília (~770 m)** com dezenas de bots, pr
 ### `electron/` — Aplicativo Desktop Nativo
 | Arquivo | Responsabilidade |
 | --- | --- |
-| `electron/main.cjs` | Inicialização do Electron, criação da `BrowserWindow` isolada, gerenciamento do nó P2P Hyperswarm, logs em `%APPDATA%` e integração IPC. |
+| `electron/main.cjs` | Inicialização do Electron, criação da `BrowserWindow` isolada, gerenciamento do nó P2P Hyperswarm/LAN, logs em `%APPDATA%` e integração IPC. |
+| `electron/lan.cjs` | Transporte nativo para redes corporativas (`GDFNet`): servidor/cliente TCP de baixa latência (`41230–41237`), descoberta UDP na sub-rede (`41229`) e proteção anti-SSRF. |
 | `electron/preload.cjs` | Ponte `contextBridge` mínima que expõe `window.fatalNet` e `window.fatalUpdater` ao renderer sem vazar APIs do Node. |
 | `electron/security.cjs` | Validadores de URL local, lista branca de flags de GPU, parser JSON seguro contra *prototype pollution*, *rate-limiter* por peer e validadores de IPC. |
 | `electron/updater.cjs` | Orquestrador do `electron-updater`: checagem periódica no GitHub Releases, download silencioso e bloqueio de reinício durante partidas (`emPartida`). |
