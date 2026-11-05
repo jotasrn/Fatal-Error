@@ -55,7 +55,7 @@ export class EnemyManager {
       e.target = best; return best;
     }
 
-    // Se é manifestante normal, foca na polícia
+    // Se é manifestante normal (sem revolta), foca SOMENTE na polícia (nunca ataca jogadores inocentes!)
     if (e.T.isProtester) {
       let bestPol = null, bd = Infinity;
       for (const other of this.enemies) {
@@ -63,10 +63,11 @@ export class EnemyManager {
         const d = other.body.pos.distanceToSquared(e.body.pos);
         if (d < bd) { bd = d; bestPol = other; }
       }
-      if (bestPol) { e.target = bestPol; return bestPol; }
+      e.target = bestPol;
+      return bestPol;
     }
 
-    // Se é polícia e o jogador não está procurado nem atacou a polícia, a polícia foca nos manifestantes!
+    // Se é polícia e o jogador não está procurado nem atacou a polícia, foca SOMENTE nos manifestantes (nunca ataca jogadores inocentes!)
     if (e.T.isPolice && !this.ctx.playerWanted) {
       let bestProt = null, bd = Infinity;
       for (const other of this.enemies) {
@@ -74,7 +75,8 @@ export class EnemyManager {
         const d = other.body.pos.distanceToSquared(e.body.pos);
         if (d < bd) { bd = d; bestProt = other; }
       }
-      if (bestProt) { e.target = bestProt; return bestProt; }
+      e.target = bestProt;
+      return bestProt;
     }
 
     let best = null, bd = Infinity;
@@ -163,8 +165,9 @@ export class EnemyManager {
     amount *= this.mods.damage;
     e.hp -= amount; e.flinch = 1; e.flashT = 0.07; if (!e.flashOn) { setFill(e.mat, true); e.flashOn = true; }
 
-    // Reação de facção ao ataque de um jogador:
-    if (info.source !== 'bot') {
+    // Reação de facção apenas quando atacado por um JOGADOR (nunca por dano colateral de outro bot ou queda):
+    if (info && info.source !== 'bot' && info.source !== 'fall') {
+      const culprit = (info.by && this.ctx.remote && this.ctx.remote.get(info.by)) || this.ctx.player;
       if ((e.T.isProtester || e.T.isCivilian) && !this.ctx.protestersRiot) {
         this.ctx.protestersRiot = true;
         if (this.ctx.hud) this.ctx.hud.message('⚠️ MULTIDÃO EM FÚRIA!', 'Você atacou os manifestantes! A multidão partiu para cima de você!', 4.0);
@@ -172,17 +175,19 @@ export class EnemyManager {
         for (const en of this.enemies) {
           if (en.alive && (en.T.isProtester || en.T.isCivilian)) {
             en.enraged = true;
-            en.target = this.ctx.player;
+            en.target = culprit;
             en.scared = false;
             if (en.T.isCivilian && en.T.weapon !== 'blade') en.T = { ...en.T, weapon: 'blade', dmg: 10, reach: 2.6, lunge: 2.6, standoff: 1.6, cool: [1.1, 1.7] };
           }
         }
+        if (this.ctx.onProtestersRiot) this.ctx.onProtestersRiot();
       } else if (e.T.isPolice && !this.ctx.playerWanted) {
         this.ctx.playerWanted = true;
         if (this.ctx.hud) this.ctx.hud.message('🚨 FORÇA POLICIAL ACIONADA!', 'A Polícia revidou o ataque ao oficial!', 3.5);
         for (const en of this.enemies) {
-          if (en.alive && en.T.isPolice) en.target = this.ctx.player;
+          if (en.alive && en.T.isPolice) en.target = culprit;
         }
+        if (this.ctx.onPlayerWanted) this.ctx.onPlayerWanted();
       }
     }
     const dir = info.dir || _d.set(0, 1, 0); const amt = clamp(0.5 + amount / 70, 0.5, 2.2) * (e.T.boss ? 1.6 : 1);
@@ -210,7 +215,7 @@ export class EnemyManager {
     const dir = (info.dir || _d.set(0, 0.5, 0)).clone().normalize();
     if (e.T.weapon === 'bomb') { this._explodeBomber(e, 0.8); if (this.onKill) this.onKill(e, info, true); return; }
     audio.enemyDie(e.center);
-    if (e.T.isCivilian && this.ctx.onCivilianKilled) {
+    if (e.T.isCivilian && this.ctx.onCivilianKilled && info && info.source !== 'bot' && info.source !== 'fall') {
       this.ctx.onCivilianKilled(e, info);
     }
     if (e.T.flying) {
@@ -258,7 +263,9 @@ export class EnemyManager {
       this._cur = e; // lets the game loop drop a bot whose update throws instead of freezing every frame
       e.t += dt;
       if (!e.alive) { this._updateDead(e, dt); continue; }
-      const P = this._pickTarget(e, dt) || ctx.player; const pp = P.body.pos, pc = P.center;
+      const target = this._pickTarget(e, dt);
+      const peaceful = !target && (e.T.isPolice || e.T.isProtester);
+      const P = target || ctx.player; const pp = P.body.pos, pc = P.center;
       if (e.flashT > 0) { e.flashT -= dt; if (e.flashT <= 0 && e.flashOn) { setFill(e.mat, false); e.flashOn = false; } }
       e.flinch = damp(e.flinch, 0, 9, dt);
       if (e.state === 'spawn') {
@@ -274,11 +281,12 @@ export class EnemyManager {
       if (e.T.flying) { this._thinkFlyer(e, dt, pc, P); world.moveBody(e.body, dt); }
       else {
         if (e.state === 'stunned') { if (e.t > e.stunDur) e.state = 'hunt'; }
+        else if (peaceful) { this._patrolPeaceful(e, dt); }
         else if (P.alive) {
-          // AI level of detail: a bot far from its target and out of its sight decides ~8x a second
+          // AI level of detail: a bot far from its target and out of its sight decides ~6-8x a second
           // instead of every frame (movement and physics still run every frame, so it stays smooth)
           const fx = pp.x - e.body.pos.x, fz = pp.z - e.body.pos.z; e.thinkAcc = (e.thinkAcc || 0) + dt;
-          if (fx * fx + fz * fz > 55 * 55 && !e.los && !e.T.boss) { if (e.thinkAcc >= 0.12) { this._think(e, e.thinkAcc, pp, pc, P); e.thinkAcc = 0; } }
+          if (fx * fx + fz * fz > 60 * 60 && !e.los && !e.T.boss) { if (e.thinkAcc >= 0.16) { this._think(e, e.thinkAcc, pp, pc, P); e.thinkAcc = 0; } }
           else { this._think(e, e.thinkAcc, pp, pc, P); e.thinkAcc = 0; }
         } else this._wander(e, dt);
         e.body.vel.y -= 24 * dt; world.moveBody(e.body, dt);
@@ -312,10 +320,23 @@ export class EnemyManager {
   // --- network mirror ---
   // Compact per-enemy state the host sends every few frames; clients ease toward it.
   snapshot() {
+    this._snapTick = ((this._snapTick || 0) + 1) % 3;
+    const tgs = this.targets();
     const out = [];
     for (const e of this.enemies) {
       if (!e.alive) continue;
       const b = e.body;
+      let nearAny = e.T.boss;
+      if (!nearAny) {
+        for (let i = 0; i < tgs.length; i++) {
+          const tp = tgs[i].body && tgs[i].body.pos;
+          if (tp) {
+            const dx = b.pos.x - tp.x, dz = b.pos.z - tp.z;
+            if (dx * dx + dz * dz < 125 * 125) { nearAny = true; break; }
+          }
+        }
+      }
+      if (!nearAny && ((e.id + this._snapTick) % 3) !== 0) continue;
       // compact: positions at 5 cm, yaw at ~0.6 deg, the type as a small index (about half the bytes)
       out.push([
         e.id,
@@ -363,7 +384,7 @@ export class EnemyManager {
       const e = this.enemies[i];
       if (e.alive && !seen.has(e.id)) {
         e.ghostTicks = (e.ghostTicks || 0) + 1;
-        if (e.ghostTicks > 5) {
+        if (e.ghostTicks > 12) {
           e.alive = false;
           this.ctx.scene.remove(e.root);
           this._disposeMesh(e.root);
@@ -426,7 +447,9 @@ export class EnemyManager {
     this._sepT -= dt; if (this._sepT > 0) return; this._sepT = 0.05; const es = this.enemies;
     for (let i = 0; i < es.length; i++) { const a = es[i]; if (!a.alive || a.T.flying) continue;
       for (let j = i + 1; j < es.length; j++) { const b = es[j]; if (!b.alive || b.T.flying) continue;
-        const dx = b.body.pos.x - a.body.pos.x, dz = b.body.pos.z - a.body.pos.z; const d2 = dx * dx + dz * dz; const rr = a.body.halfW + b.body.halfW + 0.75; if (d2 > rr * rr || d2 < 1e-6 || Math.abs(b.body.pos.y - a.body.pos.y) > 1.5) continue;
+        const dx = b.body.pos.x - a.body.pos.x, dz = b.body.pos.z - a.body.pos.z;
+        if (dx > 2.2 || dx < -2.2 || dz > 2.2 || dz < -2.2) continue;
+        const d2 = dx * dx + dz * dz; const rr = a.body.halfW + b.body.halfW + 0.75; if (d2 > rr * rr || d2 < 1e-6 || Math.abs(b.body.pos.y - a.body.pos.y) > 1.5) continue;
         const d = Math.sqrt(d2); const push = (rr - d) * 9; a.body.vel.x -= dx / d * push; a.body.vel.z -= dz / d * push; b.body.vel.x += dx / d * push; b.body.vel.z += dz / d * push; } }
   }
   _steer(e, dt, gx, gz, speed, accel) {
@@ -474,6 +497,20 @@ export class EnemyManager {
     }
   }
   _wander(e, dt) { e.body.vel.x = damp(e.body.vel.x, 0, 6, dt); e.body.vel.z = damp(e.body.vel.z, 0, 6, dt); e.aimAmt = damp(e.aimAmt, 0, 5, dt); }
+  _patrolPeaceful(e, dt) {
+    const b = e.body;
+    e.aimAmt = damp(e.aimAmt, 0, 6, dt);
+    e.burstLeft = 0; e.aimT = 0; this._hideLaser(e);
+    e.walkTimer = (e.walkTimer || 0) - dt;
+    if (e.walkTimer <= 0 || b.hitWall) {
+      e.walkTimer = rand(3, 6);
+      e.walkDir = b.hitWall && e.walkDir !== undefined ? wrapAngle(e.walkDir + Math.PI + rand(-0.6, 0.6)) : rand(0, TAU);
+    }
+    const spd = e.T.speed * 0.35;
+    b.vel.x = damp(b.vel.x, Math.sin(e.walkDir) * spd, 6, dt);
+    b.vel.z = damp(b.vel.z, Math.cos(e.walkDir) * spd, 6, dt);
+    e.yawT = e.walkDir;
+  }
   _think(e, dt, pp, pc, P) {
     const T = e.T, b = e.body, ctx = this.ctx;
     const dx = pp.x - b.pos.x, dz = pp.z - b.pos.z; const dist = Math.hypot(dx, dz); const dy = pp.y - b.pos.y;
@@ -725,6 +762,12 @@ export class EnemyManager {
     if (e.burstLeft > 0) { e.burstT -= dt; if (e.burstT <= 0) { e.burstT = T.burstInt; e.burstLeft--; this._fireOne(e, muzzle, pc, T.spread, T.pspeed, T.dmg, 0.045, P); audio.enemyShot(e.center); if (e.burstLeft === 0) e.cool = rand(T.cool[0], T.cool[1]); } return; }
     if (e.cool <= 0) {
       if (T.weapon === 'shotgun') { for (let i = 0; i < T.pellets; i++) this._fireOne(e, muzzle, pc, T.spread, T.pspeed * rand(0.85, 1.1), T.dmg, 0.05, P); audio.shotgun(e.center); e.cool = rand(T.cool[0], T.cool[1]); ctx.effects.strokeBurst(muzzle, INK.ORANGE, 8, 5, { life: 0.1, size: 0.04 }); }
+      else if (T.weapon === 'bazooka') {
+        _d.subVectors(pc, muzzle); const l = _d.length(); _d.divideScalar(Math.max(1, l)); _d.y += l * 0.008; _d.normalize();
+        this.projectiles.fire(muzzle, _d, T.pspeed, T.dmg * this.mods.damage, e, INK.ORANGE, 0.11, 1);
+        audio.explosion(muzzle); ctx.effects.strokeBurst(muzzle, INK.ORANGE, 10, 6, { life: 0.16, size: 0.045 });
+        e.cool = rand(T.cool[0], T.cool[1]);
+      }
       else { e.burstLeft = T.burst; e.burstT = 0; }
     }
   }
@@ -746,7 +789,8 @@ export class EnemyManager {
   _fireOne(e, muzzle, pc, spread, speed, dmg, thick, P = this.ctx.player) { _d.subVectors(pc, muzzle); _d.y += rand(-0.2, 0.3); _d.normalize();
     const pSpd = (P.body && P.body.vel) ? Math.hypot(P.body.vel.x, P.body.vel.z) : (P.speed || 0);
     const sp = spread * (1 + pSpd * 0.06); _d.x += rand(-sp, sp); _d.y += rand(-sp, sp); _d.z += rand(-sp, sp); _d.normalize();
-    this.projectiles.fire(muzzle, _d, speed, dmg * this.mods.damage, e, INK.RED, thick); this.ctx.effects.strokeBurst(muzzle, INK.ORANGE, 4, 4, { life: 0.07, size: 0.03 });
+    const pInk = e.T.weapon === 'laser' ? INK.ORANGE : INK.RED;
+    this.projectiles.fire(muzzle, _d, speed, dmg * this.mods.damage, e, pInk, e.T.weapon === 'laser' ? 0.06 : thick); this.ctx.effects.strokeBurst(muzzle, INK.ORANGE, 4, 4, { life: 0.07, size: 0.03 });
   }
   _animateFlyer(e, dt) {
     const J = e.J, b = e.body; e.phase += dt * 14; const flap = Math.sin(e.phase) * 0.35;
