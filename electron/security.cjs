@@ -142,7 +142,10 @@ function isTrustedAppUrl(rawUrl, appHtmlPath) {
   try {
     const actual = new URL(rawUrl);
     const expected = pathToFileURL(path.resolve(appHtmlPath));
-    return actual.pathname.toLowerCase() === expected.pathname.toLowerCase();
+    if (process.platform === 'win32') {
+      return actual.pathname.toLowerCase() === expected.pathname.toLowerCase();
+    }
+    return actual.pathname === expected.pathname;
   } catch {
     return false;
   }

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 
 import {
@@ -116,7 +117,7 @@ test('validadores de IPC, URL externa e log injection', () => {
   assert.equal(isAllowedExternalUrl('ms-msdt:/id PCWDiagnostic'), false);
 
   const appHtml = path.resolve('index.html');
-  const fileUrl = new URL('file:///' + appHtml.replace(/\\/g, '/')).href;
+  const fileUrl = pathToFileURL(appHtml).href;
   assert.equal(isTrustedAppUrl(fileUrl, appHtml), true);
   assert.equal(isTrustedAppUrl('https://evil.example/index.html', appHtml), false);
 });
