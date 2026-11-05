@@ -13,7 +13,7 @@ export class Minimap {
   setEnabled(on) { this.enabled = on; this.canvas.hidden = !on; try { localStorage.setItem('doodle_minimap', on ? '1' : '0'); } catch (e) { /* ignore */ } }
   setLevel(level, world) {
     const b = level.bounds; this.b = b;
-    const w = b.maxX - b.minX, h = b.maxZ - b.minZ; this.k = Math.min(3, 1400 / Math.max(w, h));
+    const w = b.maxX - b.minX, h = b.maxZ - b.minZ; this.k = Math.min(1.6, 800 / Math.max(w, h));
     const c = document.createElement('canvas'); c.width = Math.ceil(w * this.k); c.height = Math.ceil(h * this.k);
     const g = c.getContext('2d'); g.fillStyle = '#e9efe0'; g.fillRect(0, 0, c.width, c.height);
     const boxes = [...world.boxes].filter((x) => x.max.y - x.min.y > 0.9 && x.min.y < 40 && (x.max.x - x.min.x) < w + 1).sort((p, q) => p.max.y - q.max.y);
@@ -33,7 +33,11 @@ export class Minimap {
     g.save(); g.beginPath(); g.arc(R_PX, R_PX, R_PX - 3, 0, Math.PI * 2); g.clip();
     g.fillStyle = '#cfd8c4'; g.fillRect(0, 0, R_PX * 2, R_PX * 2);
     g.translate(R_PX, R_PX); g.rotate(player.yaw); g.scale(s, s);
-    g.save(); g.scale(1 / this.k, 1 / this.k); g.translate(-(px - b.minX) * this.k, -(pz - b.minZ) * this.k); g.drawImage(this.layer, 0, 0); g.restore();
+    const k = this.k, cx = (px - b.minX) * k, cz = (pz - b.minZ) * k, radPx = Math.ceil(VIEW_M * 1.15 * k);
+    const sx = Math.max(0, Math.floor(cx - radPx)), sy = Math.max(0, Math.floor(cz - radPx));
+    const sw = Math.min(this.layer.width, Math.ceil(cx + radPx)) - sx;
+    const sh = Math.min(this.layer.height, Math.ceil(cz + radPx)) - sy;
+    if (sw > 0 && sh > 0) g.drawImage(this.layer, sx, sy, sw, sh, (sx - cx) / k, (sy - cz) / k, sw / k, sh / k);
     const dot = (x, z, r, fill) => { g.beginPath(); g.arc(x - px, z - pz, r / s, 0, Math.PI * 2); g.fillStyle = fill; g.fill(); g.lineWidth = 1.2 / s; g.strokeStyle = '#111'; g.stroke(); };
     const lim = VIEW_M * 1.5;
     for (const e of enemies) {

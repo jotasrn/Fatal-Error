@@ -20,10 +20,16 @@ export class Input {
     this.look = { x: 0, y: 0 };
     this.mx = 0; this.my = 0; this.wheel = 0;
     this.mouseSens = 0.0022; this.padSensX = 3.4; this.padSensY = 2.6;
-    this.usingGamepad = false; this.gamepadIndex = -1; this.padHoldTime = 0;
-    this.pointerLocked = false; this.anyInput = false; this.lastPadButtons = [];
+    this.usingGamepad = false; this.gamepadIndex = -1; this._hasPad = false; this.padHoldTime = 0;
+    this.pointerLocked = false; this._lockAt = 0; this.anyInput = false; this.lastPadButtons = [];
     this.onLockChange = null; this.onAnyInput = null; this.lastActive = performance.now();
     this.invertY = false; this.onDeviceChange = null;
+
+    // Check once on startup if a gamepad is already plugged in (avoids polling navigator.getGamepads every frame)
+    try {
+      const initPads = navigator.getGamepads ? navigator.getGamepads() : [];
+      for (const p of initPads) if (p && p.connected) { this._hasPad = true; this.gamepadIndex = p.index; break; }
+    } catch (e) { /* ignore */ }
 
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
@@ -33,16 +39,19 @@ export class Input {
       this.anyInput = true;
     });
     window.addEventListener('keyup', (e) => { const a = KEYMAP[e.code]; if (a) this.keys[a] = false; if (!e.shiftKey) this.keys.sprint = false; });
-    document.addEventListener('visibilitychange', () => { if (document.hidden) { this.keys = {}; this.mouseBtns = {}; } });
-    window.addEventListener('blur', () => { this.keys = {}; this.mouseBtns = {}; });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) { this.keys = {}; this.mouseBtns = {}; this.mx = 0; this.my = 0; } });
+    window.addEventListener('blur', () => { this.keys = {}; this.mouseBtns = {}; this.mx = 0; this.my = 0; });
     this.padState = {}; this.padPrev = {};
     document.addEventListener('mousemove', (e) => {
       if (!this.pointerLocked) return;
-      let dx = e.movementX, dy = e.movementY;
-      // guard against pointer-lock spikes
-      if (Math.abs(dx) > 400) dx = 0; if (Math.abs(dy) > 400) dy = 0;
+      let dx = e.movementX || 0, dy = e.movementY || 0;
+      // Only discard huge synthetic warp spikes right when pointer lock engages (first 65ms);
+      // never zero out legitimate fast mouse flicks during gameplay!
+      if (performance.now() - this._lockAt < 65 && (Math.abs(dx) > 600 || Math.abs(dy) > 600)) return;
+      dx = clamp(dx, -4000, 4000);
+      dy = clamp(dy, -4000, 4000);
       this.mx += dx; this.my += dy; this.usingGamepad = false; this.lastActive = performance.now();
-    });
+    }, { passive: true });
     document.addEventListener('mousedown', (e) => {
       const a = MOUSEMAP[e.button]; if (a) this.mouseBtns[a] = true;
       if (this.usingGamepad && this.onDeviceChange) this.onDeviceChange(false);
@@ -53,24 +62,32 @@ export class Input {
     document.addEventListener('contextmenu', (e) => e.preventDefault());
     document.addEventListener('wheel', (e) => { this.wheel += Math.sign(e.deltaY); }, { passive: true });
     document.addEventListener('pointerlockchange', () => {
-      this.pointerLocked = document.pointerLockElement === this.canvas;
+      const locked = document.pointerLockElement === this.canvas;
+      if (locked && !this.pointerLocked) { this._lockAt = performance.now(); this.mx = 0; this.my = 0; }
+      this.pointerLocked = locked;
       if (this.onLockChange) this.onLockChange(this.pointerLocked);
     });
-    window.addEventListener('gamepadconnected', (e) => { this.gamepadIndex = e.gamepad.index; });
+    window.addEventListener('gamepadconnected', (e) => { this._hasPad = true; this.gamepadIndex = e.gamepad.index; });
+    window.addEventListener('gamepaddisconnected', () => {
+      const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+      this._hasPad = false; this.gamepadIndex = -1;
+      for (const p of pads) if (p && p.connected) { this._hasPad = true; this.gamepadIndex = p.index; break; }
+    });
   }
 
   // browsers refuse a new pointer lock for about a second after Esc released the last one, so a
   // failed request is retried until it takes or the game stops wanting it
   requestLock() {
     this.wantLock = true; if (this.pointerLocked) return;
-    const attempt = (opts) => { try { const p = this.canvas.requestPointerLock(opts); return p && p.catch ? p : Promise.resolve(); } catch (err) { return Promise.reject(err); } };
+    const attempt = (opts) => { try { const p = opts ? this.canvas.requestPointerLock(opts) : this.canvas.requestPointerLock(); return p && p.catch ? p : Promise.resolve(); } catch (err) { return Promise.reject(err); } };
     attempt({ unadjustedMovement: true }).catch(() => attempt()).catch(() => {
-      clearTimeout(this._lockRetry); this._lockRetry = setTimeout(() => { if (this.wantLock && !this.pointerLocked) this.requestLock(); }, 1200);
+      clearTimeout(this._lockRetry); this._lockRetry = setTimeout(() => { if (this.wantLock && !this.pointerLocked) this.requestLock(); }, 900);
     });
   }
   exitLock() { this.wantLock = false; clearTimeout(this._lockRetry); if (document.pointerLockElement) document.exitPointerLock(); }
 
   _getPad() {
+    if (!this._hasPad) return null;
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
     if (this.gamepadIndex >= 0 && pads[this.gamepadIndex]) return pads[this.gamepadIndex];
     for (const p of pads) if (p && p.connected) { this.gamepadIndex = p.index; return p; }
@@ -88,7 +105,7 @@ export class Input {
     // movement from keys
     let mx = (s.right ? 1 : 0) - (s.left ? 1 : 0);
     let my = (s.forward ? 1 : 0) - (s.back ? 1 : 0);
-    // look from mouse
+    // look from mouse (1:1 raw delta, zero dropped flicks)
     let lx = -this.mx * this.mouseSens, ly = -this.my * this.mouseSens; this.mx = 0; this.my = 0;
 
     const pad = this._getPad(); const padS = {};

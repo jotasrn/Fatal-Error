@@ -344,10 +344,12 @@ export function buildBrasilia(B, arena = false) {
   }
   const syncCars = () => { for (const c of cars) c.group.updateMatrix(); for (const p of carPools) { p.list.forEach((c, i) => p.im.setMatrixAt(i, c.group.matrix)); p.im.instanceMatrix.needsUpdate = true; } };
   syncCars();
+  let lastCarT = 0;
   L.animated.push({
     mesh: null,
-    update: () => {
-      const dt = 0.016;
+    update: (t) => {
+      const dt = lastCarT ? Math.min(0.05, Math.max(0, t - lastCarT)) : 0.016;
+      lastCarT = t;
       for (const car of cars) {
         car.z += car.speed * car.dir * dt;
         if (car.dir > 0 && car.z > routeB) car.z = routeA;

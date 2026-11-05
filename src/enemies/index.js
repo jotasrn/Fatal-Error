@@ -4,3 +4,4 @@
 export { TYPES, STATE_CODES, STATE_NAMES, BOSSES } from './types.js';
 export { buildHumanoid, buildWeaponProp, buildBomber, buildFlyer, buildQuadruped } from './models.js';
 export { EnemyManager } from './manager.js';
+export { BotBatcher } from './batch.js';

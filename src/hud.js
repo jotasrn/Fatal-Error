@@ -152,18 +152,30 @@ export class HUD {
     if (x == null) { m.classList.remove('on'); return; }
     m.classList.add('on'); m.style.transform = `translate(${x.toFixed(0)}px, ${y.toFixed(0)}px)`;
   }
-  setSpread(px) { this.el.crosshair.style.setProperty('--s', px.toFixed(1) + 'px'); }
-  setCrosshairMode(mode) { this._mode = mode; this._applyCross(); }
+  setSpread(px) {
+    const v = Math.round(px * 4) / 4;
+    if (v === this._lastSpread) return;
+    this._lastSpread = v;
+    this.el.crosshair.style.setProperty('--s', v.toFixed(1) + 'px');
+  }
+  setCrosshairMode(mode) { if (mode === this._mode) return; this._mode = mode; this._applyCross(); }
   setAds(on) { if (on === this._ads) return; this._ads = on; this._applyCross(); }
   _applyCross() { this.el.crosshair.className = 'crosshair ' + this._mode + (this._ads ? ' ads' : ''); }
-  setGrappleStamina(f) { const show = f < 0.995; if (this.el.gstam.hidden === show) this.el.gstam.hidden = !show; if (show) { this.el.gstamfill.style.width = (f * 100).toFixed(0) + '%'; this.el.gstam.classList.toggle('low', f < 0.2); } }
-  grappleTarget(state) { this.el.gret.className = 'grapple-ret' + (state === 1 ? ' on' : state === 2 ? ' on attached' : ''); }
+  setGrappleStamina(f) { const show = f < 0.995; if (this.el.gstam.hidden === show) this.el.gstam.hidden = !show; if (show) { const w = Math.round(f * 100); if (w !== this._lastGStam) { this._lastGStam = w; this.el.gstamfill.style.width = w + '%'; this.el.gstam.classList.toggle('low', f < 0.2); } } }
+  grappleTarget(state) { if (state === this._lastGState) return; this._lastGState = state; this.el.gret.className = 'grapple-ret' + (state === 1 ? ' on' : state === 2 ? ' on attached' : ''); }
   hitmarker(kill = false, crit = false) { const h = this.el.hitmarker; h.className = 'hitmarker' + (kill ? ' kill' : '') + (crit ? ' crit' : ''); void h.offsetWidth; h.classList.add('show'); }
   setAmmo(mag, reserve, magSize, reloading = false) {
-    this.el.mag.textContent = mag; this.el.reserve.textContent = '/' + reserve; this.el.reloading.textContent = reloading ? ' Recarregando…' : '';
+    if (mag !== this._lastMag) { this._lastMag = mag; this.el.mag.textContent = mag; }
+    if (reserve !== this._lastRes) { this._lastRes = reserve; this.el.reserve.textContent = '/' + reserve; }
+    if (reloading !== this._lastRel) { this._lastRel = reloading; this.el.reloading.textContent = reloading ? ' Recarregando…' : ''; }
     if (mag !== this._lastTally) { this._lastTally = mag; let s = ''; for (let i = 0; i < Math.min(mag, 40); i++) s += '<i></i>'; this.el.tally.innerHTML = s; }
   }
-  setKatana() { this.el.mag.textContent = '∞'; this.el.reserve.textContent = ''; this.el.reloading.textContent = ''; if (this._lastTally !== -1) { this.el.tally.innerHTML = ''; this._lastTally = -1; } }
+  setKatana() {
+    if (this._lastMag !== '∞') { this._lastMag = '∞'; this.el.mag.textContent = '∞'; }
+    if (this._lastRes !== '') { this._lastRes = ''; this.el.reserve.textContent = ''; }
+    if (this._lastRel !== false) { this._lastRel = false; this.el.reloading.textContent = ''; }
+    if (this._lastTally !== -1) { this.el.tally.innerHTML = ''; this._lastTally = -1; }
+  }
   setMoney(val) {
     if (this.el.money) this.el.money.textContent = '$' + val;
     if (this.el.bmWallet) this.el.bmWallet.textContent = '$' + val;
@@ -208,13 +220,21 @@ export class HUD {
     const key = slots.map((s) => `${s.name}|${s.active ? 1 : 0}|${s.ammo}|${s.locked ? 1 : 0}`).join(';'); if (key === this._lastSlots) return; this._lastSlots = key;
     this.el.slots.innerHTML = slots.map((s, i) => `<div class="slot${s.active ? ' active' : ''}${s.empty ? ' empty' : ''}${s.locked ? ' locked' : ''}"><span class="num">${i + 1}</span>${s.locked ? '🔒 ' : ''}${s.name}<span class="sammo">${s.ammo}</span></div>`).join('');
   }
-  setHealth(hp, max) { const f = Math.max(0, hp / max); this.el.hpfill.style.width = (f * 100).toFixed(1) + '%'; this.el.hpnum.textContent = Math.ceil(hp); this.root.classList.toggle('low', f < 0.3); }
-  setBoard(html) { const on = !!html; this.el.board.hidden = !on; if (on) this.el.board.innerHTML = html; }
+  setHealth(hp, max) {
+    const hInt = Math.ceil(hp);
+    if (hInt === this._lastHp && max === this._lastMaxHp) return;
+    this._lastHp = hInt; this._lastMaxHp = max;
+    const f = Math.max(0, hp / max);
+    this.el.hpfill.style.width = (f * 100).toFixed(1) + '%';
+    this.el.hpnum.textContent = hInt;
+    this.root.classList.toggle('low', f < 0.3);
+  }
+  setBoard(html) { const on = !!html; this.el.board.hidden = !on; if (on && html !== this._lastBoard) { this._lastBoard = html; this.el.board.innerHTML = html; } else if (!on) this._lastBoard = ''; }
   setPvpScore(html) { const on = !!html; this.el.pvpscore.hidden = !on; if (on) this.el.pvpscore.innerHTML = html; this.el.wave.parentElement.hidden = on; this.el.left.parentElement.hidden = on; }
-  setWave(n, left) { this.el.wave.textContent = n; this.el.left.textContent = left; }
-  setModifier(text) { this.el.modifier.textContent = text || ''; }
-  setTimer(text) { this.el.timer.textContent = text || ''; }
-  setScore(score, combo) { this.el.score.textContent = score; this.el.combo.textContent = combo > 1 ? 'Combo x' + combo : ''; }
+  setWave(n, left) { if (n !== this._lastWave) { this._lastWave = n; this.el.wave.textContent = n; } if (left !== this._lastLeft) { this._lastLeft = left; this.el.left.textContent = left; } }
+  setModifier(text) { const v = text || ''; if (v === this._lastMod) return; this._lastMod = v; this.el.modifier.textContent = v; }
+  setTimer(text) { const v = text || ''; if (v === this._lastTimer) return; this._lastTimer = v; this.el.timer.textContent = v; }
+  setScore(score, combo) { if (score !== this._lastScore) { this._lastScore = score; this.el.score.textContent = score; } const c = combo > 1 ? 'Combo x' + combo : ''; if (c !== this._lastCombo) { this._lastCombo = c; this.el.combo.textContent = c; } }
   setWeapon(name, hint) { this.el.weapon.textContent = name; this.el.hint.textContent = hint || ''; }
   setBoss(name, frac) { if (frac == null) { this.el.bossbar.classList.remove('show'); return; } this.el.bossbar.classList.add('show'); this.el.bossname.textContent = name; this.el.bossfill.style.width = (Math.max(0, frac) * 100).toFixed(1) + '%'; }
   tip(text, dur = 5) { this.el.tip.innerHTML = text; this.el.tip.classList.add('show'); this._tipT = dur; }
