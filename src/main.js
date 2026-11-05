@@ -18,6 +18,9 @@ import { HUD, CONTROLS_HTML } from './hud.js';
 import { audio } from './audio.js';
 import { rand, choose, clamp } from './util.js';
 import { createSurvival } from './game/survival.js';
+import { escHtml, sanitizeName, sanitizeText, clampNum, sanitizeVec3, sanitizeShots } from './security.js';
+
+const esc = escHtml;
 
 const canvas = document.getElementById('c');
 const R = new InkRenderer(canvas);
@@ -53,7 +56,7 @@ try { localStorage.removeItem('doodle_checkpoint'); } catch (e) { /* checkpoint 
 // online bank: cash you carry between online matches (solo keeps its own roguelike economy)
 let bank = Number(localStorage.getItem('doodle_bank') || 300); let bankSaveT = 0;
 const saveBank = () => { bank = Math.max(0, Math.round(player.money)); localStorage.setItem('doodle_bank', String(bank)); };
-let myName = (localStorage.getItem('doodle_name') || '').slice(0, 14) || 'Doodle' + Math.floor(Math.random() * 90 + 10);
+let myName = sanitizeName(localStorage.getItem('doodle_name') || '', 'Doodle' + Math.floor(Math.random() * 90 + 10));
 const settings = { sens: Number(localStorage.getItem('doodle_sens') || 100), invert: localStorage.getItem('doodle_invert') === '1' };
 
 const hudPrefs = {
@@ -84,9 +87,13 @@ function applyHudSettings() {
   const dot = document.querySelector('.ch-dot');
   if (dot) dot.style.display = hudPrefs.chDot ? 'block' : 'none';
 
+  // scale and opacity apply to the in-game readouts only (menus stay solid and full size); the scale
+  // used to be saved without ever being applied
   const hudEl = document.getElementById('hud');
   if (hudEl) {
-    hudEl.style.opacity = (hudPrefs.opacity / 100).toFixed(2);
+    hudEl.style.opacity = '';
+    hudEl.style.setProperty('--hud-scale', (hudPrefs.scale / 100).toFixed(2));
+    hudEl.style.setProperty('--hud-opacity', (hudPrefs.opacity / 100).toFixed(2));
   }
   const kf = document.querySelector('.killfeed');
   if (kf) kf.style.display = hudPrefs.killfeed ? 'block' : 'none';
@@ -452,7 +459,19 @@ function tallyDeath(victim, killer) {
   sendScores();
 }
 function sendScores() { const rows = [...scores.entries()].map(([id, s]) => ({ id, ...s })); net.send('score', rows); applyScores(rows); }
-function applyScores(rows) { scores.clear(); for (const r of rows) scores.set(r.id, { name: r.name, kills: r.kills, deaths: r.deaths }); refreshScoreHud(); }
+function applyScores(rows) {
+  if (!Array.isArray(rows)) return;
+  scores.clear();
+  for (const r of rows.slice(0, 24)) {
+    if (!r || typeof r.id !== 'string') continue;
+    scores.set(r.id, {
+      name: sanitizeName(r.name, 'Doodle'),
+      kills: Math.round(clampNum(r.kills, 0, 99999, 0)),
+      deaths: Math.round(clampNum(r.deaths, 0, 99999, 0)),
+    });
+  }
+  refreshScoreHud();
+}
 function sortedScores() { return [...scores.entries()].sort((a, b) => b[1].kills - a[1].kills || a[1].deaths - b[1].deaths); }
 function refreshScoreHud() {
   if (!online()) return;
@@ -464,18 +483,22 @@ function refreshScoreHud() {
 }
 function boardHTML(title = 'Mata-Mata Livre') {
   const rows = sortedScores();
-  return `<h3>${title}</h3>${rows.map(([id, s]) => `<div class="${id === net.id ? 'me' : ''}"><span>${s.name}${id === net.id ? ' (Você)' : ''}</span><span>${s.kills} Kills · ${s.deaths} Mortes</span></div>`).join('')}<div class="foot">Mata-Mata até acabar o tempo · Restam ${mmss(matchLeft)} · Sala ${String(net.aliasCode || net.code || '').replace(/-\d+$/, '')}</div>`;
+  const roomCode = esc(String(net.aliasCode || net.code || '').replace(/-\d+$/, ''));
+  return `<h3>${esc(title)}</h3>${rows.map(([id, s]) => `<div class="${id === net.id ? 'me' : ''}"><span>${esc(s.name)}${id === net.id ? ' (Você)' : ''}</span><span>${s.kills} Kills · ${s.deaths} Mortes</span></div>`).join('')}<div class="foot">Mata-Mata até acabar o tempo · Restam ${mmss(matchLeft)} · Sala ${roomCode}</div>`;
 }
 function endMatch(winner) {
-  game.over = winner; game.overT = 0; game.state = 'over'; endFocus(); input.exitLock(); hud.setBoard(null);
-  const title = winner.id === net.id ? 'Você Venceu!' : (winner.name || 'Alguém') + ' Venceu!';
-  hud.setGameplayVisible(false); hud.showScreen(`<h1>${title}</h1><div class="scoreboard">${sortedScores().map(([id, s]) => `<div class="${id === net.id ? 'me' : ''}"><span>${s.name}</span><span>${s.kills} Kills · ${s.deaths} Mortes</span></div>`).join('')}</div><div class="go" id="overGo">Retornando à sala em breve…</div>`);
+  const w = winner && typeof winner === 'object' ? winner : { id: '', name: 'Alguém' };
+  game.over = w; game.overT = 0; game.state = 'over'; endFocus(); input.exitLock(); hud.setBoard(null);
+  const wName = sanitizeName(w.name, 'Alguém');
+  const title = w.id === net.id ? 'Você Venceu!' : wName + ' Venceu!';
+  hud.setGameplayVisible(false); hud.showScreen(`<div class="p-head"><h1 class="${w.id === net.id ? 't-gold' : ''}">${esc(title)}</h1><h2>Resultado final</h2></div>${scoreRowsHTML()}${net.isHost ? '<div class="m-play"><button type="button" class="btn btn-yellow btn-lg" data-act="go">Voltar à sala</button></div>' : '<div class="foot-hint">Aguardando o anfitrião voltar à sala…</div>'}`);
 }
 
 // ---------------- networking ----------------
 function addRemote(id, name) {
-  if (remote.has(id)) { const r = remote.get(id); r.name = name; return r; }
-  const rp = new RemotePlayer(ctx, id, name, 0, INK.PURPLE); // players are violet; bots never use it
+  const cleanName = sanitizeName(name, 'Doodle');
+  if (remote.has(id)) { const r = remote.get(id); r.name = cleanName; return r; }
+  const rp = new RemotePlayer(ctx, id, cleanName, 0, INK.PURPLE); // players are violet; bots never use it
   rp.onDamage = (t, amount, fromPos) => { if (!ctx.canHurt(t) || !t.alive) return; hud.hitmarker(false, false); net.sendTo(t.id, 'pdmg', { amount: Math.round(amount), from: fromPos ? fromPos.toArray().map((v) => +v.toFixed(1)) : null, by: net.id, src: 'grenade' }); };
   remote.set(id, rp); return rp;
 }
@@ -515,11 +538,14 @@ async function _migrateHost() {
     lobby.code = code; if (!wasInMatch) { game.state = 'lobby'; screen = 'lobby'; showStart(); }
   }
 }
-net.on('refused', (d) => leaveOnline(d.reason));
+net.on('refused', (d) => leaveOnline(sanitizeText(d && d.reason, 80)));
 net.hostName = myName;
 net.onPeerJoin = (from, meta) => {
-  const name = String(meta && meta.name || 'doodle').slice(0, 14);
-  if (meta && meta.prev && meta.prev !== from) { const sc = scores.get(meta.prev); if (sc) { scores.delete(meta.prev); scores.set(from, sc); } const r = remote.get(meta.prev); if (r) r.dispose(); remote.delete(meta.prev); lobby.players.delete(meta.prev); if (lobby.order) lobby.order = lobby.order.filter((id) => id !== meta.prev); }
+  const name = sanitizeName(meta && meta.name, 'Doodle');
+  if (meta && typeof meta.prev === 'string' && meta.prev !== from && !remote.has(meta.prev)) {
+    const sc = scores.get(meta.prev); if (sc) { scores.delete(meta.prev); scores.set(from, sc); }
+    lobby.players.delete(meta.prev); if (lobby.order) lobby.order = lobby.order.filter((id) => id !== meta.prev);
+  }
   lobby.players.set(from, { name }); addRemote(from, name); broadcastLobby();
   if (game.state === 'play' || game.state === 'dying') {
     if (!scores.has(from)) scores.set(from, { name, kills: 0, deaths: 0 });
@@ -535,54 +561,73 @@ net.onPeerJoin = (from, meta) => {
   }
 };
 net.on('lobby', (d) => {
-  lobby.hostId = d.hostId; lobby.isPublic = !!d.isPublic; lobby.code = net.code; lobby.shown = d.shown || net.code;
+  if (!d || !Array.isArray(d.players)) return;
+  lobby.hostId = typeof d.hostId === 'string' ? d.hostId : net.hostId;
+  lobby.isPublic = !!d.isPublic; lobby.code = net.code; lobby.shown = sanitizeText(d.shown || net.code, 16);
   if (d.map) {
     lobby.map = knownMap(d.map);
     if (game.state === 'lobby' && loadedKey !== lobby.map) { setLevel(lobby.map, true); player.reset(level.playerStart); }
   }
-  lobby.order = d.players.map((p) => p.id); lobby.players.clear();
-  for (const p of d.players) lobby.players.set(p.id, { name: p.name });
-  for (const p of d.players) if (p.id !== net.id) addRemote(p.id, p.name);
+  const safePlayers = d.players.slice(0, 16).filter((p) => p && typeof p.id === 'string').map((p) => ({ id: p.id, name: sanitizeName(p.name, 'Doodle') }));
+  lobby.order = safePlayers.map((p) => p.id); lobby.players.clear();
+  for (const p of safePlayers) lobby.players.set(p.id, { name: p.name });
+  for (const p of safePlayers) if (p.id !== net.id) addRemote(p.id, p.name);
   for (const id of [...remote.keys()]) if (!lobby.players.has(id)) removeRemote(id);
-  if (inMatch()) { for (const p of d.players) if (!scores.has(p.id)) scores.set(p.id, { name: p.name, kills: 0, deaths: 0 }); refreshScoreHud(); }
+  if (inMatch()) { for (const p of safePlayers) if (!scores.has(p.id)) scores.set(p.id, { name: p.name, kills: 0, deaths: 0 }); refreshScoreHud(); }
   renderLobby();
 });
-net.on('leave', (d) => { const nm = (lobby.players.get(d.id) || {}).name; removeRemote(d.id); if (inMatch()) hud.kill((nm || 'Alguém') + ' saiu da sala', 0); renderLobby(); });
-net.on('start', (d) => { if (net.isHost) return; if (d.map) lobby.map = knownMap(d.map); startMatch(!!d.late, d.spawns ? d.spawns[net.id] : d.spawn, d.map); if (d.broken) for (const id of d.broken) { const br = level.breakables[id]; if (br) breakProp(br, null, false, true); } });
+net.on('leave', (d) => { if (!d || typeof d.id !== 'string') return; const nm = (lobby.players.get(d.id) || {}).name; removeRemote(d.id); if (inMatch()) hud.kill((nm || 'Alguém') + ' saiu da sala', 0); renderLobby(); });
+net.on('start', (d) => { if (net.isHost || !d || typeof d !== 'object') return; if (d.map) lobby.map = knownMap(d.map); startMatch(!!d.late, d.spawns ? d.spawns[net.id] : d.spawn, d.map); if (Array.isArray(d.broken)) for (const id of d.broken.slice(0, 500)) { const br = level.breakables[id]; if (br) breakProp(br, null, false, true); } });
 net.on('startreq', () => { if (net.isHost && game.state === 'lobby') hostStart(); });
 net.on('end', (d) => endMatch(d));
 net.on('backtolobby', () => { if (!net.isHost) toLobbyScreen(); });
-net.on('pickup', (d) => { if (!net.isHost) spawnPickup(d.kind, new THREE.Vector3().fromArray(d.pos), d.id); });
-net.on('taken', (d) => { const p = pickups.find((x) => x.id === d.id); if (p) removePickup(p); });
-net.on('take', (d) => { if (!net.isHost) return; const p = pickups.find((x) => x.id === d.id); if (p) { removePickup(p); net.send('taken', { id: d.id }); } });
-net.on('ps', (d, from) => { const r = remote.get(from); if (r) { r.push(d, performance.now() / 1000); r.lastSeen = performance.now(); } });
-net.on('pdmg', (d) => {
-  if (!player.alive || game.state !== 'play' || player.shieldT > 0) return; player.lastHitBy = d.by || null; player.lastHit = { from: d.from || null, crit: !!d.crit, amount: d.amount, src: d.src };
-  player.takeDamage(d.amount, d.from ? new THREE.Vector3().fromArray(d.from) : null);
+net.on('pickup', (d) => { if (!net.isHost && d && sanitizeVec3(d.pos)) spawnPickup(d.kind, new THREE.Vector3().fromArray(sanitizeVec3(d.pos)), d.id); });
+net.on('taken', (d) => { if (!d) return; const p = pickups.find((x) => x.id === d.id); if (p) removePickup(p); });
+net.on('take', (d) => { if (!net.isHost || !d) return; const p = pickups.find((x) => x.id === d.id); if (p) { removePickup(p); net.send('taken', { id: d.id }); } });
+net.on('ps', (d, from) => { if (!d || !sanitizeVec3(d.p)) return; const r = remote.get(from); if (r) { r.push(d, performance.now() / 1000); r.lastSeen = performance.now(); } });
+net.on('pdmg', (d, from) => {
+  if (!d || typeof d !== 'object' || !player.alive || game.state !== 'play' || player.shieldT > 0) return;
+  const amount = clampNum(d.amount, 0, 220, 0);
+  if (amount <= 0) return;
+  const fromPos = sanitizeVec3(d.from);
+  const src = typeof d.src === 'string' && HOW[d.src] ? d.src : null;
+  player.lastHitBy = from || null; // usa remetente autenticado pelo transporte, nunca d.by
+  player.lastHit = { from: fromPos, crit: !!d.crit, amount, src };
+  player.takeDamage(amount, fromPos ? new THREE.Vector3().fromArray(fromPos) : null);
 });
-net.on('espawn', (d) => { if (!net.isHost) enemies.spawn(d.type, new THREE.Vector3().fromArray(d.pos), d.id); });
-net.on('esnap', (arr) => { if (!net.isHost) enemies.applySnapshot(arr, performance.now() / 1000); });
-net.on('ekill', (d) => { if (!net.isHost) enemies.killMirror(d.id, d.info); });
-net.on('ekillcredit', (d) => { game.kills++; game.addScore(d.pts, d.label); player.addCash(d.cash, d.label); audio.kill(true); });
-net.on('ewave', (d) => { if (!net.isHost) { game.wave = d.wave; hud.setWave(d.wave, 0); hud.message('Onda ' + d.wave, d.name || 'Bots e Jogadores!', 2.5); audio.wave(); } });
-net.on('ewaveclear', (d) => { if (!net.isHost) { hud.message('Onda ' + d.wave + ' Concluída', 'Prepare-se para a próxima onda!', 2.5); audio.waveClear(); player.hp = Math.min(player.maxHp, player.hp + 40); player.addCash(300 + 50 * d.wave, 'Onda Concluída'); } });
-net.on('bmanif', (d) => { if (!net.isHost) { ctx.protestersRiot = false; ctx.playerWanted = false; audio.siren(player.center); hud.message(`🚩 MANIFESTAÇÃO ${d && d.zone || 'NA ESPLANADA'}!`, 'Confronto entre Manifestantes e PMDF! Não ataque nenhum lado!', 4.5); } });
+net.on('espawn', (d) => { if (!net.isHost && d && typeof d.type === 'string' && sanitizeVec3(d.pos)) enemies.spawn(d.type, new THREE.Vector3().fromArray(sanitizeVec3(d.pos)), d.id); });
+net.on('esnap', (arr) => { if (!net.isHost && Array.isArray(arr)) enemies.applySnapshot(arr, performance.now() / 1000); });
+net.on('ekill', (d) => { if (!net.isHost && d) enemies.killMirror(d.id, d.info); });
+net.on('ekillcredit', (d) => {
+  if (!d || typeof d !== 'object') return;
+  const pts = Math.round(clampNum(d.pts, 0, 2000, 0));
+  const cash = Math.round(clampNum(d.cash, 0, 2000, 0));
+  const label = sanitizeText(d.label, 48);
+  game.kills++; game.addScore(pts, label); player.addCash(cash, label); audio.kill(true);
+});
+net.on('ewave', (d) => { if (!net.isHost && d) { const w = Math.max(1, Math.round(clampNum(d.wave, 1, 999, 1))); game.wave = w; hud.setWave(w, 0); hud.message('Onda ' + w, sanitizeText(d.name, 48) || 'Bots e Jogadores!', 2.5); audio.wave(); } });
+net.on('ewaveclear', (d) => { if (!net.isHost && d) { const w = Math.max(1, Math.round(clampNum(d.wave, 1, 999, 1))); hud.message('Onda ' + w + ' Concluída', 'Prepare-se para a próxima onda!', 2.5); audio.waveClear(); player.hp = Math.min(player.maxHp, player.hp + 40); player.addCash(300 + 50 * Math.min(w, 30), 'Onda Concluída'); } });
+net.on('bmanif', (d) => { if (!net.isHost) { const z = sanitizeText(d && d.zone, 32) || 'NA ESPLANADA'; ctx.protestersRiot = false; ctx.playerWanted = false; audio.siren(player.center); hud.message(`🚩 MANIFESTAÇÃO ${z}!`, 'Confronto entre Manifestantes e PMDF! Não ataque nenhum lado!', 4.5); } });
 net.on('bcalm', () => { if (!net.isHost) { ctx.protestersRiot = false; ctx.playerWanted = false; } });
 net.on('briot', () => { if (!net.isHost) { ctx.protestersRiot = true; audio.siren(player.center); hud.message('⚠️ MULTIDÃO EM FÚRIA!', 'Alguém atacou os manifestantes! A multidão partiu para cima!', 4.0); } });
 net.on('bwanted', () => { if (!net.isHost) { ctx.playerWanted = true; audio.siren(player.center); hud.message('🚨 FORÇA POLICIAL ACIONADA!', 'A Polícia está revidando ataques na partida!', 3.5); } });
 net.on('ehit', (d, from) => {
-  if (!net.isHost) return;
+  if (!net.isHost || !d || typeof d !== 'object') return;
+  const amount = clampNum(d.amount, 0, 500, 0);
+  if (amount <= 0) return;
   const e = enemies.byId.get(d.id);
   if (!e || !e.alive) return;
+  const pt = d.info && sanitizeVec3(d.info.point);
+  const dr = d.info && sanitizeVec3(d.info.dir, 10);
   const info = {
     crit: !!(d.info && d.info.crit),
-    part: (d.info && d.info.part) || 'torso',
+    part: (d.info && typeof d.info.part === 'string' && d.info.part.slice(0, 16)) || 'torso',
     source: 'remote_bullet',
-    point: d.info && d.info.point ? new THREE.Vector3().fromArray(d.info.point) : e.center.clone(),
-    dir: d.info && d.info.dir ? new THREE.Vector3().fromArray(d.info.dir) : new THREE.Vector3(0, 1, 0),
+    point: pt ? new THREE.Vector3().fromArray(pt) : e.center.clone(),
+    dir: dr ? new THREE.Vector3().fromArray(dr) : new THREE.Vector3(0, 1, 0),
     by: from
   };
-  enemies.damage(e, d.amount, info);
+  enemies.damage(e, amount, info);
   if (!e.alive) {
     const sc = scores.get(from);
     const kname = sc ? sc.name : 'Jogador';
@@ -592,35 +637,39 @@ net.on('ehit', (d, from) => {
 });
 
 net.on('pdead', (d, from) => {
+  if (!d || typeof d !== 'object') return;
   const r = remote.get(from); const vn = r ? r.name : 'Alguém'; const kn = d.killer && scores.get(d.killer) ? scores.get(d.killer).name : null;
-  if (r) { r.ragdoll(d.dir ? new THREE.Vector3().fromArray(d.dir) : null, !!d.over); audio.enemyDie(r.center); }
-  const how = d.how ? ' · ' + d.how + (d.crit ? ' Tiro na Cabeça' : '') : '';
+  const dir = sanitizeVec3(d.dir, 10);
+  if (r) { r.ragdoll(dir ? new THREE.Vector3().fromArray(dir) : null, !!d.over); audio.enemyDie(r.center); }
+  const safeHow = sanitizeText(d.how, 28);
+  const how = safeHow ? ' · ' + safeHow + (d.crit ? ' Tiro na Cabeça' : '') : '';
   if (d.killer === net.id) { game.kills++; game.addScore(150, 'Eliminou ' + vn + how); player.addCash(300, 'Eliminação PvP'); audio.kill(true); }
   else hud.kill(kn ? kn + ' eliminou ' + vn + how : vn + ' caiu da página', 0);
-  if (net.isHost) tallyDeath(from, d.killer);
+  if (net.isHost) tallyDeath(from, typeof d.killer === 'string' ? d.killer : null);
 });
-net.on('nade', (d) => player.throwGrenade(d));
-net.on('rocket', (d) => player.fireRocket(d));
-net.on('brk', (d) => { const br = level.breakables[d.id]; if (br) breakProp(br, null, false); });
-net.on('parry', (d) => { audio.shieldHit(player.center); input.rumble(0.35, 0.3, 60); effects.strokeBurst(player.eye.clone().addScaledVector(player.forward, 0.5), INK.ORANGE, 8, 5, { life: 0.2, size: 0.03 }); hud.kill(d.ret ? 'Rebatido' : 'Desviado', d.ret ? 25 : 0); });
+net.on('nade', (d) => { if (d && sanitizeVec3(d.pos) && sanitizeVec3(d.vel, 200)) player.throwGrenade(d); });
+net.on('rocket', (d) => { if (d && sanitizeVec3(d.pos) && sanitizeVec3(d.vel, 400)) player.fireRocket(d); });
+net.on('brk', (d) => { if (!d) return; const br = level.breakables[d.id]; if (br) breakProp(br, null, false); });
+net.on('parry', (d) => { if (!d) return; audio.shieldHit(player.center); input.rumble(0.35, 0.3, 60); effects.strokeBurst(player.eye.clone().addScaledVector(player.forward, 0.5), INK.ORANGE, 8, 5, { life: 0.2, size: 0.03 }); hud.kill(d.ret ? 'Rebatido' : 'Desviado', d.ret ? 25 : 0); });
 net.on('shots', (d, from) => {
+  if (!d || typeof d !== 'object') return;
   const r = remote.get(from); if (!r || !r.root || !r.alive) return;
   _sm.set(r.body.pos.x + r.right.x * 0.3 + r.forward.x * 0.8, r.body.pos.y + 1.35 + r.forward.y * 0.8, r.body.pos.z + r.right.z * 0.3 + r.forward.z * 0.8);
-  const th = TRACER_THICK[d.k] || 0.02; const e = d.e || [];
+  const th = TRACER_THICK[d.k] || 0.02; const e = sanitizeShots(d.e, 36);
   for (let i = 0; i + 2 < e.length; i += 3) { _se.set(e[i], e[i + 1], e[i + 2]); effects.tracer(_sm, _se, INK.BLUE, th, 0.06); }
   r.flash(); audio.remoteShot(d.k, _sm);
 });
 net.on('cut', () => { if (player.grapple.state !== 'idle') { player.detachGrapple(false); effects.strokeBurst(player.center, INK.ORANGE, 8, 4, { life: 0.25, size: 0.03 }); hud.tip('Sua corda foi cortada!', 1.3); input.rumble(0.5, 0.3, 80); } });
 net.on('score', (rows) => { if (!net.isHost) applyScores(rows); });
-net.on('fell', (d, from) => { if (!net.isHost) return; const sc = scores.get(from); if (sc) { sc.kills = Math.max(0, sc.kills - 1); sendScores(); net.send('feed', { text: sc.name + ' caiu da página · -1' }); hud.kill(sc.name + ' caiu da página · -1', 0); } });
-net.on('feed', (d) => hud.kill(String(d.text || ''), 0));
+net.on('fell', (_d, from) => { if (!net.isHost) return; const sc = scores.get(from); if (sc) { sc.kills = Math.max(0, sc.kills - 1); sendScores(); net.send('feed', { text: sc.name + ' caiu da página · -1' }); hud.kill(sc.name + ' caiu da página · -1', 0); } });
+net.on('feed', (d) => hud.kill(sanitizeText(d && d.text, 96), 0));
 player.onFall = () => {
   if (!online() || !inMatch()) return;
   hud.kill('Caiu da página · -1 eliminação', 0);
   if (net.isHost) { const sc = scores.get(net.id); if (sc) { sc.kills = Math.max(0, sc.kills - 1); sendScores(); net.send('feed', { text: sc.name + ' caiu da página · -1' }); } }
   else net.send('fell', {});
 };
-net.on('clock', (d) => { if (!net.isHost) { matchLeft = d.left; clockRunning = !!d.on; refreshScoreHud(); } });
+net.on('clock', (d) => { if (!net.isHost && d) { matchLeft = clampNum(d.left, 0, FFA_TIME * 2, matchLeft); clockRunning = !!d.on; refreshScoreHud(); } });
 
 // ---- idle players: a warning, then out; a lobby with nobody active in it shuts down ----
 const IDLE_FLAG = 30, IDLE_MATCH = 150, IDLE_LOBBY = 300, IDLE_WARN = 20;
@@ -638,7 +687,7 @@ function idleUpdate(dt) {
   // the host also clears out a client that has sat idle past the limit, in case its tab cannot do it itself
   if (net.isHost) for (const [id, r] of remote) if (r.idle && r.idleSince && performance.now() / 1000 - r.idleSince > limit - IDLE_FLAG + 15) { net.sendTo(id, 'kick', { reason: 'Desconectado por inatividade' }); const c = net.conns.get(id); setTimeout(() => { try { c && c.close(); } catch (e) { /* ignore */ } }, 500); }
 }
-net.on('kick', (d) => { const back = String(net.aliasCode || net.code || '').replace(/-\d+$/, ''); leaveOnline(d && d.reason || 'Desconectado da sala'); lobby.rejoinCode = back; if (back) showStart(); });
+net.on('kick', (d) => { const back = sanitizeText(String(net.aliasCode || net.code || '').replace(/-\d+$/, ''), 16); leaveOnline(sanitizeText(d && d.reason, 80) || 'Desconectado da sala'); lobby.rejoinCode = back; if (back) showStart(); });
 let syncTick = 0, esnapT = 0, psT = 0;
 function netUpdate(dt) {
   idleUpdate(dt);
@@ -731,24 +780,24 @@ function settingsHTML() {
   ).join('');
 
   return `<div class="settings" id="settings">
-    <div class="settings-section-title">✨ Qualidade Gráfica & Desempenho</div>
+    <div class="settings-section-title">Gráficos</div>
     <div class="settings-grid">
       <label class="settings-row">Qualidade Gráfica
-        <select id="setGfxQ" style="font-family:inherit; font-size:15px; border:2px solid var(--ink); border-radius:5px; padding:2px 8px; background:var(--paper); color:var(--ink);">
+        <select id="setGfxQ">
           <option value="high" ${hudPrefs.gfxQuality === 'high' ? 'selected' : ''}>Alta · Ultra Nítido HD</option>
           <option value="medium" ${hudPrefs.gfxQuality === 'medium' ? 'selected' : ''}>Equilibrada · Nativo HD</option>
           <option value="low" ${hudPrefs.gfxQuality === 'low' ? 'selected' : ''}>Desempenho · FPS Máximo</option>
         </select>
       </label>
       <label class="settings-row">Estilo Visual
-        <select id="setVisualStyle" style="font-family:inherit; font-size:15px; border:2px solid var(--ink); border-radius:5px; padding:2px 8px; background:var(--paper); color:var(--ink);">
+        <select id="setVisualStyle">
           <option value="hd" ${!hudPrefs.notebookMode ? 'selected' : ''}>Colorido Cel-Shaded HD</option>
           <option value="notebook" ${hudPrefs.notebookMode ? 'selected' : ''}>Caderno Clássico</option>
         </select>
       </label>
     </div>
 
-    <div class="settings-section-title">⚙️ Controles & Som</div>
+    <div class="settings-section-title">Controles e som</div>
     <div class="settings-grid">
       <label class="settings-row">Sensibilidade do Mouse <input type="range" id="setSens" min="25" max="250" step="5" value="${settings.sens}"><b id="setSensV">${settings.sens}%</b></label>
       <label class="settings-row"><input type="checkbox" id="setInv" ${settings.invert ? 'checked' : ''}> Inverter Eixo Y</label>
@@ -757,15 +806,15 @@ function settingsHTML() {
       <label class="settings-row"><input type="checkbox" id="setMus" ${musicWanted ? 'checked' : ''}> Música de Fundo <span class="k">(M)</span></label>
     </div>
 
-    <div class="settings-section-title">🎯 Personalizar Mira (Crosshair)</div>
-    <div class="settings-row" style="justify-content:center; gap:12px; margin-top:4px;">
+    <div class="settings-section-title">Mira</div>
+    <div class="settings-row ch-row">
       <span>Cor da Mira:</span>
       <div class="ch-palette">${colorSwatches}</div>
-      <input type="color" id="chColorPicker" value="${hudPrefs.chColor}" title="Cor Personalizada" style="cursor:pointer; width:30px; height:26px; border:2px solid var(--ink); border-radius:4px; padding:0; background:none;">
+      <input type="color" id="chColorPicker" value="${hudPrefs.chColor}" title="Cor Personalizada">
     </div>
-    <div class="settings-grid" style="margin-top:6px;">
+    <div class="settings-grid">
       <label class="settings-row">Tamanho da Mira
-        <select id="setChSize" style="font-family:inherit; font-size:16px; border:2px solid var(--ink); border-radius:5px; padding:2px 8px; background:var(--paper); color:var(--ink);">
+        <select id="setChSize">
           <option value="0.75" ${hudPrefs.chSize === 0.75 ? 'selected' : ''}>Pequena</option>
           <option value="1" ${hudPrefs.chSize === 1 ? 'selected' : ''}>Média (Padrão)</option>
           <option value="1.35" ${hudPrefs.chSize === 1.35 ? 'selected' : ''}>Grande</option>
@@ -774,7 +823,7 @@ function settingsHTML() {
       <label class="settings-row"><input type="checkbox" id="setChDot" ${hudPrefs.chDot ? 'checked' : ''}> Ponto Central da Mira</label>
     </div>
 
-    <div class="settings-section-title">🖥️ Editar Interface (HUD)</div>
+    <div class="settings-section-title">Interface</div>
     <div class="settings-grid">
       <label class="settings-row">Escala da Interface
         <input type="range" id="setHudScale" min="75" max="125" step="5" value="${hudPrefs.scale}">
@@ -787,7 +836,78 @@ function settingsHTML() {
       <label class="settings-row"><input type="checkbox" id="setHudKf" ${hudPrefs.killfeed ? 'checked' : ''}> Exibir Feed de Eliminações</label>
       <label class="settings-row"><input type="checkbox" id="setHudDmg" ${hudPrefs.damageNums ? 'checked' : ''}> Exibir Marcadores de Dano</label>
     </div>
+    ${typeof window !== 'undefined' && window.FE_UPDATE ? `<div class="settings-section-title">Atualizações</div>
+    <div class="settings-row">
+      <span id="updSettingsLabel">${esc(updateSettingsText())}</span>
+      <button type="button" class="btn btn-white" id="checkUpdBtn" style="padding:5px 14px; font-size:14px;">${updStatus.state === 'ready' ? 'Atualizar e reiniciar' : 'Verificar agora'}</button>
+    </div>` : ''}
   </div>`;
+}
+
+// ---- Auto-Update (Electron + GitHub Releases, modelo Concord) ----
+let appVersion = '1.3.0';
+let updStatus = { state: 'idle', version: null, percent: 0, message: null, waitingForMatch: false };
+
+function updateSettingsText() {
+  const v = 'v' + appVersion;
+  if (updStatus.state === 'checking') return `${v} · Verificando atualizações no GitHub…`;
+  if (updStatus.state === 'downloading') return `${v} · Baixando v${updStatus.version || '?'} (${updStatus.percent || 0}%)…`;
+  if (updStatus.state === 'ready') return `${v} · Nova versão v${updStatus.version || '?'} pronta para instalar!`;
+  if (updStatus.state === 'unsupported') return `${v} · Modo desenvolvimento`;
+  if (updStatus.state === 'error') return `${v} · ${updStatus.message || 'Sem conexão com GitHub Releases'}`;
+  return `${v} · Atualização automática ativa`;
+}
+
+function updateBannerHTML() {
+  if (typeof window === 'undefined' || !window.FE_UPDATE) return '';
+  if (updStatus.state === 'downloading') {
+    return `<div class="m-info" id="updBanner"><span class="chip">⬇️ Baixando atualização <b>v${esc(updStatus.version || '')}</b> (${clampNum(updStatus.percent, 0, 100, 0)}%)…</span></div>`;
+  }
+  if (updStatus.state === 'ready') {
+    return `<div class="m-info" id="updBanner"><span class="chip chip-gold">✨ Nova versão <b>v${esc(updStatus.version || '')}</b> pronta!</span><button type="button" class="btn btn-yellow" id="installUpdBtn" style="padding:5px 14px; font-size:15px;">Atualizar e reiniciar agora</button></div>`;
+  }
+  return '';
+}
+
+function wireUpdateBanner() {
+  const b = hud.el.panel && hud.el.panel.querySelector('#installUpdBtn');
+  if (!b || !window.FE_UPDATE) return;
+  b.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    b.disabled = true;
+    b.textContent = 'Reiniciando…';
+    const res = await window.FE_UPDATE.install();
+    if (!res || !res.ok) {
+      b.disabled = false;
+      b.textContent = 'Atualizar e reiniciar agora';
+      if (res && res.motivo) hud.tip(sanitizeText(res.motivo, 80), 2.5);
+    }
+  });
+}
+
+if (typeof window !== 'undefined' && window.FE_UPDATE) {
+  window.FE_UPDATE.getInfo().then((info) => {
+    if (info && info.version) appVersion = sanitizeText(info.version, 24);
+    const lbl = document.getElementById('updSettingsLabel');
+    if (lbl) lbl.textContent = updateSettingsText();
+  }).catch(() => {});
+  window.FE_UPDATE.getStatus().then((st) => {
+    if (st && typeof st === 'object') updStatus = st;
+  }).catch(() => {});
+  window.FE_UPDATE.onStatus((st) => {
+    if (!st || typeof st !== 'object') return;
+    const prevState = updStatus.state;
+    updStatus = st;
+    const lbl = document.getElementById('updSettingsLabel');
+    if (lbl) lbl.textContent = updateSettingsText();
+    const btn = document.getElementById('checkUpdBtn');
+    if (btn) btn.textContent = updStatus.state === 'ready' ? 'Atualizar e reiniciar' : 'Verificar agora';
+    if ((game.state === 'start' || game.state === 'lobby') && (prevState !== st.state || st.state === 'downloading')) {
+      showStart();
+    } else if (st.state === 'ready' && prevState !== 'ready' && (game.state === 'play' || game.state === 'dying')) {
+      hud.tip(`Nova versão v${sanitizeText(st.version, 20)} baixada · Instala ao sair da partida`, 3.5);
+    }
+  });
 }
 
 function wireSettings() {
@@ -867,23 +987,59 @@ function wireSettings() {
     hudPrefs.damageNums = e.target.checked;
     applyHudSettings();
   });
+  const chkUpd = box.querySelector('#checkUpdBtn');
+  if (chkUpd && window.FE_UPDATE) {
+    chkUpd.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (updStatus.state === 'ready') {
+        await window.FE_UPDATE.install();
+        return;
+      }
+      chkUpd.disabled = true;
+      await window.FE_UPDATE.check();
+      chkUpd.disabled = false;
+      const lbl = box.querySelector('#updSettingsLabel');
+      if (lbl) lbl.textContent = updateSettingsText();
+    });
+  }
 }
 function wireName(box) {
   const nb = box.querySelector('#setName'); if (!nb) return;
-  nb.addEventListener('input', (e) => { myName = e.target.value.trim().slice(0, 14) || myName; localStorage.setItem('doodle_name', myName); player.name = myName; net.hostName = myName; });
+  nb.addEventListener('input', (e) => { myName = sanitizeName(e.target.value, myName); localStorage.setItem('doodle_name', myName); player.name = myName; net.hostName = myName; });
 }
 const mapName = (k) => (LEVELS.find((m) => m.key === k) || LEVELS[0]).name;
-function mapHTML(sel, canPick) { if (LEVELS.length < 2) return ''; return `<div class="mapsel" id="mapsel"><span>Mapa</span>${LEVELS.map((m) => `<button type="button" class="mapbtn${m.key === sel ? ' on' : ''}" data-map="${m.key}" ${canPick ? '' : 'disabled'}>${m.name}<i>${m.blurb}</i></button>`).join('')}</div>`; }
+function mapHTML(sel, canPick) { if (LEVELS.length < 2) return ''; return `<div class="mapsel" id="mapsel">${LEVELS.map((m) => `<button type="button" class="mapbtn${m.key === sel ? ' on' : ''}" data-map="${m.key}" ${canPick ? '' : 'disabled'}><span class="mn">${m.name}</span><span class="mb">${m.blurb}</span></button>`).join('')}</div>`; }
 function wireMap(onPick) { const box = hud.el.panel.querySelector('#mapsel'); if (!box) return; box.addEventListener('click', (e) => { e.stopPropagation(); const b = e.target.closest('.mapbtn'); if (b && !b.disabled) onPick(b.dataset.map); }); }
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
+// ---- menus: one header, the main actions as big buttons, and everything else in tabs so the panel
+// never has to scroll through maps, controls and settings at once (the open tab is remembered)
+const uiTab = { main: 'maps', pause: 'controls', mpause: 'board' };
+function tabsHTML(group, tabs) {
+  const cur = tabs.some((t) => t[0] === uiTab[group]) ? uiTab[group] : tabs[0][0];
+  return `<div class="tabs" data-group="${group}">${tabs.map(([k, label]) => `<button type="button" class="tab${k === cur ? ' on' : ''}" data-tab="${k}">${label}</button>`).join('')}</div>
+    <div class="tabpanes">${tabs.map(([k, , html]) => `<div class="pane${k === cur ? ' on' : ''}" data-pane="${k}">${html}</div>`).join('')}</div>`;
+}
+function wireTabs() {
+  for (const t of hud.el.panel.querySelectorAll('.tabs')) t.addEventListener('click', (e) => {
+    const b = e.target.closest('.tab'); if (!b) return; e.stopPropagation(); uiTab[t.dataset.group] = b.dataset.tab;
+    for (const x of t.querySelectorAll('.tab')) x.classList.toggle('on', x === b);
+    for (const x of t.nextElementSibling.children) x.classList.toggle('on', x.dataset.pane === b.dataset.tab);
+  });
+}
+const scoreRowsHTML = () => `<div class="scoreboard">${sortedScores().map(([id, s], i) => `<div class="${id === net.id ? 'me' : ''}"><span class="rk">${i + 1}</span><span class="nm">${esc(s.name)}${id === net.id ? ' (você)' : ''}</span><span class="kd"><b>${s.kills}</b> abates · ${s.deaths} mortes</span></div>`).join('')}</div>`;
 function mainHTML() {
-  return `<h1>Doodle District</h1><h2>Jogo de tiro e sobrevivência desenhado em caderno</h2>
-    <div class="mainbtns"><button type="button" class="start" id="soloBtn">JOGAR SOLO<i>Sobreviva a ondas de rabiscos</i></button><button type="button" id="onlineBtn">JOGAR ONLINE<i>Mata-Mata Livre · Até acabar o tempo + Bots</i></button></div>
-    ${mapHTML(mapKey, true)}${CONTROLS_HTML}${settingsHTML()}${best ? `<div class="beststat">Recorde: ${best}</div>` : ''}`;
+  return `<div class="m-head"><div class="logo"><span class="l1">FATAL</span><span class="l2">ERROR</span></div><div class="tagline">Tiro arcade e sobrevivência num mundo rabiscado</div></div>
+    ${updateBannerHTML()}
+    <div class="m-play">
+      <button type="button" class="btn btn-yellow btn-xl" id="soloBtn"><span class="bt">▶ Jogar Solo</span><span class="bs">Sobreviva a ondas de inimigos</span></button>
+      <button type="button" class="btn btn-blue btn-xl" id="onlineBtn"><span class="bt">Jogar Online</span><span class="bs">Mata-mata · até 10 jogadores</span></button>
+    </div>
+    <div class="m-info"><span class="chip">Mapa: <b>${esc(mapName(mapKey))}</b></span><span class="chip">Versão <b>v${esc(appVersion)}</b></span>${best ? `<span class="chip chip-gold">Recorde: <b>${best}</b></span>` : ''}</div>
+    ${tabsHTML('main', [['maps', 'Mapas', mapHTML(mapKey, true)], ['controls', 'Controles', CONTROLS_HTML], ['settings', 'Ajustes', settingsHTML()]])}`;
 }
 function onlineHTML() {
   return `<h1>Jogar Online</h1><h2>Mata-Mata Livre · Até o tempo acabar (${Math.round(FFA_TIME / 60)} min) + Bots · Até 10 jogadores</h2>
+    ${updateBannerHTML()}
     <div class="online" id="online">
       <div class="row"><span>Seu Apelido</span><input type="text" class="namebox" id="setName" maxlength="14" placeholder="Seu apelido" value="${esc(myName)}"></div>
       <div class="row"><button type="button" class="big" id="quickBtn">Partida Rápida</button><span class="hint">Entra em qualquer sala aberta ou cria uma nova</span></div>
@@ -898,9 +1054,11 @@ function onlineHTML() {
 }
 function lobbyHTML() {
   const rows = lobbyRows(); const host = net.isHost; const n = rows.length;
+  const shownCode = esc(String(net.isHost ? (net.aliasCode || net.code) : (lobby.shown || net.code) || '').replace(/-\d+$/, ''));
   return `<h1>Sala de Espera</h1><h2>Mata-Mata Livre · Até acabar o tempo (${Math.round(FFA_TIME / 60)} min) + Bots · ${n}/${net.maxPlayers} jogadores</h2>
+    ${updateBannerHTML()}
     <div class="online" id="online">
-      <div class="row"><span>Código</span><span class="code">${String(net.isHost ? (net.aliasCode || net.code) : (lobby.shown || net.code) || '').replace(/-\d+$/, '')}</span> ${net.isInternal || lobby.isLan ? '<b style="color:#0077aa; font-size:20px; margin-left:8px;">[Rede Interna GDFNet]</b>' : ''}</div>
+      <div class="row"><span>Código</span><span class="code">${shownCode}</span> ${net.isInternal || lobby.isLan ? '<b style="color:#0077aa; font-size:20px; margin-left:8px;">[Rede Interna GDFNet]</b>' : ''}</div>
       ${mapHTML(lobby.map || mapKey, host)}
       <div class="hint">${lobby.isPublic ? 'Sala pública: qualquer um na rede ou com o código pode entrar' : 'Sala privada: passe este código de 5 letras para seus colegas entrarem'}</div>
       <div class="plist">${rows.map((p) => `<div class="${p.id === lobby.hostId ? 'host' : ''}${p.id === net.id ? ' me' : ''}"><span>${esc(p.name)}</span><span>${p.id === net.id ? ' (Você)' : ''}</span></div>`).join('')}</div>
@@ -965,26 +1123,38 @@ function showStart() {
   if (game.state === 'lobby') screen = 'lobby';
   const html = screen === 'lobby' ? lobbyHTML() : screen === 'online' ? onlineHTML() : mainHTML();
   hud.showScreen(html);
+  wireUpdateBanner();
   const p = hud.el.panel;
   if (screen === 'main') {
     wireSettings();
     wireMap((k) => { mapKey = knownMap(k); lobby.map = mapKey; localStorage.setItem('doodle_map', mapKey); setLevel(mapKey, false); player.reset(level.playerStart); showStart(); });
     p.querySelector('#soloBtn').addEventListener('click', (e) => { e.stopPropagation(); begin(); });
     p.querySelector('#onlineBtn').addEventListener('click', (e) => { e.stopPropagation(); screen = 'online'; showStart(); });
+    wireTabs();
   } else wireOnline();
 }
 function showPause() {
+  const resumeHint = `<div class="foot-hint"><kbd>${hud.key('pause')}</kbd> ou <kbd>${hud.key('confirm')}</kbd> para continuar</div>`;
   if (online()) {
-    hud.showScreen(`<h1>Menu</h1><h2>Mata-Mata Livre · Sala ${String(net.aliasCode || net.code || '').replace(/-\d+$/, '')}</h2><div class="scoreboard">${sortedScores().map(([id, s]) => `<div class="${id === net.id ? 'me' : ''}"><span>${esc(s.name)}</span><span>${s.kills} Kills · ${s.deaths} Mortes</span></div>`).join('')}</div>${CONTROLS_HTML}${settingsHTML()}<div class="online" id="online"><div class="row"><button type="button" class="alt" id="leaveBtn">Sair da Partida</button></div></div><div class="go">Clique ou pressione ${hud.key('confirm')} para continuar</div>`);
-    wireSettings(); wireOnline(); return;
+    const pauseCode = esc(String(net.aliasCode || net.code || '').replace(/-\d+$/, ''));
+    hud.showScreen(`<div class="p-head"><h1>Menu</h1><div class="m-info"><span class="chip">Mata-mata livre</span><span class="chip">Sala <b>${pauseCode}</b></span></div></div>
+      <div class="m-play" id="online"><button type="button" class="btn btn-yellow btn-lg" data-act="go">▶ Continuar</button><button type="button" class="btn btn-red btn-lg" id="leaveBtn">Sair da partida</button></div>
+      ${tabsHTML('mpause', [['board', 'Placar', scoreRowsHTML()], ['controls', 'Controles', CONTROLS_HTML], ['settings', 'Ajustes', settingsHTML()]])}${resumeHint}`);
+    wireSettings(); wireOnline(); wireTabs(); return;
   }
-  hud.showScreen(`<h1>Jogo Pausado</h1><h2>Onda ${game.wave} · ${game.score} Pontos</h2>${CONTROLS_HTML}${settingsHTML()}${menuBtnHTML()}<div class="go">Clique ou pressione ${hud.key('confirm')} para continuar</div>`);
-  wireSettings(); wireMenuBtn();
+  hud.showScreen(`<div class="p-head"><h1>Pausado</h1><div class="m-info"><span class="chip">Onda <b>${game.wave}</b></span><span class="chip">Pontos <b>${game.score}</b></span></div></div>
+    <div class="m-play"><button type="button" class="btn btn-yellow btn-lg" data-act="go">▶ Continuar</button><button type="button" class="btn btn-white btn-lg" id="menuBtn">Menu principal</button></div>
+    ${tabsHTML('pause', [['controls', 'Controles', CONTROLS_HTML], ['settings', 'Ajustes', settingsHTML()]])}${resumeHint}`);
+  wireSettings(); wireMenuBtn(); wireTabs();
 }
-function showClickToPlay() { hud.showScreen(`<h1>Partida Iniciada</h1><h2>Mata-Mata Livre · Até acabar o tempo (${Math.round(FFA_TIME / 60)} min) + Bots</h2><div class="go">Clique ou pressione ${hud.key('confirm')} para lutar</div>`); }
+function showClickToPlay() { hud.showScreen(`<div class="p-head"><h1>Partida iniciada</h1><h2>Mata-mata livre · ${Math.round(FFA_TIME / 60)} min · com bots</h2></div><div class="m-play"><button type="button" class="btn btn-yellow btn-xl" data-act="go"><span class="bt">Lutar!</span></button></div><div class="foot-hint"><kbd>${hud.key('confirm')}</kbd> para começar</div>`); }
 function showDead() {
   hud.setGameplayVisible(false); const nb = game.score > best; if (nb) { best = game.score; localStorage.setItem('doodle_best', String(best)); }
-  hud.showScreen(`<h1>Você Foi Apagado</h1><div class="stats">Você sobreviveu a <b>${game.wave}</b> ondas · <b>${game.kills}</b> eliminações · <b>${game.score}</b> pontos${nb ? ' · <b>Novo Recorde!</b>' : ` · Recorde: ${best}`}</div>${menuBtnHTML()}<div class="go">Clique ou pressione ${hud.key('confirm')} para reiniciar da Onda 1</div>`);
+  hud.showScreen(`<div class="p-head"><h1 class="t-red">Você foi apagado!</h1></div>
+    <div class="statgrid"><div><b>${game.wave}</b><span>ondas</span></div><div><b>${game.kills}</b><span>eliminações</span></div><div><b>${game.score}</b><span>pontos</span></div></div>
+    <div class="m-info">${nb ? '<span class="chip chip-gold">Novo recorde!</span>' : `<span class="chip">Recorde: <b>${best}</b></span>`}</div>
+    <div class="m-play"><button type="button" class="btn btn-yellow btn-lg" data-act="go">↻ Jogar de novo</button><button type="button" class="btn btn-white btn-lg" id="menuBtn">Menu principal</button></div>
+    <div class="foot-hint"><kbd>${hud.key('confirm')}</kbd> para recomeçar da onda 1</div>`);
   wireMenuBtn();
 }
 function menuBtnHTML() { return '<div class="online menubtn"><div class="row"><button type="button" class="alt" id="menuBtn">Menu Principal</button></div></div>'; }
@@ -1049,11 +1219,11 @@ function startMatch(late, spawnIdx, forcedMap) {
 function pause() { if ((game.state !== 'play' && !(game.state === 'dying' && online())) || game.menu) return; if (!online()) game.state = 'pause'; game.menu = true; showPause(); audio.reelLoop(false); }
 function resume() { if (online()) { game.menu = false; if (game.state === 'dying' && game.respawnT <= 0) game.respawnArm = input.lastActive; hud.hideScreen(); hud.setGameplayVisible(true); if (!input.usingGamepad) input.requestLock(); return; } begin(); }
 Object.assign(window.__game, { startWave, updateWaves, begin, beginAtWave, jumpToWave, resetGame, spawnPickup, focusCandidate, enterFocus, pickSpawn, startMatch, createLobby, joinLobby, quickPlay, leaveOnline, hostStart });
-hud.onScreenClick = () => {
+hud.onScreenClick = (src) => {
   const st = game.state;
   if (st === 'over') { if (net.isHost) { net.send('backtolobby', {}); toLobbyScreen(); } return; }
   if (st === 'lobby') return;
-  if (st === 'start') { if (screen === 'main') begin(); return; }
+  if (st === 'start') { if (screen === 'main' && src !== 'backdrop') begin(); return; }
   if ((st === 'play' || st === 'dying') && game.menu) { resume(); return; }
   if (st === 'pause' || st === 'dead') resume();
 };
@@ -1126,7 +1296,7 @@ function safeEnemies(sdt) {
 function step(now) {
   try { stepInner(now); } catch (err) { reportError('step', err); }
 }
-let lastWall = 0;
+let lastWall = 0, lastMatchActiveSent = null;
 function stepInner(now) {
   // after this machine itself stalled (minimised window, map load, a hitch), everyone looks "silent"
   // only because we were not reading: give remotes a fresh grace period instead of dropping them all
@@ -1135,6 +1305,11 @@ function stepInner(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   input.update(dt);
   const st = game.state; const playing = st === 'play' || st === 'dying';
+  const matchBusy = playing || st === 'pause' || st === 'over';
+  if (matchBusy !== lastMatchActiveSent) {
+    lastMatchActiveSent = matchBusy;
+    if (window.FE_UPDATE && window.FE_UPDATE.setMatchActive) window.FE_UPDATE.setMatchActive(matchBusy);
+  }
   if (st === 'start' || st === 'pause' || st === 'dead' || st === 'over') { if (input.pressed('jump') || input.pressed('confirm') || (st === 'pause' && input.pressed('pause'))) hud.onScreenClick(); }
   if (playing && input.pressed('buy')) {
     if (hud.el.buymenu.hidden) { hud.toggleBuyMenu(true, player); input.exitLock(); }

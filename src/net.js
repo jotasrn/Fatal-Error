@@ -7,6 +7,8 @@
 // every slot at once - a directory with no directory server. A connection only counts once the
 // host has answered with a welcome, so a full or closed lobby can be skipped for the next one.
 
+import { authorizeClientPacketOnHost, authorizePacketOnClient } from './security.js';
+
 // a local dev/LAN server gets its own namespace so testing and LAN play never wander into a live public lobby
 const LOCAL = typeof location !== 'undefined' && /^(localhost|127\.0\.0\.1|\[::1\]|192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.|.*\.local)$/.test(location.hostname);
 const PREFIX = LOCAL ? 'doodledev-' : 'doodledistrict-';
@@ -63,10 +65,17 @@ class PeerNet {
     else if (pid === this.hostId) { this.connected = false; if (this.onDisconnect) this.onDisconnect(); }
   }
   _route(msg, from) {
-    // clients can address each other; the host forwards those
-    if (this.isHost && msg.to && msg.to !== this.id) { const c = this.conns.get(msg.to); if (c && c.open) c.send(msg); return; }
-    if (this.isHost && msg.relay) { for (const [pid, c] of this.conns) if (pid !== from && c.open) c.send({ t: msg.t, d: msg.d, from }); }
-    this._emit(msg.t, msg.d, msg.from || from);
+    if (this.isHost) {
+      const auth = authorizeClientPacketOnHost(msg, from, this.id);
+      if (auth.action === 'drop') return;
+      if (auth.action === 'direct') { const c = this.conns.get(auth.to); if (c && c.open) c.send(auth.packet); return; }
+      if (auth.action === 'relay') { for (const [pid, c] of this.conns) if (pid !== from && c.open) c.send(auth.packet); }
+      this._emit(auth.packet.t, auth.packet.d, from);
+      return;
+    }
+    const auth = authorizePacketOnClient(msg, from, this.hostId);
+    if (!auth.allowed) return;
+    this._emit(msg.t, msg.d, auth.from);
   }
   _keepAlive(peer) { peer.on('disconnected', () => { if (this.peer === peer && !peer.destroyed) { try { peer.reconnect(); } catch (e) { /* ignore */ } } }); }
 
@@ -256,17 +265,17 @@ class SwarmNet {
   get peerIds() { return [...this.conns.keys()]; }
   on(type, fn) { this.handlers.set(type, fn); }
   _emit(type, data, from) { const h = this.handlers.get(type); if (h) h(data, from); }
-  _wrap(key) { return { open: true, send: (m) => { this.stats.sent++; this.bridge.send(key, m); }, close: () => { /* per-peer close handled by leave() */ } }; }
+  _wrap(key) { return { open: true, send: (m) => { this.stats.sent++; this.bridge.send(key, m); }, close: () => { if (this.bridge.closePeer) this.bridge.closePeer(key); } }; }
   _onConnect(key) {
-    // client: greet the host as soon as the link is up; the host replies with a welcome
-    if (!this.isHost) this.bridge.send(key, { t: 'hello', d: this._joinMeta || {}, from: this.id });
+    // client: greet candidate peers while searching for the host; once seated, ignore random DHT peers
+    if (!this.isHost && !this.connected) this.bridge.send(key, { t: 'hello', d: this._joinMeta || {}, from: this.id });
   }
   _onData(key, msg) {
     this.stats.recv++; if (!msg || typeof msg !== 'object') return;
     if (this.isHost) {
       if (msg.t === 'hello') {
         if (!this.accepting || this.conns.size >= this.maxPlayers - 1) {
-          this.bridge.send(key, { t: 'refused', d: { reason: this.accepting ? 'that lobby is full' : 'that lobby is closed', code: this.code, players: this.conns.size + 1, max: this.maxPlayers, inMatch: !!this.inMatch, hostName: this.hostName } });
+          this.bridge.send(key, { t: 'refused', d: { reason: this.accepting ? 'that lobby is full' : 'that lobby is closed', code: this.code, players: this.conns.size + 1, max: this.maxPlayers, inMatch: !!this.inMatch, hostName: this.hostName }, from: this.id });
           return;
         }
         const isNew = !this.conns.has(key);
@@ -278,19 +287,27 @@ class SwarmNet {
         if (isNew && this.onPeerJoin) this.onPeerJoin(key, msg.d || {});
         return;
       }
-      // host routing: forward addressed messages, fan out relays, then deliver locally
-      if (msg.to && msg.to !== this.id) { const w = this.conns.get(msg.to); if (w) w.send(msg); return; }
-      if (msg.relay) { for (const [pid, w] of this.conns) if (pid !== key) w.send({ t: msg.t, d: msg.d, from: key }); }
-      this._emit(msg.t, msg.d, msg.from || key);
+      if (!this.conns.has(key)) return; // exige handshake hello previo
+      const auth = authorizeClientPacketOnHost(msg, key, this.id);
+      if (auth.action === 'drop') return;
+      if (auth.action === 'direct') { const w = this.conns.get(auth.to); if (w) w.send(auth.packet); return; }
+      if (auth.action === 'relay') { for (const [pid, w] of this.conns) if (pid !== key) w.send(auth.packet); }
+      this._emit(auth.packet.t, auth.packet.d, key);
     } else {
       if (msg.t === 'welcome') {
+        if (this.connected && this.hostId && key !== this.hostId) return; // impede sequestro de hostId
         this.hostId = key; this.conns.set(key, this._wrap(key)); this.connected = true; this.isPublic = !!(msg.d && msg.d.isPublic); this.code = (msg.d && msg.d.code) || this.code;
         if (this._pendingJoin) { clearTimeout(this._pendingJoin.timer); this._pendingJoin.resolve(this.code); this._pendingJoin = null; }
         return;
       }
-      if (msg.t === 'refused') { if (this._pendingJoin) { clearTimeout(this._pendingJoin.timer); this._pendingJoin.reject(new Error(msg.d && msg.d.reason || 'the lobby turned you away')); this._pendingJoin = null; } return; }
-      if (key !== this.hostId) return;   // only the host speaks to a client
-      this._emit(msg.t, msg.d, msg.from || key);
+      if (msg.t === 'refused') {
+        if (this.connected) return;
+        if (this._pendingJoin) { clearTimeout(this._pendingJoin.timer); this._pendingJoin.reject(new Error(msg.d && msg.d.reason || 'the lobby turned you away')); this._pendingJoin = null; }
+        return;
+      }
+      const auth = authorizePacketOnClient(msg, key, this.hostId);
+      if (!auth.allowed) return;
+      this._emit(msg.t, msg.d, auth.from);
     }
   }
   _onDisconnect(key) {
@@ -359,7 +376,6 @@ export class DualNet {
     return this.driver;
   }
   get active() { return this.driver.active; }
-  get conns() { return this.driver.conns; }
   get peerIds() { return this.driver.peerIds; }
   // main.js drops silent/idle players through net.conns: without this getter that path threw every
   // frame on the host as soon as anyone went quiet for 9 s (alt-tab, lag), freezing the match
