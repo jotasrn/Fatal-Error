@@ -12,17 +12,8 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const Hyperswarm = require('hyperswarm');
 
-// prefer the discrete GPU on dual-GPU laptops, enable GPU rasterization, and keep the game running
-// at full speed when the window is not focused (a host that alt-tabs must not stall everyone else's match)
-app.commandLine.appendSwitch('force_high_performance_gpu');
-app.commandLine.appendSwitch('ignore-gpu-blocklist');
-app.commandLine.appendSwitch('enable-gpu-rasterization');
-app.commandLine.appendSwitch('enable-zero-copy');
-app.commandLine.appendSwitch('disable-renderer-backgrounding');
-app.commandLine.appendSwitch('disable-background-timer-throttling');
-app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
-// Optional Chromium switches from <userData>/gpu-flags.txt (one per line, "name" or "name=value",
-// "#" comments) so graphics settings can be tried on a given PC without a new build.
+// Let Chromium pick the native display adapter (forcing discrete GPU on dual-GPU machines copies
+// every frame across adapters and causes stutter). Optional overrides in <userData>/gpu-flags.txt.
 try {
   const f = path.join(app.getPath('userData'), 'gpu-flags.txt');
   for (const line of fs.readFileSync(f, 'utf8').split(/\r?\n/)) {
@@ -39,6 +30,7 @@ function logLine(msg) {
   } catch { /* logging must never crash the game */ }
 }
 ipcMain.on('log:error', (_e, msg) => logLine('renderer ' + msg));
+ipcMain.on('log:info', (_e, msg) => logLine('info ' + msg));
 process.on('uncaughtException', (err) => logLine('main ' + (err && err.stack || err)));
 
 let win = null;
@@ -119,6 +111,11 @@ function createWindow() {
       contextIsolation: true, nodeIntegration: false, sandbox: false, backgroundThrottling: false,
     },
   });
+  win.webContents.on('before-input-event', (_e, input) => {
+    if (input.type === 'keyDown' && input.key === 'F11' && win && !win.isDestroyed()) {
+      win.setFullScreen(!win.isFullScreen());
+    }
+  });
   win.webContents.on('render-process-gone', (_e, d) => { logLine('render-process-gone ' + JSON.stringify(d)); if (win && !win.isDestroyed()) setTimeout(() => win && !win.isDestroyed() && win.reload(), 500); });
   win.webContents.on('unresponsive', () => logLine('window unresponsive'));
   win.setMenuBarVisibility(false);
@@ -129,8 +126,7 @@ function createWindow() {
 app.on('child-process-gone', (_e, d) => logLine('child-process-gone ' + JSON.stringify(d)));
 app.whenReady().then(() => {
   createWindow();
-  // the feature status settles once the GPU process is up: log it again a few seconds in
-  setTimeout(() => { try { logLine('gpu-features-5s ' + JSON.stringify(app.getGPUFeatureStatus()) + ' switches=' + process.argv.slice(1).join(' ') + ' flags=' + JSON.stringify(app.commandLine.hasSwitch('ignore-gpu-blocklist'))); } catch { /* ignore */ } }, 5000);
+  setTimeout(() => { try { logLine('gpu-features-5s ' + JSON.stringify(app.getGPUFeatureStatus())); } catch { /* ignore */ } }, 5000);
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 app.on('window-all-closed', () => { destroySession().finally(() => { if (process.platform !== 'darwin') app.quit(); }); });
