@@ -84,7 +84,7 @@ jobs:
             echo "| [Versao Portatil (.zip)](${BASE}/Fatal-Error-Portable.zip) | Descompacte e execute \`Fatal Error.exe\`, sem instalar |"
             echo "| [SHA256SUMS.txt](${BASE}/SHA256SUMS.txt) | Hashes SHA-256 para conferencia de integridade dos binarios |"
             echo
-            echo "Windows 10/11 (64 bits). Na primeira instalacao o Windows SmartScreen pode avisar por nao haver certificado EV pago: clique em **Mais informacoes > Executar assim mesmo**."
+            echo "Windows 10/11 (64 bits). Na primeira instalacao o Windows SmartScreen pode avisar por nao haver certificado EV pago: clique em **Mais informacoes > Executar assim mesmo**. Passo a passo completo em [\`download/README.md\`](https://github.com/${GITHUB_REPOSITORY}/blob/main/download/README.md)."
             echo
             echo "> **Quem ja tem o Fatal Error instalado nao precisa baixar nada:** o jogo detecta e baixa esta versao em segundo plano sem interromper partidas em andamento."
             echo

@@ -1,8 +1,10 @@
 .DS_Store
 node_modules/
 *.log
+*.exe
 build/
 dist/
 release/
+CONECTAR_LAN.txt
 *.pyc
 __pycache__/

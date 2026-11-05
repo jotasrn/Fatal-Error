@@ -287,7 +287,7 @@ export class Player {
     this.updateNades(dt);
     this.updateRockets(dt);
     // ---- weapons ----
-    for (let i = 0; i < 6; i++) if (inp.pressed('slot' + (i + 1))) this.switchTo(i);
+    for (let i = 0; i < 8; i++) if (inp.pressed('slot' + (i + 1))) this.switchTo(i);
     if (inp.pressed('nextWeapon')) this.cycleWeapon(1);
     if (inp.pressed('prevWeapon')) this.cycleWeapon(-1);
     if (inp.wheel !== 0) { this.cycleWeapon(inp.wheel > 0 ? 1 : -1); inp.wheel = 0; }
