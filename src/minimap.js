@@ -13,10 +13,10 @@ export class Minimap {
   setEnabled(on) { this.enabled = on; this.canvas.hidden = !on; try { localStorage.setItem('doodle_minimap', on ? '1' : '0'); } catch (e) { /* ignore */ } }
   setLevel(level, world) {
     const b = level.bounds; this.b = b;
-    const w = b.maxX - b.minX, h = b.maxZ - b.minZ; this.k = Math.min(1.6, 800 / Math.max(w, h));
+    const w = b.maxX - b.minX, h = b.maxZ - b.minZ; this.k = Math.min(1.6, 1024 / Math.max(w, h));
     const c = document.createElement('canvas'); c.width = Math.ceil(w * this.k); c.height = Math.ceil(h * this.k);
     const g = c.getContext('2d'); g.fillStyle = '#e9efe0'; g.fillRect(0, 0, c.width, c.height);
-    const boxes = [...world.boxes].filter((x) => x.max.y - x.min.y > 0.9 && x.min.y < 40 && (x.max.x - x.min.x) < w + 1).sort((p, q) => p.max.y - q.max.y);
+    const boxes = [...world.boxes].filter((x) => x.max.y - x.min.y > 0.9 && x.min.y < 40 && (x.max.x - x.min.x) < w + 1 && (x.max.z - x.min.z) < h + 1).sort((p, q) => p.max.y - q.max.y);
     for (const x of boxes) {
       const ht = Math.min(1, x.max.y / 26);
       const v = Math.round(200 - ht * 150); g.fillStyle = `rgb(${v},${v + 4},${v + 14})`;

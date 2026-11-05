@@ -23,9 +23,10 @@ const canvas = document.getElementById('c');
 const R = new InkRenderer(canvas);
 const world = new World();
 const knownMap = (k) => (LEVELS.some((m) => m.key === k) ? k : 'district');
+const navCellFor = (b) => (Math.max(b.maxX - b.minX, b.maxZ - b.minZ) > 350 ? 2.0 : 1.0);
 let mapKey = knownMap(localStorage.getItem('doodle_map') || 'district');
 let level = buildLevel(R.scene, world, mapKey, { arena: false });
-let nav = new NavGrid(world, level.bounds, 1).build();
+let nav = new NavGrid(world, level.bounds, navCellFor(level.bounds)).build();
 let loadedKey = mapKey, arenaLoaded = false;
 let minimap = null; // created with the HUD below
 audio.setTune(mapKey === 'mexico' ? 'mexico' : 'district');
@@ -34,7 +35,7 @@ function setLevel(key, on, force = false) {
   if (!force && key === loadedKey && on === arenaLoaded) return; loadedKey = key; arenaLoaded = on;
   for (const m of level.meshes) { R.scene.remove(m); if (m.geometry) m.geometry.dispose(); if (m.traverse) m.traverse((o) => { if (o !== m && o.geometry) o.geometry.dispose(); }); }
   level.animated.length = 0; world.clear();
-  level = buildLevel(R.scene, world, key, { arena: on }); nav = new NavGrid(world, level.bounds, 1).build();
+  level = buildLevel(R.scene, world, key, { arena: on }); nav = new NavGrid(world, level.bounds, navCellFor(level.bounds)).build();
   ctx.level = level; ctx.nav = nav; if (minimap) minimap.setLevel(level, world); if (window.__game) { window.__game.level = level; window.__game.nav = nav; }
   audio.setTune(key === 'mexico' ? 'mexico' : 'district');
 }
@@ -48,7 +49,7 @@ const ctx = { scene: R.scene, camera: R.camera, world, level, nav, input, hud, e
 // ---------------- persistent bits ----------------
 let best = Number(localStorage.getItem('doodle_best') || 0);
 let musicWanted = localStorage.getItem('doodle_music') !== '0';
-let checkpoint = Number(localStorage.getItem('doodle_checkpoint') || 0);
+try { localStorage.removeItem('doodle_checkpoint'); } catch (e) { /* checkpoint removido: sempre reinicia na Onda 1 */ }
 // online bank: cash you carry between online matches (solo keeps its own roguelike economy)
 let bank = Number(localStorage.getItem('doodle_bank') || 300); let bankSaveT = 0;
 const saveBank = () => { bank = Math.max(0, Math.round(player.money)); localStorage.setItem('doodle_bank', String(bank)); };
@@ -134,7 +135,7 @@ hud.setMoney(player.money);
 hud.setArmor(player.armor, player.maxArmor);
 player.name = myName;
 const net = new Net();
-const remote = new Map();      // peer id -> RemotePlayer
+const remote = ctx.remote = new Map(); // peer id -> RemotePlayer
 const lobby = { players: new Map(), hostId: null, isPublic: true, status: '', code: '', map: null };
 const scores = new Map();      // peer id -> { name, kills, deaths }
 let screen = 'main';           // which start-screen panel is showing: main | online | lobby
@@ -144,8 +145,8 @@ window.__game = { ctx, game, player, enemies, nav, world, level, hud, effects, i
 // state through ctx (ctx.level is kept current by setLevel) and reports back through these.
 const survival = createSurvival(ctx, {
   net, online,
-  getCheckpoint: () => checkpoint,
-  setCheckpoint: (v) => { checkpoint = v; localStorage.setItem('doodle_checkpoint', String(v)); },
+  getCheckpoint: () => 0,
+  setCheckpoint: () => {},
 });
 ctx.survival = survival;
 const {
@@ -303,64 +304,88 @@ enemies.onKill = (e, info, over) => {
 let brasiliaEventTimer = 0;
 function triggerBrasiliaManifestation() {
   if (level.key !== 'brasilia') return;
-  brasiliaEventTimer = 80;
+  brasiliaEventTimer = 75;
   ctx.protestersRiot = false;
   ctx.playerWanted = false;
+  if (net.active && net.isHost) net.send('bcalm', {});
 
-  // only an ongoing protest blocks a new one: civilians used to count too, and with the 10
-  // civilians of the bigger Esplanada the protest never started at all
-  const existingAmbient = enemies.enemies.filter(e => e.alive && (e.T.isProtester || e.T.isPolice)).length;
-  if (existingAmbient > 6) return; // Evita acúmulo excessivo de bots
+  const existingAmbient = enemies.enemies.filter((e) => e.alive && (e.T.isProtester || e.T.isPolice)).length;
+  if (existingAmbient > 8) return; // Evita acúmulo excessivo de bots
 
-  // Manifestantes com bandeiras do PT
-  const protSpots = [
-    new THREE.Vector3(-4, 0, 10), new THREE.Vector3(4, 0, 12),
-    new THREE.Vector3(-6, 0, 22), new THREE.Vector3(0, 0, 24), new THREE.Vector3(5, 0, 26),
-    new THREE.Vector3(-3, 0, 36), new THREE.Vector3(3, 0, 38)
+  // Escolhe o foco da manifestação perto dos jogadores ativos (Torre de TV/Fonte, Rodoviária/Conjunto Nacional ou Esplanada/Congresso)
+  const anchors = ctx.targets().filter((t) => t && t.alive && t.body);
+  const refZ = anchors.length ? choose(anchors).body.pos.z : player.body.pos.z;
+  let baseZ = 18, zoneLabel = 'NA ESPLANADA';
+  if (refZ < -265) { baseZ = -272; zoneLabel = 'NA TORRE DE TV'; }
+  else if (refZ < -125) { baseZ = -182; zoneLabel = 'NA RODOVIÁRIA'; }
+
+  // Manifestantes + Líderes Manifestantes (marcham contra a polícia; não atacam jogadores se não forem provocados!)
+  const protOffsets = [
+    [-5, -14, 'protester'], [5, -12, 'protester'], [0, -10, 'protester_leader'],
+    [-7, -4, 'protester'], [0, -3, 'protester'], [6, -2, 'protester'],
+    [-3, 4, 'protester'], [4, 5, 'protester_leader'],
   ];
-  for (const pos of protSpots) {
-    const p = enemies.spawn('protester', pos);
+  for (const [dx, dz, kind] of protOffsets) {
+    const p = enemies.spawn(kind, new THREE.Vector3(dx, 0.25, baseZ + dz));
     p.state = 'hunt';
   }
 
-  // Pelotão da PMDF / Choque
-  const polSpots = [
-    new THREE.Vector3(-6, 0, 68), new THREE.Vector3(0, 0, 68), new THREE.Vector3(6, 0, 68)
+  // Pelotão da PMDF + GSI + Tropa de Choque (BOPE) (combatem os manifestantes; não atacam jogadores inocentes!)
+  const polOffsets = [
+    [-7, 34, 'police'], [0, 34, 'police_tactical'], [7, 34, 'police'],
+    [-4, 39, 'police_tactical'], [4, 39, 'police'], [0, 42, 'police_chief'],
   ];
-  for (const pos of polSpots) {
-    const pol = enemies.spawn('police', pos);
+  for (const [dx, dz, kind] of polOffsets) {
+    const pol = enemies.spawn(kind, new THREE.Vector3(dx, 0.25, baseZ + dz));
     pol.state = 'hunt';
   }
-  const chief = enemies.spawn('police_chief', new THREE.Vector3(0, 0, 72));
-  chief.state = 'hunt';
 
-  audio.siren(new THREE.Vector3(0, 0, 60));
+  audio.siren(new THREE.Vector3(0, 0, baseZ + 24));
   if (hud) {
-    hud.message('🚩 MANIFESTAÇÃO NA ESPLANADA!', 'Guerra entre Manifestantes e PMDF! Não interfira ou sofrerá as consequências!', 5.0);
+    hud.message(`🚩 MANIFESTAÇÃO ${zoneLabel}!`, 'Confronto entre Manifestantes e PMDF! Não ataque nenhum lado ou sofrerá as consequências!', 5.0);
   }
+  if (net.active && net.isHost) net.send('bmanif', { zone: zoneLabel });
 }
 
 function spawnBrasiliaCivilians() {
   const civSpots = [
-    new THREE.Vector3(0, 7, -213),      // Plataforma superior da Rodoviária
-    new THREE.Vector3(-30, 7, -210),    // Mezanino da Rodoviária
-    new THREE.Vector3(-10, 0, -188),    // Saída da Rodoviária
-    new THREE.Vector3(46, 0, -140),     // Calçada do Museu Nacional
-    new THREE.Vector3(44, 0, -100),     // Entrada da Catedral
-    new THREE.Vector3(-46, 0, -128),    // Teatro Nacional
-    new THREE.Vector3(0, 0.22, -60),    // Gramado Central da Esplanada
-    new THREE.Vector3(-41, 0, -10),     // Parada de ônibus Norte
-    new THREE.Vector3(41, 0, 46),       // Calçada Ministério Sul
-    new THREE.Vector3(6, 0.22, 110),    // Frente do Congresso
+    ['civilian', -84, 0.3, -455],   // Estádio Mané Garrincha
+    ['politician', 56, 0, -458],    // Praça do Buriti (GDF)
+    ['civilian', 0, 9.5, -402],     // Terraço do Centro de Convenções Ulysses Guimarães
+    ['vendor', -6, 0, -346],        // Feirinha da Torre de TV
+    ['vendor', 6, 0, -342],         // Feirinha da Torre de TV
+    ['civilian', 0, 20, -312],      // Mirante da Torre de TV
+    ['civilian', 54, 0, -328],      // Entrada do Pátio Brasil Shopping
+    ['civilian', 81, 0, -240],      // Setor Comercial Sul (SCS)
+    ['civilian', -56, 0, -210],     // Calçada do Conjunto Nacional
+    ['vendor', 0, 7, -213],         // Plataforma superior da Rodoviária
+    ['civilian', -28, 7, -210],     // Mezanino da Rodoviária
+    ['civilian', 46, 0, -140],      // Calçada do Museu Nacional
+    ['civilian', 44, 0, -100],      // Entrada da Catedral
+    ['civilian', -46, 0, -128],     // Teatro Nacional
+    ['politician', -42, 0, -24],    // Ministério Norte
+    ['politician', 42, 0, 32],      // Ministério Sul
+    ['politician', 0, 5, 172],      // Rampa / Salão do Congresso Nacional
+    ['politician', -36, 0, 214],    // Praça dos Três Poderes / Planalto
   ];
-  for (const pos of civSpots) {
-    const c = enemies.spawn('civilian', pos);
+  for (const [kind, x, y, z] of civSpots) {
+    const c = enemies.spawn(kind, new THREE.Vector3(x, y, z));
     c.state = 'hunt';
   }
   triggerBrasiliaManifestation();
 }
 
+ctx.onProtestersRiot = () => {
+  if (net.active && net.isHost) net.send('briot', {});
+};
+ctx.onPlayerWanted = () => {
+  if (net.active && net.isHost) net.send('bwanted', {});
+};
+
 ctx.onCivilianKilled = (civ, info) => {
+  if (info && (info.source === 'bot' || info.source === 'fall')) return;
+  ctx.playerWanted = true;
+  if (ctx.onPlayerWanted) ctx.onPlayerWanted();
   audio.siren(civ.center);
   hud.message('🚨 CRIME COMETIDO!', 'A Polícia foi acionada para conter o infrator!', 3.5);
   hud.kill('🚨 Inocente Morto · Polícia Acionada!', -100);
@@ -369,18 +394,19 @@ ctx.onCivilianKilled = (civ, info) => {
 
   // cap the riot squad: every dead civilian used to add 3 more police, without limit
   const policeAlive = enemies.enemies.filter((e) => e.alive && e.T.isPolice).length;
-  if ((!online() || net.isHost) && policeAlive < 9) {
+  if ((!online() || net.isHost) && policeAlive < 10) {
+    const culprit = (info && info.by && remote.get(info.by)) || player;
     const cx = civ.body.pos.x, cz = civ.body.pos.z;
     for (let i = 0; i < 2; i++) {
       const pPos = new THREE.Vector3(cx + (i === 0 ? -6 : 6), 0, cz + (Math.random() - 0.5) * 8);
-      const pBot = enemies.spawn('police', pPos);
+      const pBot = enemies.spawn(i === 0 ? 'police' : 'police_tactical', pPos);
       pBot.state = 'hunt';
-      pBot.target = player;
+      pBot.target = culprit;
     }
     const chiefPos = new THREE.Vector3(cx, 0, cz + (cz > 0 ? -10 : 10));
     const chief = enemies.spawn('police_chief', chiefPos);
     chief.state = 'hunt';
-    chief.target = player;
+    chief.target = culprit;
   }
 };
 
@@ -423,7 +449,7 @@ function respawnLocal() {
 function tallyDeath(victim, killer) {
   const v = scores.get(victim); if (v) v.deaths++;
   if (killer && killer !== victim) { const k = scores.get(killer); if (k) k.kills++; }
-  sendScores(); checkWin();
+  sendScores();
 }
 function sendScores() { const rows = [...scores.entries()].map(([id, s]) => ({ id, ...s })); net.send('score', rows); applyScores(rows); }
 function applyScores(rows) { scores.clear(); for (const r of rows) scores.set(r.id, { name: r.name, kills: r.kills, deaths: r.deaths }); refreshScoreHud(); }
@@ -432,19 +458,13 @@ function refreshScoreHud() {
   if (!online()) return;
   const rows = sortedScores(); const top = rows.slice(0, 3); const myIdx = rows.findIndex(([id]) => id === net.id);
   if (myIdx >= 3) top.push(rows[myIdx]);
-  hud.setPvpScore(top.map(([id, sc]) => `<div class="row${id === net.id ? ' me' : ''}"><span class="rank">${rows.findIndex(([x]) => x === id) + 1}.</span><span>${esc(sc.name)}${id === net.id ? ' (Você)' : ''}</span><b>${sc.kills}</b></div>`).join('') + `<div class="target">Primeiro a ${FFA_TARGET} kills</div>`);
+  hud.setPvpScore(top.map(([id, sc]) => `<div class="row${id === net.id ? ' me' : ''}"><span class="rank">${rows.findIndex(([x]) => x === id) + 1}.</span><span>${esc(sc.name)}${id === net.id ? ' (Você)' : ''}</span><b>${sc.kills}</b></div>`).join('') + `<div class="target">Mata-Mata · Restam ${mmss(matchLeft)}</div>`);
   hud.setModifier('');
   if (!hud.el.board.hidden) hud.setBoard(boardHTML());
 }
 function boardHTML(title = 'Mata-Mata Livre') {
   const rows = sortedScores();
-  return `<h3>${title}</h3>${rows.map(([id, s]) => `<div class="${id === net.id ? 'me' : ''}"><span>${s.name}${id === net.id ? ' (Você)' : ''}</span><span>${s.kills} Kills · ${s.deaths} Mortes</span></div>`).join('')}<div class="foot">Primeiro a ${FFA_TARGET} kills · Restam ${mmss(matchLeft)} · Sala ${String(net.aliasCode || net.code || '').replace(/-\d+$/, '')}</div>`;
-}
-function checkWin() {
-  if (!net.isHost || !online() || game.over) return;
-  let winner = null;
-  for (const [id, s] of scores) if (s.kills >= FFA_TARGET) winner = { id, name: s.name };
-  if (winner) { net.send('end', winner); endMatch(winner); }
+  return `<h3>${title}</h3>${rows.map(([id, s]) => `<div class="${id === net.id ? 'me' : ''}"><span>${s.name}${id === net.id ? ' (Você)' : ''}</span><span>${s.kills} Kills · ${s.deaths} Mortes</span></div>`).join('')}<div class="foot">Mata-Mata até acabar o tempo · Restam ${mmss(matchLeft)} · Sala ${String(net.aliasCode || net.code || '').replace(/-\d+$/, '')}</div>`;
 }
 function endMatch(winner) {
   game.over = winner; game.overT = 0; game.state = 'over'; endFocus(); input.exitLock(); hud.setBoard(null);
@@ -546,6 +566,10 @@ net.on('ekill', (d) => { if (!net.isHost) enemies.killMirror(d.id, d.info); });
 net.on('ekillcredit', (d) => { game.kills++; game.addScore(d.pts, d.label); player.addCash(d.cash, d.label); audio.kill(true); });
 net.on('ewave', (d) => { if (!net.isHost) { game.wave = d.wave; hud.setWave(d.wave, 0); hud.message('Onda ' + d.wave, d.name || 'Bots e Jogadores!', 2.5); audio.wave(); } });
 net.on('ewaveclear', (d) => { if (!net.isHost) { hud.message('Onda ' + d.wave + ' Concluída', 'Prepare-se para a próxima onda!', 2.5); audio.waveClear(); player.hp = Math.min(player.maxHp, player.hp + 40); player.addCash(300 + 50 * d.wave, 'Onda Concluída'); } });
+net.on('bmanif', (d) => { if (!net.isHost) { ctx.protestersRiot = false; ctx.playerWanted = false; audio.siren(player.center); hud.message(`🚩 MANIFESTAÇÃO ${d && d.zone || 'NA ESPLANADA'}!`, 'Confronto entre Manifestantes e PMDF! Não ataque nenhum lado!', 4.5); } });
+net.on('bcalm', () => { if (!net.isHost) { ctx.protestersRiot = false; ctx.playerWanted = false; } });
+net.on('briot', () => { if (!net.isHost) { ctx.protestersRiot = true; audio.siren(player.center); hud.message('⚠️ MULTIDÃO EM FÚRIA!', 'Alguém atacou os manifestantes! A multidão partiu para cima!', 4.0); } });
+net.on('bwanted', () => { if (!net.isHost) { ctx.playerWanted = true; audio.siren(player.center); hud.message('🚨 FORÇA POLICIAL ACIONADA!', 'A Polícia está revidando ataques na partida!', 3.5); } });
 net.on('ehit', (d, from) => {
   if (!net.isHost) return;
   const e = enemies.byId.get(d.id);
@@ -596,7 +620,7 @@ player.onFall = () => {
   if (net.isHost) { const sc = scores.get(net.id); if (sc) { sc.kills = Math.max(0, sc.kills - 1); sendScores(); net.send('feed', { text: sc.name + ' caiu da página · -1' }); } }
   else net.send('fell', {});
 };
-net.on('clock', (d) => { if (!net.isHost) { matchLeft = d.left; clockRunning = !!d.on; } });
+net.on('clock', (d) => { if (!net.isHost) { matchLeft = d.left; clockRunning = !!d.on; refreshScoreHud(); } });
 
 // ---- idle players: a warning, then out; a lobby with nobody active in it shuts down ----
 const IDLE_FLAG = 30, IDLE_MATCH = 150, IDLE_LOBBY = 300, IDLE_WARN = 20;
@@ -630,9 +654,13 @@ function netUpdate(dt) {
   const sendPs = psT <= 0 && inMatch(); if (sendPs) psT = 1 / 20;
   if (sendPs) net.send('ps', encodeLocal(player, player.weaponIndex, { firing: player.firing, idle: input.idleSeconds > IDLE_FLAG }), true);
   if (shotQueue.length) net.broadcast('shots', { k: player.weapon.kind, e: shotQueue.splice(0) });
-  if (net.isHost && inMatch() && remote.size > 0) game.clockStarted = true;
+  if (net.isHost && inMatch()) game.clockStarted = true;
   const clockOn = inMatch() && !game.over && (net.isHost ? !!game.clockStarted : clockRunning);
-  if (inMatch() && !game.over) { if (clockOn) matchLeft = Math.max(0, matchLeft - dt); if (net.isHost) { clockT -= dt; if (clockT <= 0) { clockT = 2; net.send('clock', { left: Math.round(matchLeft), on: clockOn }); } } hud.setTimer(clockOn ? mmss(matchLeft) : 'Inicia com 2+ jogadores'); }
+  if (inMatch() && !game.over) {
+    if (clockOn) matchLeft = Math.max(0, matchLeft - dt);
+    if (net.isHost) { clockT -= dt; if (clockT <= 0) { clockT = 1; net.send('clock', { left: Math.round(matchLeft), on: clockOn }); refreshScoreHud(); } }
+    hud.setTimer(mmss(matchLeft));
+  }
   if (net.isHost && clockOn) { game.matchT += dt; if (matchLeft <= 0) { const rows = sortedScores(); const w = rows.length ? { id: rows[0][0], name: rows[0][1].name } : { id: net.id, name: myName }; net.send('end', w); endMatch(w); } }
 }
 function leaveOnline(reason) {
@@ -844,13 +872,6 @@ function wireName(box) {
   const nb = box.querySelector('#setName'); if (!nb) return;
   nb.addEventListener('input', (e) => { myName = e.target.value.trim().slice(0, 14) || myName; localStorage.setItem('doodle_name', myName); player.name = myName; net.hostName = myName; });
 }
-function checkpointHTML() {
-  if (checkpoint < 5) return '';
-  let h = '<div class="checkpoints"><span>Pontos de Controle</span>';
-  for (let w = 5; w <= checkpoint; w += 5) h += `<button type="button" data-cp="${w}">Onda ${w}</button>`;
-  return h + '</div>';
-}
-function wireCheckpoints(onGo) { const box = hud.el.panel.querySelector('.checkpoints'); if (!box) return; box.addEventListener('click', (e) => { e.stopPropagation(); const b = e.target.closest('button'); if (b) onGo(Number(b.dataset.cp)); }); }
 const mapName = (k) => (LEVELS.find((m) => m.key === k) || LEVELS[0]).name;
 function mapHTML(sel, canPick) { if (LEVELS.length < 2) return ''; return `<div class="mapsel" id="mapsel"><span>Mapa</span>${LEVELS.map((m) => `<button type="button" class="mapbtn${m.key === sel ? ' on' : ''}" data-map="${m.key}" ${canPick ? '' : 'disabled'}>${m.name}<i>${m.blurb}</i></button>`).join('')}</div>`; }
 function wireMap(onPick) { const box = hud.el.panel.querySelector('#mapsel'); if (!box) return; box.addEventListener('click', (e) => { e.stopPropagation(); const b = e.target.closest('.mapbtn'); if (b && !b.disabled) onPick(b.dataset.map); }); }
@@ -858,11 +879,11 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 
 function mainHTML() {
   return `<h1>Doodle District</h1><h2>Jogo de tiro e sobrevivência desenhado em caderno</h2>
-    <div class="mainbtns"><button type="button" class="start" id="soloBtn">JOGAR SOLO<i>Sobreviva a ondas de rabiscos</i></button><button type="button" id="onlineBtn">JOGAR ONLINE<i>Mata-Mata Livre · Até 10 jogadores</i></button></div>
-    ${mapHTML(mapKey, true)}${CONTROLS_HTML}${settingsHTML()}${checkpointHTML()}${best ? `<div class="beststat">Recorde: ${best}</div>` : ''}`;
+    <div class="mainbtns"><button type="button" class="start" id="soloBtn">JOGAR SOLO<i>Sobreviva a ondas de rabiscos</i></button><button type="button" id="onlineBtn">JOGAR ONLINE<i>Mata-Mata Livre · Até acabar o tempo + Bots</i></button></div>
+    ${mapHTML(mapKey, true)}${CONTROLS_HTML}${settingsHTML()}${best ? `<div class="beststat">Recorde: ${best}</div>` : ''}`;
 }
 function onlineHTML() {
-  return `<h1>Jogar Online</h1><h2>Mata-Mata Livre · Primeiro a ${FFA_TARGET} eliminações · Até 10 jogadores</h2>
+  return `<h1>Jogar Online</h1><h2>Mata-Mata Livre · Até o tempo acabar (${Math.round(FFA_TIME / 60)} min) + Bots · Até 10 jogadores</h2>
     <div class="online" id="online">
       <div class="row"><span>Seu Apelido</span><input type="text" class="namebox" id="setName" maxlength="14" placeholder="Seu apelido" value="${esc(myName)}"></div>
       <div class="row"><button type="button" class="big" id="quickBtn">Partida Rápida</button><span class="hint">Entra em qualquer sala aberta ou cria uma nova</span></div>
@@ -877,7 +898,7 @@ function onlineHTML() {
 }
 function lobbyHTML() {
   const rows = lobbyRows(); const host = net.isHost; const n = rows.length;
-  return `<h1>Sala de Espera</h1><h2>Mata-Mata Livre · Primeiro a ${FFA_TARGET} eliminações · ${n}/${net.maxPlayers} jogadores</h2>
+  return `<h1>Sala de Espera</h1><h2>Mata-Mata Livre · Até acabar o tempo (${Math.round(FFA_TIME / 60)} min) + Bots · ${n}/${net.maxPlayers} jogadores</h2>
     <div class="online" id="online">
       <div class="row"><span>Código</span><span class="code">${String(net.isHost ? (net.aliasCode || net.code) : (lobby.shown || net.code) || '').replace(/-\d+$/, '')}</span> ${net.isInternal || lobby.isLan ? '<b style="color:#0077aa; font-size:20px; margin-left:8px;">[Rede Interna GDFNet]</b>' : ''}</div>
       ${mapHTML(lobby.map || mapKey, host)}
@@ -946,7 +967,7 @@ function showStart() {
   hud.showScreen(html);
   const p = hud.el.panel;
   if (screen === 'main') {
-    wireSettings(); wireCheckpoints((w) => beginAtWave(w));
+    wireSettings();
     wireMap((k) => { mapKey = knownMap(k); lobby.map = mapKey; localStorage.setItem('doodle_map', mapKey); setLevel(mapKey, false); player.reset(level.playerStart); showStart(); });
     p.querySelector('#soloBtn').addEventListener('click', (e) => { e.stopPropagation(); begin(); });
     p.querySelector('#onlineBtn').addEventListener('click', (e) => { e.stopPropagation(); screen = 'online'; showStart(); });
@@ -960,11 +981,11 @@ function showPause() {
   hud.showScreen(`<h1>Jogo Pausado</h1><h2>Onda ${game.wave} · ${game.score} Pontos</h2>${CONTROLS_HTML}${settingsHTML()}${menuBtnHTML()}<div class="go">Clique ou pressione ${hud.key('confirm')} para continuar</div>`);
   wireSettings(); wireMenuBtn();
 }
-function showClickToPlay() { hud.showScreen(`<h1>Partida Iniciada</h1><h2>Mata-Mata Livre · Primeiro a ${FFA_TARGET} kills</h2><div class="go">Clique ou pressione ${hud.key('confirm')} para lutar</div>`); }
+function showClickToPlay() { hud.showScreen(`<h1>Partida Iniciada</h1><h2>Mata-Mata Livre · Até acabar o tempo (${Math.round(FFA_TIME / 60)} min) + Bots</h2><div class="go">Clique ou pressione ${hud.key('confirm')} para lutar</div>`); }
 function showDead() {
   hud.setGameplayVisible(false); const nb = game.score > best; if (nb) { best = game.score; localStorage.setItem('doodle_best', String(best)); }
-  hud.showScreen(`<h1>Você Foi Apagado</h1><div class="stats">Você sobreviveu a <b>${game.wave}</b> ondas · <b>${game.kills}</b> eliminações · <b>${game.score}</b> pontos${nb ? ' · <b>Novo Recorde!</b>' : ` · Recorde: ${best}`}</div>${checkpointHTML()}${menuBtnHTML()}<div class="go">Clique ou pressione ${hud.key('confirm')} para tentar novamente</div>`);
-  wireCheckpoints((w) => beginAtWave(w)); wireMenuBtn();
+  hud.showScreen(`<h1>Você Foi Apagado</h1><div class="stats">Você sobreviveu a <b>${game.wave}</b> ondas · <b>${game.kills}</b> eliminações · <b>${game.score}</b> pontos${nb ? ' · <b>Novo Recorde!</b>' : ` · Recorde: ${best}`}</div>${menuBtnHTML()}<div class="go">Clique ou pressione ${hud.key('confirm')} para reiniciar da Onda 1</div>`);
+  wireMenuBtn();
 }
 function menuBtnHTML() { return '<div class="online menubtn"><div class="row"><button type="button" class="alt" id="menuBtn">Menu Principal</button></div></div>'; }
 function wireMenuBtn() { const b = hud.el.panel.querySelector('#menuBtn'); if (b) b.addEventListener('click', (e) => { e.stopPropagation(); toMainMenu(); }); }
@@ -975,6 +996,7 @@ function toLobbyScreen() { net.inMatch = false; for (const r of remote.values())
 function resetGame() {
   if (level.breakables.some((b) => !b.alive)) setLevel(loadedKey, arenaLoaded, true);
   enemies.clear(); effects.clear(); survival.clearPickups();
+  ctx.protestersRiot = false; ctx.playerWanted = false;
   player.maxHp = online() ? 110 : 120; player.regenDelay = online() ? 4 : 4.5; player.regenRate = online() ? 14 : 11;
   player.reset(level.playerStart); player.name = myName; player.lastHitBy = null; player.lastHit = null; enemies.mods.speed = 1; enemies.mods.damage = 1; hud.setModifier(''); hud.setBoss(null, null); game.boss = null; endFocus(); game.katanaStreak = 0;
   game.score = 0; game.kills = 0; game.combo = 0; game.wave = 0; game.intermission = 0; game.queue = []; game.time = 0; game.over = null; game.matchT = 0; hud.setScore(0, 0); hud.setTimer(''); hud.setPvpScore(null); hud.setWave(1, 0); hud.setBoard(null);
@@ -1010,7 +1032,7 @@ function startMatch(late, spawnIdx, forcedMap) {
   const chosenMap = knownMap(lobby.map || mapKey);
   lobby.map = chosenMap;
   net.inMatch = true; game.mode = 'ffa'; enemies.mirror = !net.isHost;
-  setLevel(chosenMap, true); resetGame(); matchLeft = FFA_TIME; clockT = 0; game.clockStarted = false;
+  setLevel(chosenMap, true); resetGame(); matchLeft = FFA_TIME; clockT = 0; game.clockStarted = true; clockRunning = true;
   // nobody sends snapshots in the lobby, so the silence clock restarts here or the sweep would drop everyone
   for (const r of remote.values()) r.lastSeen = performance.now();
   if (!scores.size) for (const [id, p] of lobby.players) scores.set(id, { name: p.name, kills: 0, deaths: 0 });
@@ -1019,7 +1041,7 @@ function startMatch(late, spawnIdx, forcedMap) {
     if (level.key === 'brasilia') spawnBrasiliaCivilians();
     startWave(1);
   }
-  refreshScoreHud(); hud.message('Mata-Mata Livre', late ? 'Você entrou em uma partida em andamento' : 'Primeiro a ' + FFA_TARGET + ' eliminações · Limite de ' + Math.round(FFA_TIME / 60) + ' min · Cada um por si', 3);
+  refreshScoreHud(); hud.message('Mata-Mata Livre', late ? 'Você entrou em uma partida em andamento' : 'Mata-Mata até acabar o tempo (' + Math.round(FFA_TIME / 60) + ' min) · Junto com os Bots!', 3);
   hud.tip(`Segure <b>${hud.key('score')}</b> para ver o placar`, 5);
   // a match started by someone else's click cannot grab the mouse: ask for a click
   setTimeout(() => { if (game.state === 'play' && !input.pointerLocked && !input.usingGamepad) { game.menu = true; showClickToPlay(); } }, 250);

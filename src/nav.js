@@ -61,12 +61,13 @@ export class NavGrid {
       for (const b of _q) if (!b.data.noNav) tops.add(b.max.y);
       for (const y of [...tops].sort((a, b) => a - b)) {
         if (y < -5 || y > 70) continue;
-        _min.set(x - 0.3, y + 0.5, z - 0.3); _max.set(x + 0.3, y + 1.85, z + 0.3);
+        _min.set(x - 0.22, y + 0.72, z - 0.22); _max.set(x + 0.22, y + 1.85, z + 0.22);
         if (w.overlapsAABB(_min, _max)) continue;
         const id = this.nodes.length; this.nodes.push({ x, y, z, ix, iz, links: [] });
         const ci = iz * this.nx + ix; (this.cells[ci] || (this.cells[ci] = [])).push(id);
       }
     }
+    const maxRise = Math.max(1.35, c * 1.22);
     for (const A of this.nodes) {
       for (const [dx, dz] of DIRS) {
         const nix = A.ix + dx, niz = A.iz + dz;
@@ -74,7 +75,7 @@ export class NavGrid {
         const cand = this.cells[niz * this.nx + nix]; if (!cand) continue;
         for (const id of cand) {
           const B = this.nodes[id]; const dy = B.y - A.y;
-          if (dy > 1.35 || dy < -8) continue;
+          if (dy > maxRise || dy < -8) continue;
           if (dx !== 0 && dz !== 0 && (!this._hasNodeNear(A.ix + dx, A.iz, A.y, B.y) || !this._hasNodeNear(A.ix, A.iz + dz, A.y, B.y))) continue;
           if (!this._linkClear(A, B)) continue;
           if (dy < -0.6 && !this._dropClear(A, B)) continue;
@@ -90,15 +91,16 @@ export class NavGrid {
   _hasNodeNear(ix, iz, y1, y2) {
     if (ix < 0 || iz < 0 || ix >= this.nx || iz >= this.nz) return false;
     const cand = this.cells[iz * this.nx + ix]; if (!cand) return false;
-    for (const id of cand) { const y = this.nodes[id].y; if (Math.abs(y - y1) < 0.75 || Math.abs(y - y2) < 0.75) return true; }
+    const tol = Math.max(0.75, this.cell * 0.55);
+    for (const id of cand) { const y = this.nodes[id].y; if (Math.abs(y - y1) < tol || Math.abs(y - y2) < tol) return true; }
     return false;
   }
   _linkClear(A, B) {
-    // Start above knee height so the next stair tread does not read as a wall; railings are
+    // Start above knee/tread height so the next stair tread does not read as a wall; railings are
     // a metre tall and still block, which is what keeps enemies off balconies they cannot reach.
     const yBase = Math.max(A.y, B.y);
-    _min.set(Math.min(A.x, B.x) - 0.25, yBase + 0.5, Math.min(A.z, B.z) - 0.25);
-    _max.set(Math.max(A.x, B.x) + 0.25, yBase + 1.7, Math.max(A.z, B.z) + 0.25);
+    _min.set(Math.min(A.x, B.x) - 0.15, yBase + 0.68, Math.min(A.z, B.z) - 0.15);
+    _max.set(Math.max(A.x, B.x) + 0.15, yBase + 1.72, Math.max(A.z, B.z) + 0.15);
     return !this.world.overlapsAABB(_min, _max);
   }
   _dropClear(A, B) {
@@ -121,7 +123,7 @@ export class NavGrid {
     return best >= 0 ? best : bestAny;
   }
   // A* between two world positions; returns array of Vector3 or null
-  findPath(from, to, maxExpand = 3500) {
+  findPath(from, to, maxExpand = 2200) {
     const start = this.nearestNode(from, 3, 3), goal = this.nearestNode(to, 4, 8);
     if (start < 0 || goal < 0) return null;
     const nodes = this.nodes, gen = this._gen, closed = this._closed, g = this._g, fromArr = this._from;

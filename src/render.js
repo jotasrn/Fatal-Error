@@ -233,15 +233,15 @@ void main() {
     if (uNotebook > 0.5 && s.r >= 0.0 && s.r <= 0.995) {
       surf = mix(uPaper, surf, 0.68);
     }
-    // Gentle atmospheric aerial perspective on distant buildings (> 110 m) so Brasília stays crisp
-    float haze = smoothstep(110.0, 420.0, d) * 0.30;
+    // Gentle atmospheric aerial perspective on very distant buildings (> 160 m) so giant Brasília stays crisp
+    float haze = smoothstep(160.0, 680.0, d) * 0.28;
     col = mix(surf, skyCol, haze);
   }
 
   // Crisp dark ink outline (tinted subtly by the front object's ink colour)
   int eId = int(inkId + 0.5);
   vec3 outlineCol = baseInk(eId) * 0.22 + vec3(0.05, 0.06, 0.09);
-  float fadeE = mix(1.0, 0.42, smoothstep(45.0, 280.0, dFront));
+  float fadeE = mix(1.0, 0.38, smoothstep(55.0, 420.0, dFront));
   col = mix(col, outlineCol, clamp(edge, 0.0, 1.0) * fadeE);
 
   // Hurt / low-HP vignette, flash & slow-motion tint
@@ -281,7 +281,7 @@ export class InkRenderer {
     canvas.addEventListener('webglcontextrestored', () => { this.lost = false; this.resize(); });
 
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(80, 1, 0.08, 560);
+    this.camera = new THREE.PerspectiveCamera(80, 1, 0.08, 820);
     const depthTexture = new THREE.DepthTexture(2, 2);
     depthTexture.format = THREE.DepthFormat;
     depthTexture.type = THREE.FloatType;

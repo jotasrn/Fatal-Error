@@ -36,7 +36,13 @@ export class Projectiles {
     const speed = p.vel.length() * 1.6; if (target) _d.subVectors(target.center, p.pos).normalize(); else _d.copy(player.forward);
     p.vel.copy(_d).multiplyScalar(speed); mgr.ctx.effects.sparks(p.pos, _d, INK.ORANGE, 10, 9); mgr.ctx.effects.strokeBurst(p.pos, INK.BLUE, 8, 4, { life: 0.2 });
   }
-  _burst(p, point) { const ctx = this.mgr.ctx; ctx.effects.explosion(point, 2.5, INK.BLACK); audio.explosion(point); const P = ctx.player; const d = P.center.distanceTo(point); if (d < 3.5 && P.alive) { P.takeDamage(p.dmg * (1 - d / 3.5), point); P.knockback(_v.subVectors(P.center, point).normalize(), 6); } if (!this.mgr.mirror) this.mgr.blastEnemies(point, 3.5, p.dmg * 1.5, p.owner); }
+  _burst(p, point) {
+    const ctx = this.mgr.ctx; ctx.effects.explosion(point, 2.5, INK.BLACK); audio.explosion(point);
+    const ignorePlayers = p.owner && ((p.owner.T.isPolice && !ctx.playerWanted) || (p.owner.T.isProtester && !ctx.protestersRiot));
+    const P = ctx.player; const d = P.center.distanceTo(point);
+    if (!ignorePlayers && d < 3.5 && P.alive) { P.takeDamage(p.dmg * (1 - d / 3.5), point); P.knockback(_v.subVectors(P.center, point).normalize(), 6); }
+    if (!this.mgr.mirror) this.mgr.blastEnemies(point, 3.5, p.dmg * 1.5, p.owner);
+  }
   update(dt) {
     const mgr = this.mgr, ctx = mgr.ctx, world = ctx.world; const list = this.list; let n = 0;
     for (let i = 0; i < list.length; i++) {
@@ -47,17 +53,21 @@ export class Projectiles {
       if (hw) { if (p.blast) this._burst(p, hw.point); else { ctx.effects.bulletImpact(hw.point, hw.normal, p.ink); if (Math.random() < 0.5) audio.bulletImpact(hw.point); } continue; }
       if (!p.deflected) {
         // every peer runs the same projectile; only the local player takes damage from it here,
-        // other players just make it disappear on this screen (their own client handles them)
+        // other players just make it disappear on this screen (their own client handles them).
+        // Police / protesters NEVER hit innocent players while fighting each other!
         let consumed = false;
-        for (const P of mgr.targets()) {
-          if (!P.alive) continue;
-          const catchR = Math.max(p.blast ? 0.9 : 0.5, P.isLocal ? P.blockRadius : 0);
-          if (!this._segHitsPlayer(p.prev, p.pos, P, catchR)) continue;
-          if (P.isLocal) {
-            const def = P.tryDeflect(p);
-            if (def) { if (def.ret) { this._deflect(p, P, def.perfect); list[n++] = p; } else { p.deflected = true; ctx.effects.strokeBurst(p.pos, INK.RED, 5, 6, { life: 0.18, size: 0.03 }); } consumed = true; break; }
-            if (this._segHitsPlayer(p.prev, p.pos, P, p.blast ? 0.9 : 0.5)) { if (p.blast) this._burst(p, p.pos); else P.takeDamage(p.dmg, p.origin); consumed = true; break; }
-          } else if (this._segHitsPlayer(p.prev, p.pos, P, p.blast ? 0.9 : 0.5)) { consumed = true; break; }
+        const ignorePlayers = p.owner && ((p.owner.T.isPolice && !ctx.playerWanted) || (p.owner.T.isProtester && !ctx.protestersRiot));
+        if (!ignorePlayers) {
+          for (const P of mgr.targets()) {
+            if (!P.alive) continue;
+            const catchR = Math.max(p.blast ? 0.9 : 0.5, P.isLocal ? P.blockRadius : 0);
+            if (!this._segHitsPlayer(p.prev, p.pos, P, catchR)) continue;
+            if (P.isLocal) {
+              const def = P.tryDeflect(p);
+              if (def) { if (def.ret) { this._deflect(p, P, def.perfect); list[n++] = p; } else { p.deflected = true; ctx.effects.strokeBurst(p.pos, INK.RED, 5, 6, { life: 0.18, size: 0.03 }); } consumed = true; break; }
+              if (this._segHitsPlayer(p.prev, p.pos, P, p.blast ? 0.9 : 0.5)) { if (p.blast) this._burst(p, p.pos); else P.takeDamage(p.dmg, p.origin); consumed = true; break; }
+            } else if (this._segHitsPlayer(p.prev, p.pos, P, p.blast ? 0.9 : 0.5)) { consumed = true; break; }
+          }
         }
         // Dano entre facções (Polícia vs Manifestantes) - Host autoritativo
         if (!consumed && !mgr.mirror && p.owner && (p.owner.T.isPolice || p.owner.T.isProtester)) {

@@ -127,17 +127,20 @@ export function createSurvival(ctx, deps) {
     pickupClock = 0;
   }
 
-  // ---------------- solo waves ----------------
+  // ---------------- solo & ffa waves ----------------
   const ROSTER = [
     { t: 'grunt', from: 1, w: 10 },
-    { t: 'rusher', from: 2, w: 6 },
+    { t: 'rusher', from: 1, w: 5 },
+    { t: 'commando', from: 2, w: 6 },
     { t: 'hound', from: 2, w: 5 },
     { t: 'bomber', from: 3, w: 3 },
     { t: 'bat', from: 3, w: 4 },
     { t: 'sniper', from: 3, w: 4 },
+    { t: 'plasmatrooper', from: 4, w: 5 },
     { t: 'flyer', from: 4, w: 4 },
     { t: 'spider', from: 4, w: 4 },
     { t: 'heavy', from: 5, w: 4 },
+    { t: 'rocketeer', from: 5, w: 3 },
     { t: 'shield', from: 6, w: 4 },
     { t: 'elitesniper', from: 6, w: 3 },
   ];
@@ -156,18 +159,18 @@ export function createSurvival(ctx, deps) {
   ];
   const bossFor = (n) => BOSSES[(Math.floor(n / 5) - 1) % BOSSES.length];
   const enemyName = (t) => ({ boss: 'O Desenhista', eraser: 'A Borracha', inkblot: 'A Mancha de Tinta' })[t] || t.toUpperCase();
+  const isBigMap = () => (ctx.level.bounds.maxZ - ctx.level.bounds.minZ) > 400;
   function startWave(n) {
-    game.wave = n; game.queue = []; game.spawnT = 2; game.intermission = 0; game.boss = null; hud.setBoss(null, null);
+    game.wave = n; game.queue = []; game.spawnT = 1.4; game.intermission = 0; game.boss = null; hud.setBoss(null, null);
     const boss = n > 0 && n % 5 === 0;
     const allowed = boss || n < 4 ? 1 : n < 6 ? 3 : MODIFIERS.length; const mod = MODIFIERS[Math.floor(Math.random() * allowed)];
     mod.apply(); enemies.mods.damage *= 1.2; hud.setModifier(mod.name);
     const swarm = mod.name.startsWith('Enxame');
-    // the crowd on screen and the wave size both keep growing with the wave number
-    // hard ceiling: past ~24 wave bots on screen the frame rate collapses on modest PCs (and every
-    // bot is also streamed to each client), so late waves get longer, not denser
-    game.maxAlive = Math.min(4 + Math.floor(n * 0.9) + (swarm ? 3 : 0), (swarm ? 22 : 18) + Math.floor(n / 3), 24);
-    let count = Math.round(Math.min(5 + n * 2.0, 32 + n) * (swarm ? 1.35 : 1));
-    if (boss) { count = 7 + n; game.maxAlive += 2 + Math.floor(n / 5); game.queue.push(bossFor(n)); }
+    const big = isBigMap();
+    const waveCap = big ? 32 : 24;
+    game.maxAlive = Math.min((big ? 8 : 5) + Math.floor(n * 1.15) + (swarm ? 4 : 0), (swarm ? 26 : 22) + Math.floor(n / 2), waveCap);
+    let count = Math.round(Math.min((big ? 9 : 6) + n * 2.4, (big ? 44 : 34) + n) * (swarm ? 1.35 : 1));
+    if (boss) { count = (big ? 10 : 7) + n; game.maxAlive = Math.min(waveCap + 2, game.maxAlive + 2 + Math.floor(n / 5)); game.queue.push(bossFor(n)); }
     const pool = ROSTER.filter((r) => n >= r.from).map((r) => ({ t: r.t, w: r.w * Math.min(1, 0.3 + 0.25 * (n - r.from)) }));
     const total = pool.reduce((a, r) => a + r.w, 0);
     for (let i = 0; i < count; i++) { let r = Math.random() * total, t = pool[0].t; for (const c of pool) { r -= c.w; if (r <= 0) { t = c.t; break; } } game.queue.push(t); }
@@ -176,39 +179,50 @@ export function createSurvival(ctx, deps) {
     audio.wave();
     if (n <= tips().length) hud.tip(tips()[n - 1], 7);
     player.grenades = Math.min(player.maxGrenades, player.grenades + 1);
-    for (let i = 0; i < 7; i++) spawnPickup(i < 5 ? 'ammo' : 'health', choose(ctx.level.pickups));
-    const checkpoint = getCheckpoint();
-    if (n >= 5 && n % 5 === 0 && n > checkpoint) { setCheckpoint(n); hud.kill('Ponto de Controle · Onda ' + n, 0); }
+    const nPick = big ? 11 : 7;
+    for (let i = 0; i < nPick; i++) spawnPickup(i < Math.ceil(nPick * 0.7) ? 'ammo' : 'health', choose(ctx.level.pickups));
     if (net.active && net.isHost) net.send('ewave', { wave: n, name: boss ? enemyName(bossFor(n)) : (mod.name || '') });
   }
   function pickSpawn(type) {
     const level = ctx.level;
-    const spots = (type === 'sniper' || type === 'elitesniper') ? (level.snipers && level.snipers.length ? level.snipers : level.spawns) : level.spawns; const pp = player.body.pos;
-    if (type === 'flyer' || type === 'bat') { const a = Math.random() * Math.PI * 2, r = 22 + Math.random() * 10; return new THREE.Vector3(clamp(pp.x + Math.cos(a) * r, level.bounds.minX + 4, level.bounds.maxX - 4), pp.y + 12 + Math.random() * 6, clamp(pp.z + Math.sin(a) * r, level.bounds.minZ + 4, level.bounds.maxZ - 4)); }
+    const spots = (type === 'sniper' || type === 'elitesniper') ? (level.snipers && level.snipers.length ? level.snipers : level.spawns) : level.spawns;
+    const aliveTargets = ctx.targets ? ctx.targets().filter((t) => t && t.alive && t.body) : [];
+    const anchor = aliveTargets.length ? choose(aliveTargets) : player;
+    const pp = anchor.body.pos;
+    if (type === 'flyer' || type === 'bat') { const a = Math.random() * Math.PI * 2, r = 22 + Math.random() * 12; return new THREE.Vector3(clamp(pp.x + Math.cos(a) * r, level.bounds.minX + 4, level.bounds.maxX - 4), pp.y + 12 + Math.random() * 6, clamp(pp.z + Math.sin(a) * r, level.bounds.minZ + 4, level.bounds.maxZ - 4)); }
     if (BOSSES.includes(type)) {
       const fits = (sp) => !world.overlapsAABB({ x: sp.x - 1.1, y: sp.y + 0.1, z: sp.z - 1.1 }, { x: sp.x + 1.1, y: sp.y + 5.2, z: sp.z + 1.1 });
-      const open = spots.filter((sp) => fits(sp)); const far = open.filter((sp) => sp.distanceTo(pp) > 20);
-      if (far.length) return choose(far).clone(); if (open.length) return choose(open).clone();
-      for (let i = 0; i < 200; i++) { const a = Math.random() * Math.PI * 2, r = 22 + Math.random() * 18; const c = new THREE.Vector3(clamp(pp.x + Math.cos(a) * r, -44, 44), 0, clamp(pp.z + Math.sin(a) * r, -44, 44)); c.y = world.groundBelow(c.x, 30, c.z, 40); if (c.y > -3 && fits(c)) return c; }
+      const open = spots.filter((sp) => fits(sp));
+      const near = open.filter((sp) => { const d = sp.distanceTo(pp); return d > 20 && d < 85; });
+      if (near.length) return choose(near).clone();
+      const far = open.filter((sp) => sp.distanceTo(pp) > 20);
+      if (far.length) return choose(far).clone();
+      if (open.length) return choose(open).clone();
+      for (let i = 0; i < 200; i++) { const a = Math.random() * Math.PI * 2, r = 22 + Math.random() * 24; const c = new THREE.Vector3(clamp(pp.x + Math.cos(a) * r, level.bounds.minX + 6, level.bounds.maxX - 6), 0, clamp(pp.z + Math.sin(a) * r, level.bounds.minZ + 6, level.bounds.maxZ - 6)); c.y = world.groundBelow(c.x, 30, c.z, 40); if (c.y > -3 && fits(c)) return c; }
       return level.playerStart.clone();
     }
-    let cands = spots.filter((s) => { const d = s.distanceTo(pp); return d > 14 && d < 48; });
+    const maxR = isBigMap() ? 75 : 48;
+    let cands = spots.filter((s) => { const d = s.distanceTo(pp); return d > 14 && d < maxR; });
     if (cands.length < 2) cands = spots.filter((s) => s.distanceTo(pp) > 14);
-    const hidden = cands.filter((s) => !world.hasLineOfSight(player.eye, new THREE.Vector3(s.x, s.y + 1.2, s.z)));
+    const eye = anchor.eye || player.eye;
+    const hidden = cands.filter((s) => !world.hasLineOfSight(eye, new THREE.Vector3(s.x, s.y + 1.2, s.z)));
     return (choose(hidden.length ? hidden : cands.length ? cands : spots)).clone();
   }
   function updateWaves(dt) {
     if (game.intermission > 0) {
-      game.intermission -= dt; hud.setTimer('Próxima onda em ' + Math.ceil(game.intermission) + 's');
-      if (game.intermission <= 0) { hud.setTimer(''); startWave(game.wave + 1); }
+      game.intermission -= dt;
+      if (!online()) hud.setTimer('Próxima onda em ' + Math.ceil(game.intermission) + 's');
+      if (game.intermission <= 0) { if (!online()) hud.setTimer(''); startWave(game.wave + 1); }
       return;
     }
     const aliveWaveCount = enemies.waveAlive !== undefined ? enemies.waveAlive : enemies.alive;
+    const totalCap = isBigMap() ? 58 : 34;
     // total budget across wave + ambient bots (protesters, police, civilians)
-    if (game.queue.length && aliveWaveCount < game.maxAlive && enemies.alive < 32) {
+    if (game.queue.length && aliveWaveCount < game.maxAlive && enemies.alive < totalCap) {
       game.spawnT -= dt;
       if (game.spawnT <= 0) {
-        game.spawnT = Math.max(0.7, 2.9 - game.wave * 0.13); const t = game.queue.shift(); const e = enemies.spawn(t, pickSpawn(t));
+        game.spawnT = Math.max(0.55, (isBigMap() ? 2.1 : 2.6) - game.wave * 0.13);
+        const t = game.queue.shift(); const e = enemies.spawn(t, pickSpawn(t));
         if (e.T.boss) { const mul = 1 + 0.35 * Math.floor((game.wave - 5) / 15); e.hp = e.maxHp = Math.round(e.T.hp * mul); }
       }
     }
