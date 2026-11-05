@@ -56,6 +56,8 @@ let myName = (localStorage.getItem('doodle_name') || '').slice(0, 14) || 'Doodle
 const settings = { sens: Number(localStorage.getItem('doodle_sens') || 100), invert: localStorage.getItem('doodle_invert') === '1' };
 
 const hudPrefs = {
+  gfxQuality: localStorage.getItem('doodle_gfx_quality') || 'medium',
+  notebookMode: localStorage.getItem('doodle_notebook') === '1',
   chColor: localStorage.getItem('doodle_ch_color') || '#d02030',
   chSize: Number(localStorage.getItem('doodle_ch_size') || '1'),
   chDot: localStorage.getItem('doodle_ch_dot') !== '0',
@@ -64,8 +66,14 @@ const hudPrefs = {
   killfeed: localStorage.getItem('doodle_hud_kf') !== '0',
   damageNums: localStorage.getItem('doodle_hud_dmg') !== '0',
 };
+R.setQuality(hudPrefs.gfxQuality);
+R.setNotebookMode(hudPrefs.notebookMode);
 
 function applyHudSettings() {
+  if (R.quality !== hudPrefs.gfxQuality) R.setQuality(hudPrefs.gfxQuality);
+  R.setNotebookMode(hudPrefs.notebookMode);
+  effects.maxParticles = hudPrefs.gfxQuality === 'high' ? 300 : hudPrefs.gfxQuality === 'low' ? 100 : 220;
+
   document.documentElement.style.setProperty('--ch-color', hudPrefs.chColor);
   document.documentElement.style.setProperty('--ch-scale', String(hudPrefs.chSize));
   
@@ -84,6 +92,8 @@ function applyHudSettings() {
   const dmg = document.querySelector('.dmg-ind');
   if (dmg) dmg.style.display = hudPrefs.damageNums ? 'block' : 'none';
 
+  localStorage.setItem('doodle_gfx_quality', hudPrefs.gfxQuality);
+  localStorage.setItem('doodle_notebook', hudPrefs.notebookMode ? '1' : '0');
   localStorage.setItem('doodle_ch_color', hudPrefs.chColor);
   localStorage.setItem('doodle_ch_size', String(hudPrefs.chSize));
   localStorage.setItem('doodle_ch_dot', hudPrefs.chDot ? '1' : '0');
@@ -693,6 +703,23 @@ function settingsHTML() {
   ).join('');
 
   return `<div class="settings" id="settings">
+    <div class="settings-section-title">✨ Qualidade Gráfica & Desempenho</div>
+    <div class="settings-grid">
+      <label class="settings-row">Qualidade Gráfica
+        <select id="setGfxQ" style="font-family:inherit; font-size:15px; border:2px solid var(--ink); border-radius:5px; padding:2px 8px; background:var(--paper); color:var(--ink);">
+          <option value="high" ${hudPrefs.gfxQuality === 'high' ? 'selected' : ''}>Alta · Ultra Nítido HD</option>
+          <option value="medium" ${hudPrefs.gfxQuality === 'medium' ? 'selected' : ''}>Equilibrada · Nativo HD</option>
+          <option value="low" ${hudPrefs.gfxQuality === 'low' ? 'selected' : ''}>Desempenho · FPS Máximo</option>
+        </select>
+      </label>
+      <label class="settings-row">Estilo Visual
+        <select id="setVisualStyle" style="font-family:inherit; font-size:15px; border:2px solid var(--ink); border-radius:5px; padding:2px 8px; background:var(--paper); color:var(--ink);">
+          <option value="hd" ${!hudPrefs.notebookMode ? 'selected' : ''}>Colorido Cel-Shaded HD</option>
+          <option value="notebook" ${hudPrefs.notebookMode ? 'selected' : ''}>Caderno Clássico</option>
+        </select>
+      </label>
+    </div>
+
     <div class="settings-section-title">⚙️ Controles & Som</div>
     <div class="settings-grid">
       <label class="settings-row">Sensibilidade do Mouse <input type="range" id="setSens" min="25" max="250" step="5" value="${settings.sens}"><b id="setSensV">${settings.sens}%</b></label>
@@ -744,6 +771,11 @@ function wireSettings() {
   box.querySelector('#setFps').addEventListener('change', (e) => { perf.show = e.target.checked; try { localStorage.setItem('doodle_fps', perf.show ? '1' : '0'); } catch (err) { /* ignore */ } });
   box.querySelector('#setMap').addEventListener('change', (e) => { if (minimap) minimap.setEnabled(e.target.checked); });
   box.querySelector('#setMus').addEventListener('change', (e) => { musicWanted = e.target.checked; localStorage.setItem('doodle_music', musicWanted ? '1' : '0'); audio.musicOn(musicWanted); });
+
+  const gfxQ = box.querySelector('#setGfxQ');
+  if (gfxQ) gfxQ.addEventListener('change', (e) => { hudPrefs.gfxQuality = e.target.value; applyHudSettings(); });
+  const visSt = box.querySelector('#setVisualStyle');
+  if (visSt) visSt.addEventListener('change', (e) => { hudPrefs.notebookMode = e.target.value === 'notebook'; applyHudSettings(); });
 
   // Cor da mira via paleta
   box.querySelectorAll('.ch-swatch').forEach(sw => {
@@ -1019,10 +1051,11 @@ showStart();
 
 // ---------------- loop ----------------
 let last = performance.now(), boardToggle = false, lockTipT = 0.5, musicHealT = 2;
-function tick(now) { requestAnimationFrame(tick); perfFrame(now); step(now); }
+function tick(now) { requestAnimationFrame(tick); perfFrame(now); const t0 = performance.now(); step(now); perf.js += performance.now() - t0; perf.jsN++; }
 // ---- performance meter: an on-screen FPS readout (Settings > Mostrar FPS) and, in the desktop
 // build, a line in fatal-error.log every 15 s of play with real frame times from this machine
-const perf = { last: 0, times: [], logT: 0, show: localStorage.getItem('doodle_fps') === '1', el: null, uiT: 0 };
+const perf = { last: 0, times: [], logT: 0, show: localStorage.getItem('doodle_fps') === '1', el: null, uiT: 0, js: 0, jsN: 0, rnd: 0 };
+{ const r0 = R.render.bind(R); R.render = (...a) => { const t = performance.now(); r0(...a); perf.rnd += performance.now() - t; }; }
 function perfFrame(now) {
   const ms = perf.last ? now - perf.last : 16.7; perf.last = now; if (ms > 1000) return;
   perf.times.push(ms); if (perf.times.length > 1200) perf.times.splice(0, perf.times.length - 1200);
@@ -1036,7 +1069,10 @@ function perfFrame(now) {
   if (playing && perf.logT > 15000 && window.FE_LOG && window.FE_LOG.info) {
     perf.logT = 0; const t = perf.times.slice(-900).sort((a, b) => a - b); const avg = t.reduce((a, b) => a + b, 0) / t.length;
     const info = R.renderer.info.render;
-    window.FE_LOG.info(`perf map=${level.key} fps=${(1000 / avg).toFixed(1)} p50=${t[Math.floor(t.length * 0.5)].toFixed(1)}ms p95=${t[Math.floor(t.length * 0.95)].toFixed(1)}ms pior=${t[t.length - 1].toFixed(0)}ms bots=${enemies.alive} calls=${info.calls} tri=${info.triangles} ratio=${R.pixelRatio} tela=${innerWidth}x${innerHeight}`);
+    const jsMs = perf.jsN ? perf.js / perf.jsN : 0, rMs = perf.jsN ? perf.rnd / perf.jsN : 0; perf.js = 0; perf.rnd = 0; perf.jsN = 0;
+    // cpu = whole JS frame (logic + draw submission), render = draw submission part; if cpu is far below the
+    // frame time, the limit is the GPU / presentation (vsync), not the game code
+    window.FE_LOG.info(`perf map=${level.key} cpu=${jsMs.toFixed(1)}ms render=${rMs.toFixed(1)}ms fps=${(1000 / avg).toFixed(1)} p50=${t[Math.floor(t.length * 0.5)].toFixed(1)}ms p95=${t[Math.floor(t.length * 0.95)].toFixed(1)}ms pior=${t[t.length - 1].toFixed(0)}ms bots=${enemies.alive} calls=${info.calls} tri=${info.triangles} ratio=${R.pixelRatio} tela=${innerWidth}x${innerHeight}`);
   }
 }
 { // which GPU WebGL is really drawing on (software rendering here would explain everything)
@@ -1154,7 +1190,17 @@ function stepInner(now) {
   for (const a of level.animated) a.update(game.time);
   audio.setListener(player.eye, player.right);
   const w = player.weapon; if (w.isGun) hud.setAmmo(w.mag, w.reserve, w.magSize, w.reloading); else hud.setKatana();
-  hud.setSlots(player.weapons.map((wp, i) => ({ name: wp.name, active: i === player.weaponIndex, ammo: wp.owned ? (wp.isGun ? wp.mag + '/' + wp.reserve : '∞') : 'Bloqueada', empty: wp.isGun && wp.mag === 0 && wp.reserve === 0, locked: !wp.owned })));
+  {
+    let slotSig = player.weaponIndex + '|';
+    for (let i = 0; i < player.weapons.length; i++) {
+      const wp = player.weapons[i];
+      slotSig += (wp.owned ? (wp.isGun ? wp.mag + '/' + wp.reserve : 'i') : 'x') + ',';
+    }
+    if (slotSig !== hud._lastSlotSig) {
+      hud._lastSlotSig = slotSig;
+      hud.setSlots(player.weapons.map((wp, i) => ({ name: wp.name, active: i === player.weaponIndex, ammo: wp.owned ? (wp.isGun ? wp.mag + '/' + wp.reserve : '∞') : 'Bloqueada', empty: wp.isGun && wp.mag === 0 && wp.reserve === 0, locked: !wp.owned })));
+    }
+  }
   hud.setGrenades(player.grenades); hud.setGrappleStamina(player.grapStam); hud.setHealth(player.hp, player.maxHp); hud.setSpread(w.spreadPx); hud.update(dt);
   if (online()) hud.setFocusMeter(playing, player.grapStam, false, 'Gancho');
   else hud.setFocusMeter(playing && (w.kind === 'katana' || game.katanaStreak > 0 || game.focus.active), game.focus.active ? 1 : clamp(game.katanaStreak / KATANA_CHARGE_KILLS, 0, 1), game.focus.active, 'Katana');

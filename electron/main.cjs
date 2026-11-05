@@ -12,9 +12,24 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const Hyperswarm = require('hyperswarm');
 
-// No GPU/compositor command-line switches: forcing the discrete GPU (1.0.4-1.0.8) made machines
-// whose monitor hangs off the integrated GPU render on one adapter and copy every frame to the
-// other, which shows up as stutter and a laggy mouse. Chromium's own adapter choice is used again.
+// prefer the discrete GPU on dual-GPU laptops, enable GPU rasterization, and keep the game running
+// at full speed when the window is not focused (a host that alt-tabs must not stall everyone else's match)
+app.commandLine.appendSwitch('force_high_performance_gpu');
+app.commandLine.appendSwitch('ignore-gpu-blocklist');
+app.commandLine.appendSwitch('enable-gpu-rasterization');
+app.commandLine.appendSwitch('enable-zero-copy');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+// Optional Chromium switches from <userData>/gpu-flags.txt (one per line, "name" or "name=value",
+// "#" comments) so graphics settings can be tried on a given PC without a new build.
+try {
+  const f = path.join(app.getPath('userData'), 'gpu-flags.txt');
+  for (const line of fs.readFileSync(f, 'utf8').split(/\r?\n/)) {
+    const t = line.trim(); if (!t || t.startsWith('#')) continue;
+    const i = t.indexOf('='); if (i < 0) app.commandLine.appendSwitch(t); else app.commandLine.appendSwitch(t.slice(0, i), t.slice(i + 1));
+  }
+} catch { /* no flags file */ }
 
 function logLine(msg) {
   try {
@@ -24,7 +39,6 @@ function logLine(msg) {
   } catch { /* logging must never crash the game */ }
 }
 ipcMain.on('log:error', (_e, msg) => logLine('renderer ' + msg));
-ipcMain.on('log:info', (_e, msg) => logLine('info ' + msg));
 process.on('uncaughtException', (err) => logLine('main ' + (err && err.stack || err)));
 
 let win = null;
@@ -82,10 +96,6 @@ async function startSession({ code, asHost }) {
     socket.on('error', drop);
   });
 
-  // Everyone both announces and looks up (full mesh): it is far faster and more reliable to form
-  // the link than a server-only/client-only split. The star shape the host-authoritative game
-  // wants is enforced in src/net.js instead — only the host answers a hello with a welcome, and a
-  // client ignores data from any peer that is not the host, so client↔client links sit idle.
   const disc = swarm.join(topicFor(code), { server: true, client: true });
   await disc.flushed();
   return selfId;
@@ -109,7 +119,6 @@ function createWindow() {
       contextIsolation: true, nodeIntegration: false, sandbox: false, backgroundThrottling: false,
     },
   });
-  // if the page or the GPU process dies, log why and bring the game back instead of a dead window
   win.webContents.on('render-process-gone', (_e, d) => { logLine('render-process-gone ' + JSON.stringify(d)); if (win && !win.isDestroyed()) setTimeout(() => win && !win.isDestroyed() && win.reload(), 500); });
   win.webContents.on('unresponsive', () => logLine('window unresponsive'));
   win.setMenuBarVisibility(false);
@@ -119,10 +128,9 @@ function createWindow() {
 
 app.on('child-process-gone', (_e, d) => logLine('child-process-gone ' + JSON.stringify(d)));
 app.whenReady().then(() => {
-  // record which GPU(s) this machine has and what Chromium enabled, for diagnosing performance
-  app.getGPUInfo('basic').then((info) => logLine('gpu ' + JSON.stringify((info && info.gpuDevice) || info))).catch(() => {});
-  try { logLine('gpu-features ' + JSON.stringify(app.getGPUFeatureStatus())); } catch { /* ignore */ }
   createWindow();
+  // the feature status settles once the GPU process is up: log it again a few seconds in
+  setTimeout(() => { try { logLine('gpu-features-5s ' + JSON.stringify(app.getGPUFeatureStatus()) + ' switches=' + process.argv.slice(1).join(' ') + ' flags=' + JSON.stringify(app.commandLine.hasSwitch('ignore-gpu-blocklist'))); } catch { /* ignore */ } }, 5000);
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 app.on('window-all-closed', () => { destroySession().finally(() => { if (process.platform !== 'darwin') app.quit(); }); });
