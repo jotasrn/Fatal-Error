@@ -1,0 +1,48 @@
+# Roda em todo push na main/master e em todo Pull Request (modelo Concord).
+# Valida sintaxe, integridade do CSP/importmap, suite de regressao de seguranca,
+# auditoria bloqueante de dependencias (high/critical) e analise estatica CodeQL.
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias (sem scripts de terceiros)
+        run: npm ci --ignore-scripts
+
+      - name: Verificar sintaxe e integridade do CSP
+        run: npm run check
+
+      - name: Testes de seguranca e protocolo P2P
+        run: npm test
+
+      - name: Auditoria bloqueante de vulnerabilidades (high/critical)
+        run: npm audit --audit-level=high
+
+  codeql:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+      - uses: github/codeql-action/analyze@v3
+

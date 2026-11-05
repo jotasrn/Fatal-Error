@@ -1,4 +1,5 @@
-// DOM heads-up display drawn in "pen" style (multiplied over the paper canvas).
+// DOM heads-up display, "cartoon arcade" style: chunky white cards with a dark outline and a hard
+// drop shadow, so every readout stays legible over the bright cel-shaded world.
 export class HUD {
   constructor(root) {
     this.root = root;
@@ -10,16 +11,32 @@ export class HUD {
       <div class="grapple-ret" id="gret"></div><div class="gstam" id="gstam" hidden><i id="gstamfill"></i></div>
       <div class="hitmarker" id="hitmarker"><i></i><i></i></div>
       <div class="dmg-ind" id="dmg"></div>
-      <div class="hud-tl"><div class="score">Pontos <b id="score">0</b></div><div class="money">Dinheiro <b id="money">$300</b></div><div class="money-flash" id="mflash"></div><div class="combo" id="combo"></div><div class="shop-hint" id="shopHintBtn">🛒 [B] Loja de Armas</div></div>
-      <div class="hud-tr"><div class="wave">Onda <b id="wave">1</b></div><div class="modifier" id="modifier"></div><div class="left"><b id="left">0</b> inimigos restantes</div><div class="timer" id="timer"></div><div class="pvpscore" id="pvpscore" hidden></div></div><div class="board" id="board" hidden></div>
+      <div class="hud-tl">
+        <div class="card stat-card"><div class="stat score"><span class="lbl">Pontos</span><b id="score">0</b></div><div class="stat money"><span class="lbl">Dinheiro</span><b id="money">$300</b></div></div>
+        <div class="money-flash" id="mflash"></div><div class="combo" id="combo"></div>
+        <div class="shop-hint" id="shopHintBtn"><kbd>B</kbd> Loja</div>
+      </div>
+      <div class="hud-tr">
+        <div class="card wave-card"><div class="wave"><span class="lbl">Onda</span><b id="wave">1</b></div><div class="left"><b id="left">0</b> inimigos</div></div>
+        <div class="modifier" id="modifier"></div><div class="timer" id="timer"></div><div class="pvpscore" id="pvpscore" hidden></div>
+      </div><div class="board" id="board" hidden></div>
       <div class="bossbar" id="bossbar"><div class="bossname" id="bossname"></div><div class="bar big"><div class="fill red" id="bossfill"></div></div></div>
       <div class="hud-bl">
-        <div class="health"><span>Vida</span><div class="bar"><div class="fill" id="hpfill"></div></div><span id="hpnum">100</span></div>
-        <div class="armor"><span>Colete</span><div class="bar"><div class="fill armor" id="armorfill"></div></div><span id="armornum">0</span></div>
-        <div class="ammo"><b id="mag">30</b><span id="reserve">/120</span><span class="reloading" id="reloading"></span><span class="nades" id="nades" title="Granadas"></span></div>
-        <div class="tally" id="tally"></div>
+        <div class="card vitals">
+          <div class="health"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.5-4.6-9.6-9.2C.9 8.4 2.9 4.5 6.6 4.5c2.2 0 3.6 1.2 5.4 3.1 1.8-1.9 3.2-3.1 5.4-3.1 3.7 0 5.7 3.9 4.2 7.3C19.5 16.4 12 21 12 21z"/></svg></span><div class="bar"><div class="fill" id="hpfill"></div></div><span class="num" id="hpnum">100</span></div>
+          <div class="armor"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l8 3v6.2c0 5-3.4 9.3-8 10.8-4.6-1.5-8-5.8-8-10.8V5l8-3z"/></svg></span><div class="bar"><div class="fill armor" id="armorfill"></div></div><span class="num" id="armornum">0</span></div>
+          <div class="nades-row"><span class="lbl">Granadas</span><span class="nades" id="nades" title="Granadas"></span></div>
+        </div>
       </div>
-      <div class="hud-br"><div class="slots" id="slots"></div><div class="weapon" id="weapon">Rifle</div><div class="hint" id="hint"></div></div>
+      <div class="hud-br">
+        <div class="slots" id="slots"></div>
+        <div class="card weapon-card">
+          <div class="weapon" id="weapon">Rifle</div>
+          <div class="ammo"><b id="mag">30</b><span id="reserve">/120</span></div>
+          <div class="reloading" id="reloading"></div><div class="tally" id="tally"></div>
+        </div>
+        <div class="hint" id="hint"></div>
+      </div>
       <div class="tip" id="tip"></div>
       <div class="message"><div class="msg-main" id="msg"></div><div class="msg-sub" id="msgsub"></div></div>
       <div class="killfeed" id="killfeed"></div>
@@ -27,7 +44,7 @@ export class HUD {
       <div class="buymenu" id="buymenu" hidden>
         <div class="bm-box">
           <div class="bm-header">
-            <div class="bm-title">LOJA DO CADERNO</div>
+            <div class="bm-title">Loja de Armas</div>
             <div class="bm-wallet">Saldo: <b id="bm-wallet-amt">$300</b></div>
           </div>
           <div class="bm-sub">Compre armas e blindagens com o dinheiro acumulado de seus abates</div>
@@ -98,7 +115,12 @@ export class HUD {
     const q = (id) => root.querySelector('#' + id);
     this.el = { crosshair: q('crosshair'), gret: q('gret'), hitmarker: q('hitmarker'), dmg: q('dmg'), score: q('score'), money: q('money'), mflash: q('mflash'), armorfill: q('armorfill'), armornum: q('armornum'), buymenu: q('buymenu'), bmWallet: q('bm-wallet-amt'), bmClose: q('bmCloseBtn'), combo: q('combo'), wave: q('wave'), modifier: q('modifier'), left: q('left'), timer: q('timer'), hpfill: q('hpfill'), hpnum: q('hpnum'), mag: q('mag'), reserve: q('reserve'), reloading: q('reloading'), tally: q('tally'), weapon: q('weapon'), hint: q('hint'), slots: q('slots'), tip: q('tip'), msg: q('msg'), msgsub: q('msgsub'), killfeed: q('killfeed'), screen: q('screen'), panel: q('panel'), nades: q('nades'), scope: q('scope'), focusmark: q('focusmark'), focusmeter: q('focusmeter'), fmfill: q('fmfill'), bossbar: q('bossbar'), bossname: q('bossname'), bossfill: q('bossfill'), pvpscore: q('pvpscore'), board: q('board'), gstam: q('gstam'), gstamfill: q('gstamfill') };
     this._msgT = 0; this._scope = false; this._nades = -1; this._pad = false; this.onDevice = null; this._fmShow = false; this._fmFrac = -1; this._fmReady = false; this._lastTally = -1; this._lastSlots = ''; this._ads = false; this._mode = ''; this.onScreenClick = null; this._tipT = 0;
-    this.el.screen.addEventListener('click', () => { if (this.onScreenClick) this.onScreenClick(); });
+    // Only the dimmed backdrop (outside the panel) and explicit buttons act: clicking on text or on
+    // empty space inside a menu used to start or resume the game by accident.
+    this.el.screen.addEventListener('click', (e) => { if (e.target === this.el.screen && this.onScreenClick) this.onScreenClick('backdrop'); });
+    // capture phase: a "go" button works even inside boxes that stop propagation themselves
+    this.el.panel.addEventListener('click', (e) => { if (e.target.closest('[data-act="go"]') && this.onScreenClick) this.onScreenClick('button'); }, true);
+    this.el.panel.addEventListener('click', (e) => e.stopPropagation());
     this.onBuy = null;
     this.el.buymenu.querySelectorAll('.bm-card').forEach((card) => {
       const btn = card.querySelector('.bm-action');
@@ -218,7 +240,7 @@ export class HUD {
   }
   setSlots(slots) {
     const key = slots.map((s) => `${s.name}|${s.active ? 1 : 0}|${s.ammo}|${s.locked ? 1 : 0}`).join(';'); if (key === this._lastSlots) return; this._lastSlots = key;
-    this.el.slots.innerHTML = slots.map((s, i) => `<div class="slot${s.active ? ' active' : ''}${s.empty ? ' empty' : ''}${s.locked ? ' locked' : ''}"><span class="num">${i + 1}</span>${s.locked ? '🔒 ' : ''}${s.name}<span class="sammo">${s.ammo}</span></div>`).join('');
+    this.el.slots.innerHTML = slots.map((s, i) => `<div class="slot${s.active ? ' active' : ''}${s.empty ? ' empty' : ''}${s.locked ? ' locked' : ''}" title="${s.name}${s.locked ? ' (bloqueada)' : ''}"><span class="num">${i + 1}</span><span class="sname">${s.name}</span><span class="sammo">${s.ammo}</span></div>`).join('');
   }
   setHealth(hp, max) {
     const hInt = Math.ceil(hp);
@@ -256,31 +278,4 @@ export class HUD {
 export const KB_KEYS = { fire: 'LMB', aim: 'RMB', block: 'RMB', jump: 'Espaço', sprint: 'Shift', slide: 'C', dash: 'C', grapple: 'Q', melee: 'F', reload: 'R', grenade: 'G', focus: 'Ambos os botões (ou X)', next: 'Scroll', pause: 'Esc', confirm: 'Espaço', score: 'Tab' };
 export const PAD_KEYS = { fire: 'R2', aim: 'L2', block: 'L2', jump: '✕', sprint: 'L3', slide: '○', dash: '○', grapple: 'L1', melee: 'R1', reload: '□', grenade: 'R3', focus: 'L2 + R2', next: '△', pause: 'Options', confirm: '✕', score: 'Create' };
 export const CONTROLS_HTML = `
-<div class="cols">
-  <div><div class="colhead">Teclado + Mouse</div>
-    <div><b>WASD</b> Mover &nbsp; <b>Mouse</b> Olhar &nbsp; <b>Shift</b> Correr</div>
-    <div><b>LMB</b> Atirar / Cortar &nbsp; <b>RMB</b> Mirar / Bloquear</div>
-    <div><b>Espaço</b> Pular (na parede = Pulo na Parede)</div>
-    <div>No ar pressione <b>Espaço</b> = Pulo Duplo</div>
-    <div><b>C / Ctrl</b> Deslizar no chão · Investida no ar</div>
-    <div><b>Q / E</b> Gancho: clique para balançar, segure para puxar, pule para se lançar</div>
-    <div><b>F</b> Golpe rápido de Katana &nbsp; <b>R</b> Recarregar &nbsp; <b>M</b> Música</div>
-    <div><b>G</b> Granada · Segure para arremessar mais longe</div>
-    <div><b>Tab</b> Placar (Online) &nbsp; <b>Esc</b> Pausa</div>
-    <div><b>Ambos os botões</b> Corte Foco com barra cheia (ou tecla X)</div>
-    <div><b>1-6 / Scroll</b> Revólver · Escopeta · Rifle · Sniper · Bazuca · Katana</div>
-    <div><b>B</b> Loja / Comprar Armas, Coletes e Munição</div>
-  </div>
-  <div><div class="colhead">Controle PS5 / Padrão</div>
-    <div><b>Analógico L</b> Mover &nbsp; <b>Analógico R</b> Olhar &nbsp; <b>L3</b> Correr</div>
-    <div><b>R2</b> Atirar / Cortar &nbsp; <b>L2</b> Mirar / Bloquear</div>
-    <div><b>✕</b> Pular &nbsp; <b>○</b> Deslizar · Investida no ar</div>
-    <div><b>L1</b> Gancho (segure para puxar, ✕ para se lançar)</div>
-    <div><b>L2 + R2</b> Corte Foco com barra cheia</div>
-    <div><b>R1</b> Golpe rápido de Katana e volta para a arma</div>
-    <div><b>□</b> Recarregar &nbsp; <b>△</b> Próxima arma</div>
-    <div><b>R3 / D-Pad Cima</b> Granada · Segure para arremessar longe</div>
-    <div><b>D-Pad Baixo</b> Loja / Comprar Armas & Coletes</div>
-    <div><b>Create</b> Placar (Online) &nbsp; <b>Options</b> Pausa</div>
-  </div>
-</div>`;
+<div class="controls"><div class="ctl-col"><div class="ctl-title">Teclado e mouse</div><div class="ctl-group"><div class="ctl-gname">Movimento</div><div class="ctl"><span class="keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span class="act">Mover</span></div><div class="ctl"><span class="keys"><kbd>Mouse</kbd></span><span class="act">Olhar</span></div><div class="ctl"><span class="keys"><kbd>Shift</kbd></span><span class="act">Correr</span></div><div class="ctl"><span class="keys"><kbd>Espaço</kbd></span><span class="act">Pular · na parede: pulo na parede · no ar: pulo duplo</span></div><div class="ctl"><span class="keys"><kbd>C</kbd> / <kbd>Ctrl</kbd></span><span class="act">Deslizar · no ar: investida</span></div><div class="ctl"><span class="keys"><kbd>Q</kbd> / <kbd>E</kbd></span><span class="act">Gancho · segure para puxar, pule para se lançar</span></div></div><div class="ctl-group"><div class="ctl-gname">Combate</div><div class="ctl"><span class="keys"><kbd>Clique esq.</kbd></span><span class="act">Atirar / cortar</span></div><div class="ctl"><span class="keys"><kbd>Clique dir.</kbd></span><span class="act">Mirar / bloquear</span></div><div class="ctl"><span class="keys"><kbd>R</kbd></span><span class="act">Recarregar</span></div><div class="ctl"><span class="keys"><kbd>F</kbd></span><span class="act">Golpe rápido de katana</span></div><div class="ctl"><span class="keys"><kbd>G</kbd></span><span class="act">Granada · segure para ir mais longe</span></div><div class="ctl"><span class="keys"><kbd>X</kbd></span><span class="act">Corte Foco (barra cheia)</span></div><div class="ctl"><span class="keys"><kbd>1</kbd>–<kbd>8</kbd> / <kbd>Scroll</kbd></span><span class="act">Trocar de arma</span></div></div><div class="ctl-group"><div class="ctl-gname">Geral</div><div class="ctl"><span class="keys"><kbd>B</kbd></span><span class="act">Loja de armas</span></div><div class="ctl"><span class="keys"><kbd>Tab</kbd></span><span class="act">Placar (online)</span></div><div class="ctl"><span class="keys"><kbd>M</kbd></span><span class="act">Música</span></div><div class="ctl"><span class="keys"><kbd>Esc</kbd></span><span class="act">Pausa</span></div></div></div><div class="ctl-col"><div class="ctl-title">Controle (PS5 / padrão)</div><div class="ctl-group"><div class="ctl-gname">Movimento</div><div class="ctl"><span class="keys"><kbd>L</kbd></span><span class="act">Mover</span></div><div class="ctl"><span class="keys"><kbd>R</kbd></span><span class="act">Olhar</span></div><div class="ctl"><span class="keys"><kbd>L3</kbd></span><span class="act">Correr</span></div><div class="ctl"><span class="keys"><kbd>✕</kbd></span><span class="act">Pular</span></div><div class="ctl"><span class="keys"><kbd>○</kbd></span><span class="act">Deslizar · investida</span></div><div class="ctl"><span class="keys"><kbd>L1</kbd></span><span class="act">Gancho</span></div></div><div class="ctl-group"><div class="ctl-gname">Combate</div><div class="ctl"><span class="keys"><kbd>R2</kbd></span><span class="act">Atirar / cortar</span></div><div class="ctl"><span class="keys"><kbd>L2</kbd></span><span class="act">Mirar / bloquear</span></div><div class="ctl"><span class="keys"><kbd>□</kbd></span><span class="act">Recarregar</span></div><div class="ctl"><span class="keys"><kbd>R1</kbd></span><span class="act">Golpe de katana</span></div><div class="ctl"><span class="keys"><kbd>R3</kbd></span><span class="act">Granada</span></div><div class="ctl"><span class="keys"><kbd>L2</kbd>+<kbd>R2</kbd></span><span class="act">Corte Foco</span></div><div class="ctl"><span class="keys"><kbd>△</kbd></span><span class="act">Próxima arma</span></div></div><div class="ctl-group"><div class="ctl-gname">Geral</div><div class="ctl"><span class="keys"><kbd>D-Pad ↓</kbd></span><span class="act">Loja</span></div><div class="ctl"><span class="keys"><kbd>Create</kbd></span><span class="act">Placar (online)</span></div><div class="ctl"><span class="keys"><kbd>Options</kbd></span><span class="act">Pausa</span></div></div></div></div>`;
