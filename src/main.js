@@ -18,7 +18,7 @@ import { HUD, CONTROLS_HTML } from './hud.js';
 import { audio } from './audio.js';
 import { rand, choose, clamp } from './util.js';
 import { createSurvival } from './game/survival.js';
-import { escHtml, sanitizeName, sanitizeText, clampNum, sanitizeVec3, sanitizeShots } from './security.js';
+import { escHtml, sanitizeName, sanitizeText, clampNum, sanitizeVec3, sanitizeShots, sanitizePlayerState } from './security.js';
 
 const esc = escHtml;
 
@@ -634,7 +634,7 @@ net.on('backtolobby', () => { if (!net.isHost) toLobbyScreen(); });
 net.on('pickup', (d) => { if (!net.isHost && d && sanitizeVec3(d.pos)) spawnPickup(d.kind, new THREE.Vector3().fromArray(sanitizeVec3(d.pos)), d.id); });
 net.on('taken', (d) => { if (!d) return; const p = pickups.find((x) => x.id === d.id); if (p) removePickup(p); });
 net.on('take', (d) => { if (!net.isHost || !d) return; const p = pickups.find((x) => x.id === d.id); if (p) { removePickup(p); net.send('taken', { id: d.id }); } });
-net.on('ps', (d, from) => { if (!d || !sanitizeVec3(d.p)) return; const r = remote.get(from); if (r) { r.push(d, performance.now() / 1000); r.lastSeen = performance.now(); } });
+net.on('ps', (d, from) => { const ps = sanitizePlayerState(d); if (!ps) return; const r = remote.get(from); if (r) { r.push(ps, performance.now() / 1000); r.lastSeen = performance.now(); } });
 net.on('pdmg', (d, from) => {
   if (!d || typeof d !== 'object' || !player.alive || game.state !== 'play' || player.shieldT > 0) return;
   const amount = clampNum(d.amount, 0, 220, 0);

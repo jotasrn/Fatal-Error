@@ -48,6 +48,26 @@ export function sanitizeVec3(arr, maxAbs = 2500) {
   return [x, y, z];
 }
 
+/**
+ * Valida o estado compacto do jogador enviado em 'ps' (ver encodeLocal em players.js):
+ * [x, y, z, yaw, pitch, arma, flags, hp, vx, vy, vz, (gx, gy, gz do gancho)].
+ * Devolve uma copia limpa ou null. (O pacote e um array, nao um objeto com `p`.)
+ */
+export function sanitizePlayerState(d, maxAbs = 2500) {
+  if (!Array.isArray(d) || d.length < 8 || d.length > 16) return null;
+  for (const v of d) if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+  if (!sanitizeVec3(d, maxAbs)) return null;
+  if (d.length >= 14 && !sanitizeVec3(d.slice(11, 14), maxAbs)) return null;
+  const out = d.slice();
+  out[3] = clampNum(out[3], -1e4, 1e4, 0);
+  out[4] = clampNum(out[4], -Math.PI, Math.PI, 0);
+  out[5] = Math.round(clampNum(out[5], 0, 31, 0));
+  out[6] = Math.round(clampNum(out[6], 0, 0xffff, 0));
+  out[7] = clampNum(out[7], -100, 1000, 0);
+  for (let i = 8; i < Math.min(out.length, 11); i++) out[i] = clampNum(out[i], -200, 200, 0);
+  return out;
+}
+
 /** Limita lista de coordenadas de tracers (shots.e) a no maximo 12 raios (36 floats) finitos. */
 export function sanitizeShots(arr, maxCoords = 36, maxAbs = 2500) {
   if (!Array.isArray(arr) || arr.length < 3) return [];

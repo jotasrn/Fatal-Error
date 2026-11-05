@@ -131,7 +131,8 @@ async function startSession({ code }) {
 
   const swarm = new Hyperswarm();
   const conns = new Map();
-  const limiter = new PeerRateLimiter({ ratePerSec: 140, burst: 220, maxStrikes: 30 });
+  // O host repassa o 'ps' de todos (20/s cada) + esnap + tiros: com 6+ jogadores 140/s cortava pacotes e derrubava a sala
+  const limiter = new PeerRateLimiter({ ratePerSec: 600, burst: 900, maxStrikes: 240 });
   const selfId = swarm.keyPair.publicKey.toString('hex');
   const current = { swarm, conns, limiter, selfId };
   sessionState = current;

@@ -310,3 +310,16 @@ test('GDFNet / LAN: conexao real Host <-> Cliente via TCP direto e descoberta UD
   }
 });
 
+
+test('sanitizePlayerState aceita o array real de encodeLocal e recusa lixo', async () => {
+  const { sanitizePlayerState } = await import('../src/security.js');
+  const ps = [12.5, 0, -230.1, 1.57, -0.2, 2, 64 | 16, 120, 3.1, 0, -4.2];
+  assert.deepEqual(sanitizePlayerState(ps), ps);
+  const grappling = [...ps, 10, 20, -30]; grappling[6] |= 128;
+  assert.equal(sanitizePlayerState(grappling).length, 14);
+  assert.equal(sanitizePlayerState({ p: [1, 2, 3] }), null); // formato antigo/objeto nao e o protocolo
+  assert.equal(sanitizePlayerState([1, 2]), null);
+  assert.equal(sanitizePlayerState([NaN, 0, 0, 0, 0, 0, 0, 100]), null);
+  assert.equal(sanitizePlayerState([1e9, 0, 0, 0, 0, 0, 0, 100]), null);
+  assert.equal(sanitizePlayerState([0, 0, 0, 0, 0, 999, 0, 100])[5], 31);
+});

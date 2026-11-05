@@ -235,7 +235,7 @@ function createLanManager({ onEvent = () => {}, logLine = () => {} } = {}) {
     const ifaces = listLanInterfaces();
     const primary = ifaces[0];
     const selfId = crypto.randomBytes(32).toString('hex');
-    const limiter = new PeerRateLimiter({ ratePerSec: 180, burst: 260, maxStrikes: 35 });
+    const limiter = new PeerRateLimiter({ ratePerSec: 600, burst: 900, maxStrikes: 240 });
     const conns = new Map();
     const pendingSockets = new Set();
 
@@ -414,7 +414,7 @@ function createLanManager({ onEvent = () => {}, logLine = () => {} } = {}) {
     }
 
     const selfId = crypto.randomBytes(32).toString('hex');
-    const limiter = new PeerRateLimiter({ ratePerSec: 180, burst: 260, maxStrikes: 35 });
+    const limiter = new PeerRateLimiter({ ratePerSec: 600, burst: 900, maxStrikes: 240 });
     const conns = new Map();
     const pendingSockets = new Set();
     const cur = {
