@@ -167,9 +167,11 @@ export function createSurvival(ctx, deps) {
     mod.apply(); enemies.mods.damage *= 1.2; hud.setModifier(mod.name);
     const swarm = mod.name.startsWith('Enxame');
     const big = isBigMap();
-    const waveCap = big ? 32 : 24;
-    game.maxAlive = Math.min((big ? 8 : 5) + Math.floor(n * 1.15) + (swarm ? 4 : 0), (swarm ? 26 : 22) + Math.floor(n / 2), waveCap);
-    let count = Math.round(Math.min((big ? 9 : 6) + n * 2.4, (big ? 44 : 34) + n) * (swarm ? 1.35 : 1));
+    // no online a onda cresce com o número de jogadores (1 → 1x, 2 → 1.6x, 3 → 2.2x, até 3x)
+    const k = ctx.crowd ? ctx.crowd() : 1;
+    const waveCap = Math.round((big ? 32 : 24) * Math.min(k, 2.2));
+    game.maxAlive = Math.min(Math.round(((big ? 8 : 5) + Math.floor(n * 1.15) + (swarm ? 4 : 0)) * k), Math.round(((swarm ? 26 : 22) + Math.floor(n / 2)) * Math.min(k, 2.2)), waveCap);
+    let count = Math.round(Math.min((big ? 9 : 6) + n * 2.4, (big ? 44 : 34) + n) * (swarm ? 1.35 : 1) * k);
     if (boss) { count = (big ? 10 : 7) + n; game.maxAlive = Math.min(waveCap + 2, game.maxAlive + 2 + Math.floor(n / 5)); game.queue.push(bossFor(n)); }
     const pool = ROSTER.filter((r) => n >= r.from).map((r) => ({ t: r.t, w: r.w * Math.min(1, 0.3 + 0.25 * (n - r.from)) }));
     const total = pool.reduce((a, r) => a + r.w, 0);
@@ -216,14 +218,15 @@ export function createSurvival(ctx, deps) {
       return;
     }
     const aliveWaveCount = enemies.waveAlive !== undefined ? enemies.waveAlive : enemies.alive;
-    const totalCap = isBigMap() ? 58 : 34;
+    const crowdK = ctx.crowd ? ctx.crowd() : 1;
+    const totalCap = Math.round((isBigMap() ? 58 : 34) * Math.min(crowdK, 1.8));
     // total budget across wave + ambient bots (protesters, police, civilians)
     if (game.queue.length && aliveWaveCount < game.maxAlive && enemies.alive < totalCap) {
       game.spawnT -= dt;
       if (game.spawnT <= 0) {
-        game.spawnT = Math.max(0.55, (isBigMap() ? 2.1 : 2.6) - game.wave * 0.13);
+        game.spawnT = Math.max(0.4, ((isBigMap() ? 2.1 : 2.6) - game.wave * 0.13) / Math.sqrt(crowdK));
         const t = game.queue.shift(); const e = enemies.spawn(t, pickSpawn(t));
-        if (e.T.boss) { const mul = 1 + 0.35 * Math.floor((game.wave - 5) / 15); e.hp = e.maxHp = Math.round(e.T.hp * mul); }
+        if (e.T.boss) { const mul = (1 + 0.35 * Math.floor((game.wave - 5) / 15)) * (1 + 0.6 * (crowdK - 1)); e.hp = e.maxHp = Math.round(e.T.hp * mul); }
       }
     }
     if (!game.queue.length && aliveWaveCount === 0) {

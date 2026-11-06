@@ -342,13 +342,18 @@ function hardenSessionPermissions() {
 }
 
 function createWindow() {
+  const iconPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'icon.png')
+    : path.join(__dirname, '../build/icon.png');
+
   win = new BrowserWindow({
     width: 1280,
     height: 720,
     minWidth: 960,
     minHeight: 540,
-    backgroundColor: '#f9f8f5',
+    backgroundColor: '#0b0c10',
     title: 'Fatal Error',
+    icon: fs.existsSync(iconPath) ? iconPath : undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,

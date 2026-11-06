@@ -152,8 +152,9 @@ export function buildTraffic(B, lanes, signals = {}) {
       else { const list = CAR_PALETTES[type]; pal.body = list[palIdx++ % list.length]; }
       const s = lane.from + ((i + 0.5) / lane.count) * len;
       const vmax = (BUSLIKE[type] ? lane.vmax * 0.68 : lane.vmax) * (0.9 + ((k * 0.37) % 0.2));
-      const car = { type, w, h, d, isBus: !!BUSLIKE[type], lane, axis: lane.axis, dir: lane.dir, s, v: vmax * 0.6, vmax, pal,
-        x: 0, z: 0, laneX: 0, speed: 0, group: new THREE.Object3D(), vel: new THREE.Vector3(), hidden: false, anchors: [] };
+      const car = { type, w, h, d, isBus: !!BUSLIKE[type], lane, axis: lane.axis, dir: lane.dir, s, v: lane.parked ? 0 : vmax * 0.6, vmax: lane.parked ? 0 : vmax, pal,
+        x: 0, y: 0, z: 0, laneX: 0, speed: 0, group: new THREE.Object3D(), vel: new THREE.Vector3(), hidden: false, anchors: [] };
+      car.group.rotation.order = 'YXZ';
       lane.cars.push(car); cars.push(car);
       if (car.isBus) for (const f of type === 'zebrinha' ? [-0.25, 0.25] : [-0.32, 0, 0.32]) {
         const a = new THREE.Object3D(); car.anchors.push({ obj: a, off: f * d });
@@ -178,9 +179,11 @@ export function buildTraffic(B, lanes, signals = {}) {
     const lane = c.lane;
     if (lane.axis === 'z') { c.x = lane.c; c.z = c.s; c.group.rotation.y = c.dir > 0 ? 0 : Math.PI; }
     else { c.x = c.s; c.z = lane.c; c.group.rotation.y = c.dir > 0 ? Math.PI / 2 : -Math.PI / 2; }
-    c.laneX = c.x; c.group.position.set(c.x, c.hidden ? -60 : 0, c.z);
+    c.y = lane.yAt ? lane.yAt(c.s) : 0;
+    if (lane.yAt) { const dy = lane.yAt(c.s + c.dir * 0.8) - lane.yAt(c.s - c.dir * 0.8); c.group.rotation.x = -Math.atan2(dy, 1.6); }
+    c.laneX = c.x; c.group.position.set(c.x, c.hidden ? -60 : c.y, c.z);
     c.speed = c.v; c.vel.set(lane.axis === 'x' ? c.v * c.dir : 0, 0, lane.axis === 'z' ? c.v * c.dir : 0);
-    for (const a of c.anchors) a.obj.position.set(c.x + (lane.axis === 'x' ? a.off * c.dir : 0), c.hidden ? -60 : c.h + 0.35, c.z + (lane.axis === 'z' ? a.off * c.dir : 0));
+    for (const a of c.anchors) a.obj.position.set(c.x + (lane.axis === 'x' ? a.off * c.dir : 0), c.hidden ? -60 : c.y + c.h + 0.35, c.z + (lane.axis === 'z' ? a.off * c.dir : 0));
   };
   const sync = () => {
     for (const c of cars) { place(c); c.group.updateMatrix(); }
@@ -202,6 +205,7 @@ export function buildTraffic(B, lanes, signals = {}) {
   function update(t) {
     const dt = lastT ? Math.min(0.05, Math.max(0, t - lastT)) : 0.016; lastT = t;
     for (const lane of lanes) {
+      if (lane.parked) continue;
       const list = lane.cars, dir = lane.dir;
       list.sort((a, b) => (b.s - a.s) * dir); // front-most first
       let ahead = null;

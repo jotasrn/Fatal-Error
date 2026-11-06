@@ -191,12 +191,25 @@ function dressHumanoid(J, hatG, mat, solid, T, bw, hs, limbR) {
   if (gear.has('holster')) { box(tor, solid, 0.07, 0.15, 0.1, 0.27 * bw, 0.02, 0.02); box(tor, mat, 0.05, 0.06, 0.04, 0.27 * bw, 0.12, 0.05); }
   if (gear.has('shirtstar')) put(tor, solid, new THREE.CylinderGeometry(0.075, 0.075, 0.02, 5), 0, 0.33, fz(0.33) + 0.012, Math.PI / 2, 0, 0);
   if (gear.has('armband')) for (const k of ['armL', 'armR']) ring(J[k], acc, limbR * 1.8, limbR * 1.8, 0.35, 0, -0.1, 0);
+  if (gear.has('jersey')) { // camisa amarela da seleção: gola e punhos verdes, escudo no peito
+    ring(tor, acc, fx(0.5) * 1.08 + 0.015, fz(0.5) * 1.1 + 0.015, 0.06, 0, 0.5, 0);
+    for (const k of ['armL', 'armR']) ring(J[k], acc, limbR * 1.9, limbR * 1.9, 0.07, 0, -0.17, 0);
+    put(tor, acc, new THREE.CylinderGeometry(0.045, 0.045, 0.02, 6), -0.1 * bw, 0.38, fz(0.38) + 0.012, Math.PI / 2, 0, 0);
+  }
   if (gear.has('cape')) { box(tor, mat, 0.62 * bw, 1.1, 0.03, 0, 0.0, -fz(0.3) - 0.06, 0.12, 0, 0); ring(tor, solid, 0.13, 0.12, 0.3, 0, 0.52, 0); }
   K.flush();
 }
 
 export function buildWeaponProp(gun, mat, solid, T) {
   if (T.weapon === 'blade') { bx(0.02, 0.05, 0.95, 0, 0.04, 0.42, mat, gun); bx(0.11, 0.11, 0.03, 0, 0.04, -0.06, solid, gun); bx(0.035, 0.045, 0.24, 0, 0.04, -0.19, solid, gun); }
+  else if (T.weapon === 'flag' && T.isRioter) {
+    // bandeira do Brasil: retângulo verde, losango amarelo e círculo azul
+    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 1.45, 6), solid);
+    mast.rotation.x = Math.PI / 2.3; mast.position.set(0, 0.28, 0.38); gun.add(mast);
+    const fg = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.4, 0.012), makeInkMaterial({ ink: INK.GREEN, fill: true, side: THREE.DoubleSide })); fg.position.set(0.25, 0.52, 0.65); fg.rotation.y = Math.PI / 10; gun.add(fg);
+    const rh = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.26, 0.02), mat); rh.position.set(0.25, 0.52, 0.65); rh.rotation.set(0, Math.PI / 10, Math.PI / 4); rh.scale.set(1.25, 0.85, 1); gun.add(rh);
+    const ci = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.03, 10), makeInkMaterial({ ink: INK.BLUE, fill: true })); ci.position.set(0.25, 0.52, 0.65); ci.rotation.set(Math.PI / 2, 0, 0); ci.rotation.y = 0; gun.add(ci);
+  }
   else if (T.weapon === 'flag' || T.isProtester) {
     // Mastro da bandeira
     const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 1.45, 6), solid);

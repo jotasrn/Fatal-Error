@@ -18,6 +18,7 @@ import { HUD, CONTROLS_HTML } from './hud.js';
 import { audio } from './audio.js';
 import { rand, choose, clamp } from './util.js';
 import { createSurvival } from './game/survival.js';
+import { createBrasiliaEvents } from './game/brasiliaEvents.js';
 import { escHtml, sanitizeName, sanitizeText, clampNum, sanitizeVec3, sanitizeShots, sanitizePlayerState } from './security.js';
 
 const esc = escHtml;
@@ -37,7 +38,7 @@ audio.setTune(mapKey === 'mexico' ? 'mexico' : 'district');
 function setLevel(key, on, force = false) {
   if (!force && key === loadedKey && on === arenaLoaded) return; loadedKey = key; arenaLoaded = on;
   for (const m of level.meshes) { R.scene.remove(m); if (m.geometry) m.geometry.dispose(); if (m.traverse) m.traverse((o) => { if (o !== m && o.geometry) o.geometry.dispose(); }); }
-  level.animated.length = 0; world.clear();
+  level.animated.length = 0; world.clear(); if (ctx.bEvents) ctx.bEvents.clear();
   level = buildLevel(R.scene, world, key, { arena: on }); nav = new NavGrid(world, level.bounds, navCellFor(level.bounds)).build();
   ctx.level = level; ctx.nav = nav; if (minimap) minimap.setLevel(level, world); if (window.__game) { window.__game.level = level; window.__game.nav = nav; }
   audio.setTune(key === 'mexico' ? 'mexico' : 'district');
@@ -156,6 +157,16 @@ const survival = createSurvival(ctx, {
   setCheckpoint: () => {},
 });
 ctx.survival = survival;
+// quantos jogadores estão de fato na partida (os bots crescem com isso no online)
+const crowd = () => { if (!online()) return 1; let n = 1; for (const r of remote.values()) if (!r.away) n++; return Math.min(3, 1 + 0.6 * (n - 1)); };
+ctx.crowd = crowd;
+const snapNav = (v) => { const id = nav.nearestNode(v, 4, 3); if (id >= 0) { const nd = nav.nodes[id]; v.set(nd.x, nd.y + 0.05, nd.z); } return v; };
+const bEvents = createBrasiliaEvents(ctx, {
+  net, online, snap: snapNav, crowd,
+  manifest: () => triggerBrasiliaManifestation(),
+  onCrash: (pos) => { for (let i = 0; i < 2; i++) { const p = enemies.spawn(i ? 'police_tactical' : 'police', snapNav(new THREE.Vector3(pos.x + rand(-10, 10), 0, pos.z + rand(-10, 10)))); p.state = 'hunt'; } audio.siren(pos); },
+});
+ctx.rioterProps = () => bEvents.rioterProps(); ctx.bEvents = bEvents;
 const {
   pickups, spawnPickup, removePickup, updatePickups, updateArenaPickups,
   startWave, updateWaves, pickSpawn,
@@ -290,6 +301,7 @@ enemies.onKill = (e, info, over) => {
       }
     });
   }
+  if (info.source === 'bot' || info.source === 'event') return; // bot contra bot ou desastre: não conta para o jogador
   game.kills++; game.combo++; game.comboT = 3.5;
   let label = e.T.name, pts = e.T.score;
   if (info.crit) { label = 'Tiro na Cabeça'; pts += 60; }
@@ -358,7 +370,7 @@ function triggerBrasiliaManifestation() {
 // Trânsito de Brasília: os veículos empurram/ferem o jogador e atropelam os bots (o host decide os abates)
 const _carDir = new THREE.Vector3();
 function carOverlap(car, p, r, maxY) {
-  if (car.hidden || Math.abs(p.y) > maxY) return false;
+  if (car.hidden || p.y - car.y > maxY || p.y - car.y < -1) return false;
   const hw = car.axis === 'x' ? car.d / 2 : car.w / 2, hd = car.axis === 'x' ? car.w / 2 : car.d / 2;
   return Math.abs(p.x - car.x) < hw + r && Math.abs(p.z - car.z) < hd + r;
 }
@@ -397,6 +409,7 @@ function updateTrafficHits() {
 }
 
 function spawnBrasiliaCivilians() {
+  bEvents.reset();
   const civSpots = [
     ['civilian', -84, 0.3, -455],   // Estádio Mané Garrincha
     ['politician', 56, 0, -458],    // Praça do Buriti (GDF)
@@ -405,10 +418,11 @@ function spawnBrasiliaCivilians() {
     ['vendor', 6, 0, -342],         // Feirinha da Torre de TV
     ['civilian', 0, 20, -312],      // Mirante da Torre de TV
     ['civilian', 54, 0, -328],      // Entrada do Pátio Brasil Shopping
-    ['civilian', 81, 0, -240],      // Setor Comercial Sul (SCS)
-    ['civilian', -56, 0, -210],     // Calçada do Conjunto Nacional
-    ['vendor', 0, 7, -213],         // Plataforma superior da Rodoviária
-    ['civilian', -28, 7, -210],     // Mezanino da Rodoviária
+    ['civilian', 78, 0, -268],      // Setor Comercial Sul (SCS)
+    ['civilian', -56, 0, -240],     // Calçada do Conjunto Nacional
+    ['vendor', 0, 0, -213],         // Plataforma superior da Rodoviária
+    ['civilian', -24, -6.2, -234],  // Embarque (piso inferior) da Rodoviária
+    ['vendor', 12, -6.2, -192],     // Pastel com caldo de cana no embarque
     ['civilian', 46, 0, -140],      // Calçada do Museu Nacional
     ['civilian', 44, 0, -108],      // Entrada da Catedral
     ['civilian', 186, 0, -347],     // Comércio da W3 Sul
@@ -440,7 +454,7 @@ ctx.onPlayerWanted = () => {
 };
 
 ctx.onCivilianKilled = (civ, info) => {
-  if (info && (info.source === 'bot' || info.source === 'fall' || info.source === 'car')) return;
+  if (info && (info.source === 'bot' || info.source === 'fall' || info.source === 'car' || info.source === 'event')) return;
   ctx.playerWanted = true;
   if (ctx.onPlayerWanted) ctx.onPlayerWanted();
   audio.siren(civ.center);
@@ -657,6 +671,7 @@ net.on('ekillcredit', (d) => {
 });
 net.on('ewave', (d) => { if (!net.isHost && d) { const w = Math.max(1, Math.round(clampNum(d.wave, 1, 999, 1))); game.wave = w; hud.setWave(w, 0); hud.message('Onda ' + w, sanitizeText(d.name, 48) || 'Bots e Jogadores!', 2.5); audio.wave(); } });
 net.on('ewaveclear', (d) => { if (!net.isHost && d) { const w = Math.max(1, Math.round(clampNum(d.wave, 1, 999, 1))); hud.message('Onda ' + w + ' Concluída', 'Prepare-se para a próxima onda!', 2.5); audio.waveClear(); player.hp = Math.min(player.maxHp, player.hp + 40); player.addCash(300 + 50 * Math.min(w, 30), 'Onda Concluída'); } });
+net.on('bevent', (d) => { if (!net.isHost && level.key === 'brasilia') bEvents.onNet(d); });
 net.on('bmanif', (d) => { if (!net.isHost) { const z = sanitizeText(d && d.zone, 32) || 'NA ESPLANADA'; ctx.protestersRiot = false; ctx.playerWanted = false; audio.siren(player.center); hud.message(`🚩 MANIFESTAÇÃO ${z}!`, 'Confronto entre Manifestantes e PMDF! Não ataque nenhum lado!', 4.5); } });
 net.on('bcalm', () => { if (!net.isHost) { ctx.protestersRiot = false; ctx.playerWanted = false; } });
 net.on('briot', () => { if (!net.isHost) { ctx.protestersRiot = true; audio.siren(player.center); hud.message('⚠️ MULTIDÃO EM FÚRIA!', 'Alguém atacou os manifestantes! A multidão partiu para cima!', 4.0); } });
@@ -1273,7 +1288,7 @@ function startMatch(late, spawnIdx, forcedMap) {
 }
 function pause() { if ((game.state !== 'play' && !(game.state === 'dying' && online())) || game.menu) return; if (!online()) game.state = 'pause'; game.menu = true; showPause(); audio.reelLoop(false); }
 function resume() { if (online()) { game.menu = false; if (game.state === 'dying' && game.respawnT <= 0) game.respawnArm = input.lastActive; hud.hideScreen(); hud.setGameplayVisible(true); if (!input.usingGamepad) input.requestLock(); return; } begin(); }
-Object.assign(window.__game, { startWave, updateWaves, begin, beginAtWave, jumpToWave, resetGame, spawnPickup, focusCandidate, enterFocus, pickSpawn, startMatch, createLobby, joinLobby, quickPlay, leaveOnline, hostStart });
+Object.assign(window.__game, { bEvents, startWave, updateWaves, begin, beginAtWave, jumpToWave, resetGame, spawnPickup, focusCandidate, enterFocus, pickSpawn, startMatch, createLobby, joinLobby, quickPlay, leaveOnline, hostStart });
 hud.onScreenClick = (src) => {
   const st = game.state;
   if (st === 'over') { if (net.isHost) { net.send('backtolobby', {}); toLobbyScreen(); } return; }
@@ -1392,17 +1407,10 @@ function stepInner(now) {
     musicHealT -= dt; if (musicHealT <= 0) { musicHealT = 2; if (musicWanted && st === 'play' && !audio.musicPlaying && audio.ctx) audio.musicOn(true); if (input.anyInput) audio.resume(); }
     { const B = level.bounds, bp = player.body.pos; if (bp.x < B.minX - 8 || bp.x > B.maxX + 8 || bp.z < B.minZ - 8 || bp.z > B.maxZ + 8 || bp.y > 150) bp.y = -100; }
     if (level.cars && playing) updateTrafficHits();
-    player.update(sdt); safeEnemies(sdt); effects.update(sdt); updatePickups(sdt); netUpdate(dt);
+    player.update(sdt); safeEnemies(sdt); effects.update(sdt); bEvents.update(sdt); updatePickups(sdt); netUpdate(dt);
     if (st === 'play' && (!online() || net.isHost)) {
       updateWaves(sdt);
-      if (level.key === 'brasilia') {
-        brasiliaEventTimer -= sdt;
-        if (brasiliaEventTimer <= 0) {
-          brasiliaEventTimer = 80;
-          const aliveProt = enemies.enemies.filter(e => e.alive && e.T.isProtester).length;
-          if (aliveProt < 3) triggerBrasiliaManifestation();
-        }
-      }
+      if (level.key === 'brasilia') bEvents.hostTick(sdt);
     }
     if (online()) updateArenaPickups(dt);
     if (game.comboT > 0) { game.comboT -= sdt; if (game.comboT <= 0) { game.combo = 0; hud.setScore(game.score, 0); } }

@@ -106,6 +106,7 @@ export const HOST_ONLY_TYPES = new Set([
   'bcalm',
   'briot',
   'bwanted',
+  'bevent',
   'kick',
   'leave',
   'feed',

@@ -8,6 +8,8 @@ import { rand, randInt, clamp, damp, wrapAngle, angleLerp, alignYAxis, TAU } fro
 import { audio } from '../audio.js';
 import { TYPES, STATE_CODES, STATE_NAMES } from './types.js';
 const TYPE_KEYS = Object.keys(TYPES);
+// danos que não são culpa de um jogador (outro bot, queda, trânsito, desastre de evento): não revoltam a multidão nem chamam a polícia
+const COLLATERAL = new Set(['bot', 'fall', 'car', 'event']);
 import { buildHumanoid, buildBomber, buildFlyer, buildQuadruped, buildCached, cloneModel } from './models.js';
 import { Projectiles } from './projectiles.js';
 const modelBuilder = (T) => (m, s) => T.model === 'bomber' ? buildBomber(m, s, T) : T.model === 'blob' ? buildBomber(m, s, T, true) : T.model === 'flyer' ? buildFlyer(m, s, T) : (T.model === 'quadruped' || T.model === 'spider') ? buildQuadruped(m, s, T) : buildHumanoid(m, s, T);
@@ -27,7 +29,7 @@ export class EnemyManager {
   get waveAlive() {
     let c = 0;
     for (const e of this.enemies) {
-      if (e.alive && !e.T.isCivilian && !e.T.isProtester && !e.T.isPolice && !e.T.isPet) c++;
+      if (e.alive && !e.T.isCivilian && !e.T.isProtester && !e.T.isPolice && !e.T.isPet && !e.T.isRioter) c++;
     }
     return c;
   }
@@ -47,6 +49,20 @@ export class EnemyManager {
     e.retargetT = (e.retargetT ?? 0) - dt;
     if (e.target && e.target.alive && e.retargetT > 0) return e.target;
     e.retargetT = 0.4;
+
+    // 8 de Janeiro: o invasor ataca quem estiver perto (jogador, polícia, civis) e, sem ninguém por perto,
+    // vai quebrar vidraças e gradis da Praça dos Três Poderes
+    if (e.T.isRioter) {
+      let best = null, bd = 32 * 32; const p0 = e.body.pos;
+      for (const t of this.targets()) { if (!t.alive) continue; const d = t.body.pos.distanceToSquared(p0); if (d < bd) { bd = d; best = t; } }
+      for (const o of this.enemies) {
+        if (!o.alive || o === e || o.T.isRioter || o.T.isPet || o.T.flying || o.T.boss || o.state === 'spawn') continue;
+        const d = o.body.pos.distanceToSquared(p0); if (d < bd) { bd = d; best = o; }
+      }
+      if (!best && this.ctx.rioterProps) { bd = Infinity; for (const pr of this.ctx.rioterProps()) { if (!pr.alive) continue; const d = pr.body.pos.distanceToSquared(p0); if (d < bd) { bd = d; best = pr; } } }
+      if (!best) best = this.nearestTarget(p0);
+      e.target = best; return best;
+    }
 
     // Se é manifestante e a multidão se revoltou contra os jogadores, persegue os players!
     if (e.T.isProtester && this.ctx.protestersRiot) {
@@ -71,8 +87,8 @@ export class EnemyManager {
     if (e.T.isPolice && !this.ctx.playerWanted) {
       let bestProt = null, bd = Infinity;
       for (const other of this.enemies) {
-        if (!other.alive || !other.T.isProtester) continue;
-        const d = other.body.pos.distanceToSquared(e.body.pos);
+        if (!other.alive || !(other.T.isProtester || other.T.isRioter)) continue;
+        const d = other.body.pos.distanceToSquared(e.body.pos) * (other.T.isRioter ? 0.5 : 1); // invasores primeiro
         if (d < bd) { bd = d; bestProt = other; }
       }
       e.target = bestProt;
@@ -166,7 +182,7 @@ export class EnemyManager {
     e.hp -= amount; e.flinch = 1; e.flashT = 0.07; if (!e.flashOn) { setFill(e.mat, true); e.flashOn = true; }
 
     // Reação de facção apenas quando atacado por um JOGADOR (nunca por dano colateral de outro bot ou queda):
-    if (info && info.source !== 'bot' && info.source !== 'fall' && info.source !== 'car') {
+    if (info && !COLLATERAL.has(info.source)) {
       const culprit = (info.by && this.ctx.remote && this.ctx.remote.get(info.by)) || this.ctx.player;
       if ((e.T.isProtester || e.T.isCivilian) && !this.ctx.protestersRiot) {
         this.ctx.protestersRiot = true;
@@ -215,7 +231,7 @@ export class EnemyManager {
     const dir = (info.dir || _d.set(0, 0.5, 0)).clone().normalize();
     if (e.T.weapon === 'bomb') { this._explodeBomber(e, 0.8); if (this.onKill) this.onKill(e, info, true); return; }
     audio.enemyDie(e.center);
-    if (e.T.isCivilian && this.ctx.onCivilianKilled && info && info.source !== 'bot' && info.source !== 'fall' && info.source !== 'car') {
+    if (e.T.isCivilian && this.ctx.onCivilianKilled && info && !COLLATERAL.has(info.source)) {
       this.ctx.onCivilianKilled(e, info);
     }
     if (e.T.flying) {
@@ -291,7 +307,7 @@ export class EnemyManager {
         } else this._wander(e, dt);
         e.body.vel.y -= 24 * dt; world.moveBody(e.body, dt);
       }
-      if (e.body.pos.y < -6) {
+      if (e.body.pos.y < (ctx.level && ctx.level.killY != null ? ctx.level.killY : -6)) {
         if (e.T.isPet) { const tp = this.nearestTarget(e.body.pos) || ctx.player; e.body.pos.copy(tp.body.pos); e.body.pos.y += 0.5; e.body.vel.set(0, 0, 0); }
         else { this.kill(e, { source: 'fall', dir: _up.clone() }); continue; }
       }
@@ -529,11 +545,19 @@ export class EnemyManager {
   _think(e, dt, pp, pc, P) {
     const T = e.T, b = e.body, ctx = this.ctx;
     const dx = pp.x - b.pos.x, dz = pp.z - b.pos.z; const dist = Math.hypot(dx, dz); const dy = pp.y - b.pos.y;
-    e.losT -= dt; if (e.losT <= 0) { e.losT = 0.12 + rand(0, 0.1); e.los = ctx.world.hasLineOfSight(this.eye(e, _eye), pc, SEE_THROUGH); }
+    e.losT -= dt; if (e.losT <= 0) { e.losT = 0.12 + rand(0, 0.1); e.los = P.isProp ? dist < 8 : ctx.world.hasLineOfSight(this.eye(e, _eye), pc, SEE_THROUGH); } // a vidraça tapa a própria linha de visão
     e.cool -= dt; const yawTo = Math.atan2(dx, dz);
     if (T.isPet) { this._thinkPet(e, dt, pp, dist, dx, dz); return; }
     if (T.isCivilian && !e.enraged) {
       e.aimAmt = 0;
+      // foge de quem estiver depredando por perto (8 de Janeiro) ou da confusão (7 de Setembro)
+      let threat = null, td = 16 * 16;
+      for (const o of this.enemies) { if (!o.alive || !o.T.isRioter) continue; const d = o.body.pos.distanceToSquared(b.pos); if (d < td) { td = d; threat = o; } }
+      if (!threat && this.ctx.panicAt) { const pz = this.ctx.panicAt; const d = (pz.x - b.pos.x) ** 2 + (pz.z - b.pos.z) ** 2; if (d < 60 * 60) threat = { body: { pos: pz } }; }
+      if (threat) {
+        const tx = threat.body.pos.x - b.pos.x, tz = threat.body.pos.z - b.pos.z;
+        this._steer(e, dt, b.pos.x - tx * 3, b.pos.z - tz * 3, T.speed * 1.6, 45); e.yawT = Math.atan2(-tx, -tz); return;
+      }
       // If injured or player/threat is close, civilian panics and flees
       if (e.scared || dist < 20 || e.hp < T.hp) {
         e.scared = true;
