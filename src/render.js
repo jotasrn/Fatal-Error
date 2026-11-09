@@ -331,7 +331,12 @@ export class InkRenderer {
     this._clear = new THREE.Color(1, 0, 0);
     this._camDir = new THREE.Vector3();
     this.resize();
-    window.addEventListener('resize', () => this.resize());
+    window.addEventListener('resize', () => {
+      this.resize();
+      clearTimeout(this._reT);
+      this._reT = setTimeout(() => this.resize(), 100);
+      this._reT2 = setTimeout(() => this.resize(), 260);
+    });
   }
 
   setQuality(q) {

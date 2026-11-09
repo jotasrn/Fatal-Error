@@ -325,6 +325,35 @@ ipcMain.on('update:match-active', (event, active) => {
   noteMatchActive(!!active);
 });
 
+function toggleFullscreen() {
+  if (!win || win.isDestroyed()) return;
+  if (win.isFullScreen()) {
+    win.setFullScreen(false);
+    win.setMenuBarVisibility(false);
+    if (!win.isMaximized()) {
+      win.setSize(1280, 720);
+      win.center();
+    }
+  } else {
+    win.setFullScreen(true);
+  }
+}
+
+ipcMain.on('win:minimize', (event) => {
+  if (!isTrustedSender(event)) return;
+  if (win && !win.isDestroyed()) win.minimize();
+});
+
+ipcMain.on('win:toggle-fullscreen', (event) => {
+  if (!isTrustedSender(event)) return;
+  toggleFullscreen();
+});
+
+ipcMain.handle('win:is-fullscreen', (event) => {
+  if (!isTrustedSender(event)) return false;
+  return Boolean(win && !win.isDestroyed() && win.isFullScreen());
+});
+
 function hardenSessionPermissions() {
   const ALLOWED_PERMISSIONS = new Set(['pointerLock', 'fullscreen']);
 
@@ -409,9 +438,17 @@ function createWindow() {
         return;
       }
     }
-    // F11 alterna tela cheia.
-    if (input.key === 'F11' && win && !win.isDestroyed()) {
-      win.setFullScreen(!win.isFullScreen());
+    // F11 alterna tela cheia de forma estavel (evita conflito interno do Chromium e repeticao).
+    if (input.key === 'F11') {
+      event.preventDefault();
+      if (!input.repeat) toggleFullscreen();
+      return;
+    }
+    // F9 ou Ctrl+M minimiza o jogo para a barra de tarefas.
+    if (input.key === 'F9' || ((input.control || input.meta) && String(input.key || '').toLowerCase() === 'm')) {
+      event.preventDefault();
+      if (!input.repeat && win && !win.isDestroyed()) win.minimize();
+      return;
     }
   });
 

@@ -70,3 +70,9 @@ contextBridge.exposeInMainWorld('FE_UPDATE', Object.freeze({
   setMatchActive: (active) => ipcRenderer.send('update:match-active', !!active),
   onStatus: bindSingleChannel('update:status', (cb, status) => status && cb(status)),
 }));
+
+contextBridge.exposeInMainWorld('FE_WIN', Object.freeze({
+  minimize: () => ipcRenderer.send('win:minimize'),
+  toggleFullScreen: () => ipcRenderer.send('win:toggle-fullscreen'),
+  isFullScreen: () => ipcRenderer.invoke('win:is-fullscreen'),
+}));

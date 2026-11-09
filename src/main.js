@@ -845,6 +845,14 @@ function settingsHTML() {
   ).join('');
 
   return `<div class="settings" id="settings">
+    <div class="settings-section-title">Janela e Exibição</div>
+    <div class="settings-grid">
+      <div class="settings-row" style="gap:8px;">
+        <button type="button" class="btn btn-white" id="btnToggleFullscreen" style="flex:1; font-size:14px; padding:6px 12px; cursor:pointer;">Alternar Tela Cheia (F11)</button>
+        <button type="button" class="btn btn-white" id="btnMinimizeGame" style="flex:1; font-size:14px; padding:6px 12px; cursor:pointer;">Minimizar Jogo (F9 / Ctrl+M)</button>
+      </div>
+    </div>
+
     <div class="settings-section-title">Gráficos</div>
     <div class="settings-grid">
       <label class="settings-row">Qualidade Gráfica
@@ -978,6 +986,28 @@ if (typeof window !== 'undefined' && window.FE_UPDATE) {
 function wireSettings() {
   const box = hud.el.panel.querySelector('#settings'); if (!box) return;
   box.addEventListener('click', (e) => e.stopPropagation()); box.addEventListener('keydown', (e) => e.stopPropagation());
+
+  const btnFs = box.querySelector('#btnToggleFullscreen');
+  if (btnFs) {
+    btnFs.addEventListener('click', () => {
+      if (window.FE_WIN?.toggleFullScreen) {
+        window.FE_WIN.toggleFullScreen();
+      } else if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      } else {
+        document.documentElement.requestFullscreen().catch(() => {});
+      }
+    });
+  }
+
+  const btnMin = box.querySelector('#btnMinimizeGame');
+  if (btnMin) {
+    btnMin.addEventListener('click', () => {
+      if (window.FE_WIN?.minimize) {
+        window.FE_WIN.minimize();
+      }
+    });
+  }
   const sens = box.querySelector('#setSens'), out = box.querySelector('#setSensV');
   sens.addEventListener('input', () => { settings.sens = Number(sens.value); out.textContent = settings.sens + '%'; applySettings(); });
   box.querySelector('#setInv').addEventListener('change', (e) => { settings.invert = e.target.checked; applySettings(); });
@@ -1298,6 +1328,28 @@ hud.onScreenClick = (src) => {
   if (st === 'pause' || st === 'dead') resume();
 };
 canvas.addEventListener('click', () => { if (game.state === 'play' && !game.menu && !input.pointerLocked && !input.usingGamepad) input.requestLock(); });
+
+// Controles de janela flutuantes (Minimizar / Tela Cheia)
+const btnWinMin = document.getElementById('fe-btn-min');
+const btnWinFs = document.getElementById('fe-btn-fs');
+if (btnWinMin) {
+  btnWinMin.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (window.FE_WIN?.minimize) window.FE_WIN.minimize();
+  });
+}
+if (btnWinFs) {
+  btnWinFs.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (window.FE_WIN?.toggleFullScreen) {
+      window.FE_WIN.toggleFullScreen();
+    } else if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    } else {
+      document.documentElement.requestFullscreen().catch(() => {});
+    }
+  });
+}
 input.onLockChange = (locked) => { if (!locked && (game.state === 'play' || (game.state === 'dying' && online())) && !game.menu && !input.usingGamepad) pause(); };
 input.onDeviceChange = (pad) => { hud.setDevice(pad); hud.setWeapon(player.weapon.name, player.weapon.hint); };
 window.addEventListener('pagehide', () => { if (net.active) net.leave(); });
