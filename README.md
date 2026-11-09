@@ -85,7 +85,7 @@
 - Partidas intensas com **cronômetro de 10 minutos**, misturando jogadores reais e hordas de bots sincronizados pelo Host em tempo real.
 - **Sem Servidor Central**: o jogo opera com arquitetura dupla de rede para funcionar em qualquer lugar:
   - **Modo Global P2P (`Hyperswarm` + `Noise`)**: conecta jogadores em qualquer internet residencial, fibra ou 4G via DHT distribuída + *UDP hole-punching* nativo, sem precisar abrir portas no roteador. Crie salas públicas, use **Partida Rápida** ou compartilhe um **código privado de 5 letras**.
-  - **Modo Rede Interna / Corporativa (`GDFNet` / WebRTC)**: projetado para ambientes corporativos/governamentais onde portas UDP externas ou DHT são bloqueadas pelo firewall, permitindo jogar normalmente entre colegas na rede.
+  - **Modo Rede Interna / Corporativa ( WebRTC)**: projetado para ambientes corporativos/governamentais onde portas UDP externas ou DHT são bloqueadas pelo firewall, permitindo jogar normalmente entre colegas na rede.
 - **Recursos de Partida**:
   - Entrada livre em partidas já em andamento (*late-join*).
   - **Migração Automática de Host**: se o criador da sala cair ou sair, outro jogador assume a autoridade da partida sem derrubar a sala.
@@ -240,5 +240,5 @@ npm start
 | --- | --- | --- |
 | **[`download/README.md`](download/README.md)** | Jogadores | Links diretos de download, Instalador vs Portátil, aviso do SmartScreen, verificação SHA-256, pasta de dados e solução de problemas |
 | **[`SECURITY.md`](SECURITY.md)** | Segurança / Auditoria | Modelo de ameaça P2P, tabela de Electron Fuses, Sandbox/CSP, protocolo Hyperswarm/Noise, anti-cheat de Host e DevSecOps |
-| **[`docs/ARQUITETURA.md`](docs/ARQUITETURA.md)** | Desenvolvedores | Diagrama de processos Electron, topologia híbrida P2P/GDFNet, pipeline gráfica de caderno, `BotBatcher` e mapa arquivo por arquivo |
+| **[`docs/ARQUITETURA.md`](docs/ARQUITETURA.md)** | Desenvolvedores | Diagrama de processos Electron, topologia híbrida P2P, pipeline gráfica de caderno, `BotBatcher` e mapa arquivo por arquivo |
 | **[`docs/ATUALIZACAO.md`](docs/ATUALIZACAO.md)** | Mantenedores | Funcionamento interno do `electron-updater`, proteção de partida ativa e passo a passo para publicar novas versões via `git tag` |

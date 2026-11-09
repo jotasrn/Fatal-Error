@@ -16,7 +16,7 @@ const MAX_FRAME_BYTES = 256 * 1024;
 /** Limite de conexoes P2P simultaneas na sessao Hyperswarm / LAN. */
 const MAX_PEERS = 16;
 
-/** Portas padrao da rede interna corporativa (GDFNet / LAN). */
+/** Portas padrao da rede interna corporativa (LAN). */
 const LAN_DISCOVERY_PORT = 41229;
 const LAN_PORT_BASE = 41230;
 const LAN_PORT_COUNT = 8;
@@ -37,7 +37,7 @@ function isValidPrivateLanIp(ip) {
     // Rejeita enderecos de rede/broadcast tipicos /24 como destino TCP unicast
     if (a !== 10 && !(a === 172 && b >= 16 && b <= 31)) return false;
   }
-  if (a === 10) return true; // 10.0.0.0/8 (ex.: GDFNet 10.63.30.x)
+  if (a === 10) return true; // 10.0.0.0/8 (ex.: 10.63.30.x)
   if (a === 192 && b === 168) return true; // 192.168.0.0/16
   if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
   if (a === 127 && b === 0 && c === 0 && d === 1) return true; // loopback de teste
@@ -88,7 +88,7 @@ function decodeLanCode(raw) {
 }
 
 /**
- * Aceita codigo GDFNet (`Gxxxxxxx`) ou `IP[:Porta]` privado dentro da faixa de portas do jogo.
+ * Aceita codigo (`Gxxxxxxx`) ou `IP[:Porta]` privado dentro da faixa de portas do jogo.
  */
 function parseLanTarget(raw) {
   if (typeof raw !== 'string') return null;

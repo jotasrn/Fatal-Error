@@ -1,8 +1,8 @@
 'use strict';
 /**
- * Transporte nativo de Rede Interna / Corporativa (GDFNet / LAN) sobre TCP + UDP Discovery.
+ * Transporte nativo de Rede Interna / Corporativa (LAN) sobre TCP + UDP Discovery.
  *
- * Opera 100% dentro da rede local (ex.: 10.63.30.x na GDFNet), sem depender de DHT UDP externo,
+ * Opera 100% dentro da rede local (ex.: 10.63.30.x), sem depender de DHT UDP externo,
  * mDNS (.local) ou servidores STUN/TURN bloqueados pelo proxy/firewall corporativo.
  *
  * Reutiliza exatamente as mesmas primitivas de seguranca do Hyperswarm (`frame`, `makeDecoder`,
@@ -39,7 +39,7 @@ function computeBroadcast(ip, netmask) {
 }
 
 /**
- * Seleciona interfaces IPv4 fisicas privadas, priorizando 10.x.x.x (redes corporativas como GDFNet)
+ * Seleciona interfaces IPv4 fisicas privadas, priorizando 10.x.x.x 
  * e 192.168.x.x, ignorando switches virtuais (WSL / Hyper-V / Docker).
  */
 function listLanInterfaces() {
@@ -84,7 +84,7 @@ function listenOnPortRange(server, basePort, count) {
     let idx = 0;
     const tryNext = () => {
       if (idx >= count) {
-        reject(new Error('Nenhuma porta local disponivel para hospedar sala GDFNet'));
+        reject(new Error('Nenhuma porta local disponivel para hospedar sala'));
         return;
       }
       const port = basePort + idx++;

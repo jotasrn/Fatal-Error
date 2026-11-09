@@ -56,7 +56,7 @@ No menu principal do jogo, clique em **JOGAR ONLINE**:
 
 1. **Escolha o Modo de Rede**:
    - **Global (P2P Hyperswarm)**: recomendado para jogar de casa, fibra ou 4G com amigos em qualquer lugar, sem configurar roteador.
-   - **Rede Interna / Corporativa (`GDFNet`)**: recomendado quando todos estão em uma rede corporativa/empresarial cujo firewall bloqueia tráfego UDP/DHT externo.
+   - **Rede Interna / Corporativa**: recomendado quando todos estão em uma rede corporativa/empresarial cujo firewall bloqueia tráfego UDP/DHT externo.
 2. **Entrar ou Criar Sala**:
    - **Partida Rápida**: entra automaticamente em uma sala pública aberta (ou cria uma se não houver nenhuma).
    - **Criar Sala**: escolha o mapa (ex.: *Brasília · Eixo Monumental*) e defina se a sala será pública ou privada. Um **código de 5 letras** aparecerá na tela.
@@ -112,7 +112,7 @@ Para remover também logs e configurações locais, apague a pasta `%APPDATA%\fa
 | --- | --- |
 | **"O Windows protegeu o computador" (SmartScreen)** | Clique em **Mais informações** → **Executar assim mesmo**. |
 | **Antivírus colocou o instalador em quarentena** | Falso-positivo comum em executáveis sem assinatura EV paga. Confira o hash no `SHA256SUMS.txt` e permita o arquivo, ou baixe o `Fatal-Error-Portable.zip`. |
-| **Não encontra a sala do colega no modo Global** | Verifique se ambos permitiram o `Fatal Error` no Firewall do Windows e estão na mesma versão. Se estiverem em rede empresarial restrita, mudem para o modo **Rede Interna / Corporativa (`GDFNet`)**. |
+| **Não encontra a sala do colega no modo Global** | Verifique se ambos permitiram o `Fatal Error` no Firewall do Windows e estão na mesma versão. Se estiverem em rede empresarial restrita, mudem para o modo **Rede Interna / Corporativa**. |
 | **Queda de FPS em notebooks com vídeo integrado** | O jogo já possui ajuste automático de resolução; feche abas pesadas do navegador em segundo plano para liberar memória de vídeo (VRAM). |
 | **O jogo não abre ou apresenta erro inesperado** | Anexe o arquivo `%APPDATA%\fatal-error\fatal-error.log` ao abrir uma [Issue no GitHub](https://github.com/jotasrn/Fatal-Error/issues). |
 

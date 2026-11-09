@@ -24,7 +24,7 @@ Este documento descreve como os processos, a renderização procedural de cadern
 │                                                                         │
 │  • Motor 3D Three.js (WebGL2) + Pós-processamento de folha de caderno   │
 │  • Física de personagem, armas, IA de bots, BotBatcher e áudio 8-bit    │
-│  • Camada de protocolo de partida (src/net.js): Host, Cliente e GDFNet  │
+│  • Camada de protocolo de partida (src/net.js): Host, Cliente           │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -39,7 +39,7 @@ Para garantir conectividade tanto na internet aberta quanto dentro de redes corp
 | Modo | Transporte | Como descobre e conecta |
 | --- | --- | --- |
 | **Global P2P** | `Hyperswarm` (via IPC `electron/main.cjs`) | Deriva um tópico criptográfico SHA-256 de 32 bytes a partir do código da sala (ou lobby público), anuncia na DHT Kademlia distribuída e negocia conexão direta cifrada com **Noise Protocol + UDP Hole-Punching**. |
-| **Rede Interna / Corporativa (`GDFNet`)** | Híbrido `LanNet` (`electron/lan.cjs` TCP/UDP) + `PeerNet` (`WebRTC` IP local sem mDNS/TURN) | Prioriza conexão TCP direta (`41230–41237`) na rede `10.x.x.x`/`192.168.x.x` via código de 8 letras (`Gxxxxxxx`) ou descoberta UDP (`41229`), com fallback imediato para WebRTC ICE direto por IP local caso o Firewall de Domínio bloqueie TCP de entrada. |
+| **Rede Interna / Corporativa** | Híbrido `LanNet` (`electron/lan.cjs` TCP/UDP) + `PeerNet` (`WebRTC` IP local sem mDNS/TURN) | Prioriza conexão TCP direta (`41230–41237`) na rede `10.x.x.x`/`192.168.x.x` via código de 8 letras (`Gxxxxxxx`) ou descoberta UDP (`41229`), com fallback imediato para WebRTC ICE direto por IP local caso o Firewall de Domínio bloqueie TCP de entrada. |
 
 ### Modelo Host-Autoritativo com Migração Automática
 - **Sincronização de Jogadores**: cada jogador simula o próprio movimento localmente a `60+ Hz` (zero *input lag*) e envia snapshots compactos de posição/rotação/arma; os demais interpolam suavemente em `src/players.js`.
@@ -79,7 +79,7 @@ Para suportar o mapa expandido de **Brasília (~770 m)** com dezenas de bots, pr
 | Arquivo | Responsabilidade |
 | --- | --- |
 | `electron/main.cjs` | Inicialização do Electron, criação da `BrowserWindow` isolada, gerenciamento do nó P2P Hyperswarm/LAN, logs em `%APPDATA%` e integração IPC. |
-| `electron/lan.cjs` | Transporte nativo para redes corporativas (`GDFNet`): servidor/cliente TCP de baixa latência (`41230–41237`), descoberta UDP na sub-rede (`41229`) e proteção anti-SSRF. |
+| `electron/lan.cjs` | Transporte nativo para redes corporativas: servidor/cliente TCP de baixa latência (`41230–41237`), descoberta UDP na sub-rede (`41229`) e proteção anti-SSRF. |
 | `electron/preload.cjs` | Ponte `contextBridge` mínima que expõe `window.fatalNet` e `window.fatalUpdater` ao renderer sem vazar APIs do Node. |
 | `electron/security.cjs` | Validadores de URL local, lista branca de flags de GPU, parser JSON seguro contra *prototype pollution*, *rate-limiter* por peer e validadores de IPC. |
 | `electron/updater.cjs` | Orquestrador do `electron-updater`: checagem periódica no GitHub Releases, download silencioso e bloqueio de reinício durante partidas (`emPartida`). |
@@ -97,7 +97,7 @@ Para suportar o mapa expandido de **Brasília (~770 m)** com dezenas de bots, pr
 | `src/hud.js` | Interface DOM estilo *Cartoon Arcade*: vida, blindagem, dinheiro, ondas, mira telescópica, medidor de Foco, *killfeed* e Loja (`[B]`). |
 | `src/minimap.js` | Minimapa tático em tempo real exibindo geometria próxima, aliados, inimigos e eventos. |
 | `src/effects.js` | Partículas de tinta, faíscas de deflexão, explosões, trilhas de projéteis e *screen shake*. |
-| `src/net.js` | Protocolo multiplayer: salas públicas/privadas, modo Global (Hyperswarm) e Corporativo (`GDFNet`), autoridade de Host e migração automática. |
+| `src/net.js` | Protocolo multiplayer: salas públicas/privadas, modo Global (Hyperswarm) e Corporativo, autoridade de Host e migração automática. |
 | `src/players.js` | Avatares 3D, interpolação de movimento, animações e barras de identificação dos jogadores remotos. |
 | `src/security.js` | Sanitização no cliente/Host: escape HTML (`escHtml`), limites numéricos (`clampNum`), validação de vetores/tiros e listas de permissão de pacotes. |
 | `src/util.js` | Funções matemáticas utilitárias, PRNG determinístico e molas físicas amortecidas (`Spring`) para recuo de câmera. |

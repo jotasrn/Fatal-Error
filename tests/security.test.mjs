@@ -213,7 +213,7 @@ test('anti-spoofing e autoridade do Host no protocolo multiplayer', () => {
   });
 });
 
-test('GDFNet / LAN: codificacao de codigo 8 letras e bloqueio anti-SSRF de IPs publicos/portas', () => {
+test('LAN: codificacao de codigo 8 letras e bloqueio anti-SSRF de IPs publicos/portas', () => {
   assert.equal(isValidPrivateLanIp('10.63.30.10'), true);
   assert.equal(isValidPrivateLanIp('192.168.1.42'), true);
   assert.equal(isValidPrivateLanIp('172.20.5.9'), true);
@@ -243,7 +243,7 @@ test('GDFNet / LAN: codificacao de codigo 8 letras e bloqueio anti-SSRF de IPs p
   assert.equal(parseLanTarget(`10.63.30.10:${LAN_PORT_BASE + 1}`).port, LAN_PORT_BASE + 1);
 });
 
-test('GDFNet / LAN: conexao real Host <-> Cliente via TCP direto e descoberta UDP', async () => {
+test('LAN: conexao real Host <-> Cliente via TCP direto e descoberta UDP', async () => {
   const hostEvents = [];
   const clientEvents = [];
   const testDiscoveryPort = 41929;

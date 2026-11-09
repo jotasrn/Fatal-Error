@@ -1139,8 +1139,8 @@ function onlineHTML() {
       <div class="row"><span>Seu Apelido</span><input type="text" class="namebox" id="setName" maxlength="14" placeholder="Seu apelido" value="${esc(myName)}"></div>
       <div class="row"><button type="button" class="big" id="quickBtn">Partida Rápida</button><span class="hint">Entra em qualquer sala aberta ou cria uma nova</span></div>
       <div class="row split"><span>ou</span></div>
-      <div class="row"><button type="button" id="createBtn">Criar Sala</button><div class="radio" style="display:flex; flex-wrap:wrap; gap:10px;"><label><input type="radio" name="vis" value="public" ${lobby.mode === 'public' || (!lobby.mode && lobby.isPublic) ? 'checked' : ''}> 🌐 Pública (Global)</label><label><input type="radio" name="vis" value="private" ${lobby.mode === 'private' || (!lobby.mode && !lobby.isPublic && !lobby.isLan) ? 'checked' : ''}> 🔒 Privada (Global)</label><label style="color:#0077aa; font-weight:bold;"><input type="radio" name="vis" value="lan" ${lobby.mode === 'lan' || lobby.isLan ? 'checked' : ''}> 🏢 Sala Interna (GDFNet / Mesma Rede)</label></div></div>
-      <div class="row"><span>Tem o código da sala?</span><input type="text" id="codeBox" placeholder="CÓDIGO OU IP" maxlength="22" autocomplete="off"><label style="font-size:16px; margin:0 4px;"><input type="checkbox" id="joinLanCheck"> Forçar GDFNet</label><button type="button" id="joinBtn">Entrar</button></div>
+      <div class="row"><button type="button" id="createBtn">Criar Sala</button><div class="radio" style="display:flex; flex-wrap:wrap; gap:10px;"><label><input type="radio" name="vis" value="public" ${lobby.mode === 'public' || (!lobby.mode && lobby.isPublic) ? 'checked' : ''}> 🌐 Pública (Global)</label><label><input type="radio" name="vis" value="private" ${lobby.mode === 'private' || (!lobby.mode && !lobby.isPublic && !lobby.isLan) ? 'checked' : ''}> 🔒 Privada (Global)</label><label style="color:#0077aa; font-weight:bold;"><input type="radio" name="vis" value="lan" ${lobby.mode === 'lan' || lobby.isLan ? 'checked' : ''}> 🏢 Sala Interna ( Mesma Rede)</label></div></div>
+      <div class="row"><span>Tem o código da sala?</span><input type="text" id="codeBox" placeholder="CÓDIGO OU IP" maxlength="22" autocomplete="off"><label style="font-size:16px; margin:0 4px;"><input type="checkbox" id="joinLanCheck"> Forçar </label><button type="button" id="joinBtn">Entrar</button></div>
       <div class="lobbylist" id="lobbylist"><div class="row"><span>Salas Abertas</span><button type="button" class="alt" id="refreshBtn">Atualizar</button></div><div class="rows" id="lobbyRows">${lobbyListHTML()}</div></div>
       <div class="status" id="status">${esc(lobby.status || '')}</div>
       ${lobby.rejoinCode ? `<div class="row"><button type="button" class="big" id="rejoinBtn">Reconectar a ${esc(lobby.rejoinCode)}</button></div>` : ''}
@@ -1153,12 +1153,12 @@ function lobbyHTML() {
   const isGdf = !!(net.isInternal || lobby.isLan);
   const directIp = isGdf && net.lanAddress ? `<span style="margin-left:10px; font-size:16px; color:#1f2937;">IP Direto: <b style="user-select:text;">${esc(net.lanAddress)}</b></span>` : '';
   const hintText = isGdf
-    ? 'Sala GDFNet: seus colegas podem clicar em "Salas Abertas" ou digitar o Código / IP Direto acima'
+    ? 'Sala : seus colegas podem clicar em "Salas Abertas" ou digitar o Código / IP Direto acima'
     : (lobby.isPublic ? 'Sala pública: qualquer um na rede ou com o código pode entrar' : 'Sala privada: passe este código para seus colegas entrarem');
   return `<h1>Sala de Espera</h1><h2>Mata-Mata Livre · Até acabar o tempo (${Math.round(FFA_TIME / 60)} min) + Bots · ${n}/${net.maxPlayers} jogadores</h2>
     ${updateBannerHTML()}
     <div class="online" id="online">
-      <div class="row"><span>Código</span><span class="code" style="user-select:text;">${shownCode}</span> ${isGdf ? '<b style="color:#0077aa; font-size:20px; margin-left:8px;">[Rede Interna GDFNet]</b>' : ''}${directIp}</div>
+      <div class="row"><span>Código</span><span class="code" style="user-select:text;">${shownCode}</span> ${isGdf ? '<b style="color:#0077aa; font-size:20px; margin-left:8px;">[Rede Interna]</b>' : ''}${directIp}</div>
       ${mapHTML(lobby.map || mapKey, host)}
       <div class="hint">${hintText}</div>
       <div class="plist">${rows.map((p) => `<div class="${p.id === lobby.hostId ? 'host' : ''}${p.id === net.id ? ' me' : ''}"><span>${esc(p.name)}</span><span>${p.id === net.id ? ' (Você)' : ''}</span></div>`).join('')}</div>
@@ -1171,7 +1171,7 @@ function lobbyListHTML() {
   if (listBusy) return '<div class="hint">Buscando salas…</div>';
   if (!lobbyList) return '<div class="hint">Clique em Atualizar para buscar salas abertas</div>';
   if (!lobbyList.length) return '<div class="hint">Nenhuma sala pública encontrada · Crie uma ou use Partida Rápida</div>';
-  return lobbyList.map((l) => `<div class="lobbyrow"><span class="code">${esc(l.code)}</span><span>${esc(l.hostName || 'Alguém')}${l.isLan ? ' <b style="color:#0077aa;">[GDFNet]</b>' : ' - Sala'}</span><span>${l.players}/${l.max}${l.inMatch ? ' · Em partida' : ''}</span>${l.full ? '<span class="status">Lotada</span>' : `<button type="button" data-join="${esc(l.code)}" data-lan="${l.isLan ? '1' : '0'}">Entrar</button>`}</div>`).join('');
+  return lobbyList.map((l) => `<div class="lobbyrow"><span class="code">${esc(l.code)}</span><span>${esc(l.hostName || 'Alguém')}${l.isLan ? ' <b style="color:#0077aa;">[Interna]</b>' : ' - Sala'}</span><span>${l.players}/${l.max}${l.inMatch ? ' · Em partida' : ''}</span>${l.full ? '<span class="status">Lotada</span>' : `<button type="button" data-join="${esc(l.code)}" data-lan="${l.isLan ? '1' : '0'}">Entrar</button>`}</div>`).join('');
 }
 async function refreshLobbies() {
   if (listBusy || net.active) return; listBusy = true; const box = hud.el.panel.querySelector('#lobbyRows'); if (box) box.innerHTML = lobbyListHTML();

@@ -1,6 +1,6 @@
 // Rede hibrida P2P do Fatal Error:
 // 1. Modo Global (SwarmNet): Hyperswarm DHT + Noise Ed25519 + UDP hole-punching (sem servidor).
-// 2. Modo Rede Interna / Corporativa GDFNet (GdfHybridNet = LanNet TCP/UDP + PeerNet WebRTC LAN):
+// 2. Modo Rede Interna / Corporativa (GdfHybridNet = LanNet TCP/UDP + PeerNet WebRTC LAN):
 //    - Prioriza conexao TCP direta na rede local (10.x.x.x / 192.168.x.x) + descoberta UDP na sub-rede,
 //      funcionando 100% offline e entre VLANs pelo codigo de 8 letras (`Gxxxxxxx`) ou IP direto.
 //    - Se o Firewall de Dominio do Windows bloquear porta TCP de entrada na maquina do Host,
@@ -28,7 +28,7 @@ const WAN_PEER_OPTS = {
   },
 };
 
-// Na GDFNet / Rede Interna, servidores STUN/TURN externos sofrem timeout no firewall corporativo
+// Na Rede Interna, servidores STUN/TURN externos sofrem timeout no firewall corporativo
 // e atrasam o ICE. Com iceServers vazio + WebRtcHideLocalIpsWithMdns desativado no Electron,
 // os dois PCs trocam candidatos host IPv4 (ex.: 10.63.30.x) instantaneamente e abrem UDP direto.
 const LAN_PEER_OPTS = {
@@ -66,7 +66,7 @@ class PeerNet {
     this.conns = new Map();
     this.isHost = false;
     this.id = null;
-    this.logicalId = null; // Permite compartilhar o mesmo hostId do LanNet no modo hibrido GDFNet
+    this.logicalId = null; // Permite compartilhar o mesmo hostId do LanNet no modo hibrido 
     this.code = null;
     this.hostId = null;
     this._transportHostId = null;
@@ -1125,7 +1125,7 @@ class GdfHybridNet {
     await this.leave();
     this.isHost = false;
     if (this.lan) {
-      if (onStatus) onStatus('Buscando salas na rede local (GDFNet)…');
+      if (onStatus) onStatus('Buscando salas na rede local…');
       const localRooms = await this.lan.discover(500);
       const openRoom = localRooms.find((r) => !r.full);
       if (openRoom) {
@@ -1175,7 +1175,7 @@ class GdfHybridNet {
   }
 }
 
-// ---- DualNet: orquestra Global P2P (Hyperswarm) e Rede Interna Corporativa (GDFNet) ----
+// ---- DualNet: orquestra Global P2P (Hyperswarm) e Rede Interna Corporativa ----
 export class DualNet {
   constructor() {
     this.swarm = (typeof window !== 'undefined' && window.FE_NET) ? new SwarmNet() : null;

@@ -46,7 +46,7 @@ if (!gotLock) {
   app.quit();
 }
 
-// Em redes corporativas (ex.: GDFNet 10.x.x.x), switches e firewalls de dominio bloqueiam
+// Em redes corporativas (ex.: 10.x.x.x), switches e firewalls de dominio bloqueiam
 // Multicast DNS (.local / UDP 5353). Desativar o ofuscamento mDNS permite que o fallback
 // WebRTC troque candidatos ICE diretos com o IP interno da placa de rede local.
 // Seguro porque o BrowserWindow e estritamente isolado no index.html local (sem sites externos).
@@ -247,7 +247,7 @@ ipcMain.on('net:close-peer', (event, payload) => {
   }
 });
 
-// ---- IPC de Rede Interna / Corporativa (GDFNet / LAN direta TCP + UDP) ----
+// ---- IPC de Rede Interna / Corporativa ( / LAN direta TCP + UDP) ----
 const lanManager = createLanManager({
   onEvent: (channel, payload) => send(win, channel, payload),
   logLine,
