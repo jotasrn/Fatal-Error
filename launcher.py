@@ -348,7 +348,7 @@ def main():
             server.shutdown()
             sys.exit(0)
     else:
-        # Abre a janela nativa do jogo
+        # Abre a janela nativa do jogo em tela cheia
         window = webview.create_window(
             title="Fatal Error",
             url=local_url,
@@ -356,8 +356,9 @@ def main():
             height=720,
             min_size=(960, 540),
             resizable=True,
+            fullscreen=True,
             confirm_close=False,
-            background_color='#f9f8f5'
+            background_color='#0b0c10'
         )
         webview.start(gui='edgechromium')
         server.shutdown()

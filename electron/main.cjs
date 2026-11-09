@@ -351,6 +351,8 @@ function createWindow() {
     height: 720,
     minWidth: 960,
     minHeight: 540,
+    fullscreen: true,
+    autoHideMenuBar: true,
     backgroundColor: '#0b0c10',
     title: 'Fatal Error',
     icon: fs.existsSync(iconPath) ? iconPath : undefined,
@@ -422,6 +424,7 @@ function createWindow() {
   win.webContents.on('unresponsive', () => logLine('window unresponsive'));
 
   win.setMenuBarVisibility(false);
+  win.setFullScreen(true);
   win.loadFile(APP_HTML_PATH);
   win.on('closed', () => { win = null; });
 }
