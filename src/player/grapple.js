@@ -13,7 +13,7 @@ export const GrappleMixin = {
   // only when they are genuinely near the aim line and not behind whatever you are pointing at,
   // so the hook stops jumping to rings above your head that you never aimed at.
   _findGrappleTarget() {
-    const ctx = this.ctx, o = this.eye, d = this.forward, maxD = 75;
+    const ctx = this.ctx, o = this.eye, d = this.forward, maxD = 75 * (this.grappleRangeMul || 1);
     const hitW = ctx.world.raycast(o, d, maxD, NO_GRAPPLE);
     const wallDist = hitW ? hitW.dist : maxD;
     // exact hit on an enemy
@@ -54,8 +54,9 @@ export const GrappleMixin = {
   _fireGrapple() {
     if (this.grapStam < STAM_MIN) { audio.winded(); this.ctx.hud.tip('O gancho precisa respirar', 0.9); return; }
     const t = this._findGrappleTarget(); if (!t) { audio.empty(); return; }
-    this.grapStam -= STAM_FIRE; this.stamPause = STAM_PAUSE;
-    const g = this.grapple; g.state = 'fly'; g.anchor.copy(t.point); this._handPos(g.from); g.hook.copy(g.from); g.flyT = 0; g.flyDur = clamp(t.dist / 110, 0.04, 0.6); g.enemy = t.enemy || null; g.mover = t.mover || null; g.t = 0;
+    this.grapStam -= STAM_FIRE * (this.grappleStamDrainMul || 1); this.stamPause = STAM_PAUSE;
+    const spdM = this.grappleSpeedMul || 1;
+    const g = this.grapple; g.state = 'fly'; g.anchor.copy(t.point); this._handPos(g.from); g.hook.copy(g.from); g.flyT = 0; g.flyDur = clamp(t.dist / (110 * spdM), 0.035, 0.6); g.enemy = t.enemy || null; g.mover = t.mover || null; g.t = 0;
     audio.grappleFire(); this.ctx.input.rumble(0.15, 0.4, 40); this.weapon.recoil.kick(-0.3, 0.2, 0.5);
   },
   detachGrapple(boost) {
@@ -78,8 +79,8 @@ export const GrappleMixin = {
     } else if (g.state === 'on') {
       if (g.mover) g.anchor.copy(g.mover.mesh.position);
       g.hook.copy(g.anchor); g.swingT += dt; const c = this.center; _d.subVectors(g.anchor, c); const dist = _d.length(); if (dist > 0.01) _d.divideScalar(dist);
-      const reeling = inp.down('grapple'); const vAlong = b.vel.dot(_d);
-      if (reeling) { g.len = Math.max(1.5, g.len - 14 * dt); if (vAlong < 22) b.vel.addScaledVector(_d, 42 * dt); }
+      const reeling = inp.down('grapple'); const vAlong = b.vel.dot(_d); const spdM = this.grappleSpeedMul || 1;
+      if (reeling) { g.len = Math.max(1.5, g.len - 14 * spdM * dt); if (vAlong < 22 * spdM) b.vel.addScaledVector(_d, 42 * spdM * dt); }
       else {
         if (vAlong < 6) b.vel.addScaledVector(_d, 3 * dt);
         // swing pump: holding forward adds energy along the view direction (Spider-Man style)
@@ -100,7 +101,7 @@ export const GrappleMixin = {
       }
       if (b.onGround && reeling && _d.y > 0.2) { b.vel.y = Math.max(b.vel.y, 4.5); b.onGround = false; }
       g.t += dt; if (g.t > 0.15) { g.t = 0; if (!ctx.world.hasLineOfSight(this.eye, g.anchor)) g.blockedT += 0.15; else g.blockedT = 0; }
-      if (inp.pressed('grapple') || dist < 1.3 || g.blockedT > 0.3 || dist > 90 || (!drag && b.onGround && g.swingT > 0.6 && !reeling)) this.detachGrapple(dist < 1.3);
+      if (inp.pressed('grapple') || dist < 1.3 || g.blockedT > 0.3 || dist > 90 * (this.grappleRangeMul || 1) || (!drag && b.onGround && g.swingT > 0.6 && !reeling)) this.detachGrapple(dist < 1.3);
     }
     if (g.state !== 'idle') {
       this._handPos(_v3); alignYAxis(this.rope, _v3, g.hook, 0.008); this.rope.visible = true;

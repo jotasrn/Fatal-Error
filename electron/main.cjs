@@ -459,6 +459,10 @@ function createWindow() {
     }
   });
   win.webContents.on('unresponsive', () => logLine('window unresponsive'));
+  win.webContents.on('console-message', (ev) => {
+    const lv = typeof ev?.level === 'number' ? ev.level : (ev?.level === 'error' ? 3 : ev?.level === 'warning' ? 2 : 1);
+    if (lv >= 2 && ev?.message) logLine(`console[L${lv}] ${ev.sourceId || ''}:${ev.lineNumber || 0} ${ev.message}`);
+  });
 
   win.setMenuBarVisibility(false);
   win.setFullScreen(true);

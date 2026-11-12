@@ -16,6 +16,7 @@ import { ShopMixin } from './shop.js';
 import { GrenadeMixin } from './grenades.js';
 import { RocketMixin } from './rockets.js';
 import { GrappleMixin } from './grapple.js';
+import { progression } from '../game/progression.js';
 
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _d = new THREE.Vector3(), _fwd = new THREE.Vector3(), _right = new THREE.Vector3(), _down = new THREE.Vector3(0, -1, 0);
 
@@ -52,6 +53,7 @@ export class Player {
     const hm = makeInkMaterial({ ink: INK.BLUE }); this.hookMesh = new THREE.Group();
     this.hookMesh.add(new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.05, 6, 10), hm)); const hb = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.3, 0.08), hm); hb.position.y = -0.2; this.hookMesh.add(hb);
     this.hookMesh.visible = false; ctx.scene.add(this.hookMesh);
+    progression.applyToPlayer(this);
   }
   reset(pos) {
     this.nadeCharge = 0; this._nadeHeld = false; if (this._arc) this.updateNadeArc(-1); this.grapStam = 1; this.blockHeld = 0;
@@ -63,6 +65,7 @@ export class Player {
     this.weapons[0].owned = true;
     for (let i = 1; i <= 6; i++) this.weapons[i].owned = false;
     this.weapons[7].owned = true;
+    progression.applyToPlayer(this);
     this.switchTo(0, true); this.rig.visible = true; this.eyeH = EYE_STAND; this.grenades = 3; this.clearNades(); this.clearRockets();
     if (this.ctx.hud) { this.ctx.hud.setMoney(this.money); this.ctx.hud.setArmor(0, this.maxArmor); }
   }
@@ -272,7 +275,7 @@ export class Player {
     this.blockHeld = this.isBlocking ? this.blockHeld + dt : 0;
     // the grapple runs on breath: hanging drains it, feet on the ground bring it back fast
     this.stamPause -= dt;
-    if (this.grapple.state !== 'idle') this.grapStam -= STAM_DRAIN * dt; else if (this.stamPause <= 0) this.grapStam += (b.onGround ? STAM_GROUND : STAM_AIR) * dt;
+    if (this.grapple.state !== 'idle') this.grapStam -= STAM_DRAIN * (this.grappleStamDrainMul || 1) * dt; else if (this.stamPause <= 0) this.grapStam += (b.onGround ? STAM_GROUND : STAM_AIR) * (this.grappleStamRegenMul || 1) * dt;
     this.grapStam = clamp(this.grapStam, 0, 1);
     if (this.grapple.state === 'on' && this.grapStam <= 0) { this.detachGrapple(false); ctx.hud.tip('Sem fôlego · Pouse para recuperar o fôlego', 1.4); }
     const hs2 = Math.hypot(b.vel.x, b.vel.z); const moving = b.onGround && hs2 > 0.6 && !this.sliding;

@@ -19,6 +19,11 @@ export class HUD {
       <div class="hud-tr">
         <div class="card wave-card"><div class="wave"><span class="lbl">Onda</span><b id="wave">1</b></div><div class="left"><b id="left">0</b> inimigos</div></div>
         <div class="modifier" id="modifier"></div><div class="timer" id="timer"></div><div class="pvpscore" id="pvpscore" hidden></div>
+        <div class="card mission-card" id="missioncard" hidden>
+          <div class="mc-title" id="missiontitle"></div>
+          <div class="mc-status" id="missionstatus"></div>
+          <div class="bar"><div class="fill" id="missionfill"></div></div>
+        </div>
       </div><div class="board" id="board" hidden></div>
       <div class="bossbar" id="bossbar"><div class="bossname" id="bossname"></div><div class="bar big"><div class="fill red" id="bossfill"></div></div></div>
       <div class="hud-bl">
@@ -113,7 +118,7 @@ export class HUD {
         </div>
       </div>`;
     const q = (id) => root.querySelector('#' + id);
-    this.el = { crosshair: q('crosshair'), gret: q('gret'), hitmarker: q('hitmarker'), dmg: q('dmg'), score: q('score'), money: q('money'), mflash: q('mflash'), armorfill: q('armorfill'), armornum: q('armornum'), buymenu: q('buymenu'), bmWallet: q('bm-wallet-amt'), bmClose: q('bmCloseBtn'), combo: q('combo'), wave: q('wave'), modifier: q('modifier'), left: q('left'), timer: q('timer'), hpfill: q('hpfill'), hpnum: q('hpnum'), mag: q('mag'), reserve: q('reserve'), reloading: q('reloading'), tally: q('tally'), weapon: q('weapon'), hint: q('hint'), slots: q('slots'), tip: q('tip'), msg: q('msg'), msgsub: q('msgsub'), killfeed: q('killfeed'), screen: q('screen'), panel: q('panel'), nades: q('nades'), scope: q('scope'), focusmark: q('focusmark'), focusmeter: q('focusmeter'), fmfill: q('fmfill'), bossbar: q('bossbar'), bossname: q('bossname'), bossfill: q('bossfill'), pvpscore: q('pvpscore'), board: q('board'), gstam: q('gstam'), gstamfill: q('gstamfill') };
+    this.el = { crosshair: q('crosshair'), gret: q('gret'), hitmarker: q('hitmarker'), dmg: q('dmg'), score: q('score'), money: q('money'), mflash: q('mflash'), armorfill: q('armorfill'), armornum: q('armornum'), buymenu: q('buymenu'), bmWallet: q('bm-wallet-amt'), bmClose: q('bmCloseBtn'), combo: q('combo'), wave: q('wave'), modifier: q('modifier'), left: q('left'), timer: q('timer'), missioncard: q('missioncard'), missiontitle: q('missiontitle'), missionstatus: q('missionstatus'), missionfill: q('missionfill'), hpfill: q('hpfill'), hpnum: q('hpnum'), mag: q('mag'), reserve: q('reserve'), reloading: q('reloading'), tally: q('tally'), weapon: q('weapon'), hint: q('hint'), slots: q('slots'), tip: q('tip'), msg: q('msg'), msgsub: q('msgsub'), killfeed: q('killfeed'), screen: q('screen'), panel: q('panel'), nades: q('nades'), scope: q('scope'), focusmark: q('focusmark'), focusmeter: q('focusmeter'), fmfill: q('fmfill'), bossbar: q('bossbar'), bossname: q('bossname'), bossfill: q('bossfill'), pvpscore: q('pvpscore'), board: q('board'), gstam: q('gstam'), gstamfill: q('gstamfill') };
     this._msgT = 0; this._scope = false; this._nades = -1; this._pad = false; this.onDevice = null; this._fmShow = false; this._fmFrac = -1; this._fmReady = false; this._lastTally = -1; this._lastSlots = ''; this._ads = false; this._mode = ''; this.onScreenClick = null; this._tipT = 0;
     // Only the dimmed backdrop (outside the panel) and explicit buttons act: clicking on text or on
     // empty space inside a menu used to start or resume the game by accident.
@@ -256,6 +261,16 @@ export class HUD {
   setWave(n, left) { if (n !== this._lastWave) { this._lastWave = n; this.el.wave.textContent = n; } if (left !== this._lastLeft) { this._lastLeft = left; this.el.left.textContent = left; } }
   setModifier(text) { const v = text || ''; if (v === this._lastMod) return; this._lastMod = v; this.el.modifier.textContent = v; }
   setTimer(text) { const v = text || ''; if (v === this._lastTimer) return; this._lastTimer = v; this.el.timer.textContent = v; }
+  setMission(info) {
+    const c = this.el.missioncard;
+    if (!c) return;
+    if (!info) { c.hidden = true; return; }
+    c.hidden = false;
+    if (this.el.missiontitle.textContent !== info.title) this.el.missiontitle.textContent = info.title || '';
+    if (this.el.missionstatus.textContent !== info.status) this.el.missionstatus.textContent = info.status || '';
+    const pct = Math.max(0, Math.min(1, info.pct || 0));
+    this.el.missionfill.style.width = (pct * 100).toFixed(1) + '%';
+  }
   setScore(score, combo) { if (score !== this._lastScore) { this._lastScore = score; this.el.score.textContent = score; } const c = combo > 1 ? 'Combo x' + combo : ''; if (c !== this._lastCombo) { this._lastCombo = c; this.el.combo.textContent = c; } }
   setWeapon(name, hint) { this.el.weapon.textContent = name; this.el.hint.textContent = hint || ''; }
   setBoss(name, frac) { if (frac == null) { this.el.bossbar.classList.remove('show'); return; } this.el.bossbar.classList.add('show'); this.el.bossname.textContent = name; this.el.bossfill.style.width = (Math.max(0, frac) * 100).toFixed(1) + '%'; }

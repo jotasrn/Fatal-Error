@@ -16,6 +16,7 @@ export class Minimap {
     const w = b.maxX - b.minX, h = b.maxZ - b.minZ; this.k = Math.min(1.6, 1024 / Math.max(w, h));
     const c = document.createElement('canvas'); c.width = Math.ceil(w * this.k); c.height = Math.ceil(h * this.k);
     const g = c.getContext('2d'); g.fillStyle = '#e9efe0'; g.fillRect(0, 0, c.width, c.height);
+    if (level.drawMinimap) level.drawMinimap(g, b, this.k); // mapas com vias reais desenham o traçado antes dos prédios
     const boxes = [...world.boxes].filter((x) => x.max.y - x.min.y > 0.9 && x.min.y < 40 && (x.max.x - x.min.x) < w + 1 && (x.max.z - x.min.z) < h + 1).sort((p, q) => p.max.y - q.max.y);
     for (const x of boxes) {
       const ht = Math.min(1, x.max.y / 26);
@@ -25,7 +26,7 @@ export class Minimap {
     this.layer = c;
   }
   // throttled: call every frame, it repaints at ~20 Hz
-  update(dt, player, enemies, remotes) {
+  update(dt, player, enemies, remotes, markers = null) {
     if (!this.enabled || !this.layer || !player) return;
     this.t -= dt; if (this.t > 0) return; this.t = 0.05;
     const g = this.g, s = R_PX / VIEW_M, b = this.b, px = player.body.pos.x, pz = player.body.pos.z;
@@ -47,6 +48,25 @@ export class Minimap {
       dot(ex, ez, T.boss ? 6 : 3.4, col);
     }
     if (remotes) for (const r of remotes) { if (!r.alive || !r.root || r.away) continue; dot(r.body.pos.x, r.body.pos.z, 4.2, '#8a3ce0'); }
+    // marcadores de missão / objetivos (com seta na borda quando estão longe)
+    if (markers && markers.length) {
+      for (const m of markers) {
+        let dx = m.x - px, dz = m.z - pz;
+        const dist = Math.hypot(dx, dz);
+        const maxM = VIEW_M - 10 / s;
+        if (dist > maxM) { dx = (dx / dist) * maxM; dz = (dz / dist) * maxM; }
+        const sz = 6.2 / s;
+        g.save();
+        g.translate(dx, dz);
+        g.rotate(Math.PI / 4);
+        g.fillStyle = m.color || '#ffd23f';
+        g.strokeStyle = '#111';
+        g.lineWidth = 1.8 / s;
+        g.fillRect(-sz / 2, -sz / 2, sz, sz);
+        g.strokeRect(-sz / 2, -sz / 2, sz, sz);
+        g.restore();
+      }
+    }
     g.restore();
     // the player: an arrow at the centre, always pointing up (the map turns instead)
     g.beginPath(); g.moveTo(R_PX, R_PX - 9); g.lineTo(R_PX + 6.5, R_PX + 7); g.lineTo(R_PX, R_PX + 3.5); g.lineTo(R_PX - 6.5, R_PX + 7); g.closePath();

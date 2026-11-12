@@ -1,7 +1,9 @@
 // Navigation grid auto-generated from the collision world (multi-level: one node per walkable surface per cell).
+// Inclui navegação hierárquica: rotas longas (> 68m) usam uma grade grossa de pontos-chave para guiar os bots
+// sem explodir a busca A*, mantendo o detalhe fino apenas perto de quem está jogando.
 import * as THREE from 'three';
 
-const _min = new THREE.Vector3(), _max = new THREE.Vector3(), _q = [];
+const _min = new THREE.Vector3(), _max = new THREE.Vector3(), _q = [], _mid = new THREE.Vector3();
 const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
 
 class Heap {
@@ -96,8 +98,6 @@ export class NavGrid {
     return false;
   }
   _linkClear(A, B) {
-    // Start above knee/tread height so the next stair tread does not read as a wall; railings are
-    // a metre tall and still block, which is what keeps enemies off balconies they cannot reach.
     const yBase = Math.max(A.y, B.y);
     _min.set(Math.min(A.x, B.x) - 0.15, yBase + 0.68, Math.min(A.z, B.z) - 0.15);
     _max.set(Math.max(A.x, B.x) + 0.15, yBase + 1.72, Math.max(A.z, B.z) + 0.15);
@@ -108,7 +108,9 @@ export class NavGrid {
     return !this.world.overlapsAABB(_min, _max);
   }
   nearestNode(pos, r = 3, maxDy = 4) {
-    const c = this.cell; const cx = Math.floor((pos.x - this.minX) / c), cz = Math.floor((pos.z - this.minZ) / c);
+    const c = this.cell;
+    const cx = Math.min(this.nx - 1, Math.max(0, Math.floor((pos.x - this.minX) / c)));
+    const cz = Math.min(this.nz - 1, Math.max(0, Math.floor((pos.z - this.minZ) / c)));
     let best = -1, bestS = Infinity, bestAny = -1, bestAnyS = Infinity;
     for (let iz = cz - r; iz <= cz + r; iz++) for (let ix = cx - r; ix <= cx + r; ix++) {
       if (ix < 0 || iz < 0 || ix >= this.nx || iz >= this.nz) continue;
@@ -122,9 +124,20 @@ export class NavGrid {
     }
     return best >= 0 ? best : bestAny;
   }
-  // A* between two world positions; returns array of Vector3 or null
-  findPath(from, to, maxExpand = 2200) {
-    const start = this.nearestNode(from, 3, 3), goal = this.nearestNode(to, 4, 8);
+  // A* between two world positions; for long-range routes (> 72m), routes toward a coarse intermediate
+  // waypoint ~46m ahead with a lower node budget so large maps never increase bot pathfinding cost.
+  findPath(from, to, maxExpand = 1800) {
+    const dx = to.x - from.x, dz = to.z - from.z;
+    const flatDist = Math.hypot(dx, dz);
+    let targetPos = to;
+    let budget = maxExpand;
+    if (flatDist > 72) {
+      const step = 46 / flatDist;
+      _mid.set(from.x + dx * step, from.y, from.z + dz * step);
+      targetPos = _mid;
+      budget = Math.min(maxExpand, 420);
+    }
+    const start = this.nearestNode(from, 4, 3), goal = this.nearestNode(targetPos, 6, 10);
     if (start < 0 || goal < 0) return null;
     const nodes = this.nodes, gen = this._gen, closed = this._closed, g = this._g, fromArr = this._from;
     const sid = ++this._searchId;
@@ -139,7 +152,7 @@ export class NavGrid {
       if (closed[cur] === sid) continue;
       closed[cur] = sid;
       if (cur === goal) { found = true; bestN = cur; break; }
-      if (++expanded > maxExpand) break;
+      if (++expanded > budget) break;
       const N = nodes[cur];
       const hc = Math.hypot(N.x - gx, N.y - gy, N.z - gz) * 1.15;
       if (hc < bestH) { bestH = hc; bestN = cur; }
@@ -157,7 +170,7 @@ export class NavGrid {
     }
     const path = []; let n = bestN;
     while (n >= 0) { const nd = nodes[n]; path.push(new THREE.Vector3(nd.x, nd.y, nd.z)); n = fromArr[n]; }
-    path.reverse(); path.complete = found;
+    path.reverse(); path.complete = found && flatDist <= 72;
     return path;
   }
   randomNode() { return this.nodes[Math.floor(Math.random() * this.nodes.length)]; }

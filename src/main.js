@@ -19,6 +19,8 @@ import { audio } from './audio.js';
 import { rand, choose, clamp } from './util.js';
 import { createSurvival } from './game/survival.js';
 import { createBrasiliaEvents } from './game/brasiliaEvents.js';
+import { progression, PROG_ITEMS } from './game/progression.js';
+import { MissionManager } from './game/missions.js';
 import { escHtml, sanitizeName, sanitizeText, clampNum, sanitizeVec3, sanitizeShots, sanitizePlayerState } from './security.js';
 
 const esc = escHtml;
@@ -30,7 +32,7 @@ const knownMap = (k) => (LEVELS.some((m) => m.key === k) ? k : 'district');
 const navCellFor = (b) => (Math.max(b.maxX - b.minX, b.maxZ - b.minZ) > 350 ? 2.0 : 1.0);
 let mapKey = knownMap(localStorage.getItem('fatal_map') || 'district');
 let level = buildLevel(R.scene, world, mapKey, { arena: false });
-let nav = new NavGrid(world, level.bounds, navCellFor(level.bounds)).build();
+let nav = new NavGrid(world, level.navBounds || level.bounds, navCellFor(level.navBounds || level.bounds)).build();
 let loadedKey = mapKey, arenaLoaded = false;
 let minimap = null; // created with the HUD below
 audio.setTune(mapKey === 'mexico' ? 'mexico' : 'district');
@@ -38,8 +40,8 @@ audio.setTune(mapKey === 'mexico' ? 'mexico' : 'district');
 function setLevel(key, on, force = false) {
   if (!force && key === loadedKey && on === arenaLoaded) return; loadedKey = key; arenaLoaded = on;
   for (const m of level.meshes) { R.scene.remove(m); if (m.geometry) m.geometry.dispose(); if (m.traverse) m.traverse((o) => { if (o !== m && o.geometry) o.geometry.dispose(); }); }
-  level.animated.length = 0; world.clear(); if (ctx.bEvents) ctx.bEvents.clear();
-  level = buildLevel(R.scene, world, key, { arena: on }); nav = new NavGrid(world, level.bounds, navCellFor(level.bounds)).build();
+  level.animated.length = 0; world.clear(); if (ctx.bEvents) ctx.bEvents.clear(); if (ctx.missions) ctx.missions.clear();
+  level = buildLevel(R.scene, world, key, { arena: on }); nav = new NavGrid(world, level.navBounds || level.bounds, navCellFor(level.navBounds || level.bounds)).build();
   ctx.level = level; ctx.nav = nav; if (minimap) minimap.setLevel(level, world); if (window.__game) { window.__game.level = level; window.__game.nav = nav; }
   audio.setTune(key === 'mexico' ? 'mexico' : 'district');
 }
@@ -144,10 +146,12 @@ hud.setArmor(player.armor, player.maxArmor);
 player.name = myName;
 const net = new Net();
 const remote = ctx.remote = new Map(); // peer id -> RemotePlayer
-const lobby = { players: new Map(), hostId: null, isPublic: true, status: '', code: '', map: null };
+const lobby = { players: new Map(), hostId: null, isPublic: true, status: '', code: '', map: null, gameMode: 'ffa' };
 const scores = new Map();      // peer id -> { name, kills, deaths }
 let screen = 'main';           // which start-screen panel is showing: main | online | lobby
-window.__game = { ctx, game, player, enemies, nav, world, level, hud, effects, input, net, remote, lobby, scores };
+ctx.progression = progression;
+const missions = ctx.missions = new MissionManager(ctx);
+window.__game = { ctx, game, player, enemies, nav, world, level, hud, effects, input, net, remote, lobby, scores, missions, progression };
 
 // Solo survival systems (waves, pickups, katana focus) live in their own module; it reads live
 // state through ctx (ctx.level is kept current by setLevel) and reports back through these.
@@ -176,7 +180,7 @@ const {
 
 // anything a bullet or a blade can hit besides enemies
 ctx.targets = () => [player, ...remote.values()];
-ctx.canHurt = (t) => online() && t !== player;
+ctx.canHurt = (t) => online() && game.onlineMode !== 'coop' && t !== player;
 ctx.raycastPlayers = (o, d, maxDist) => {
   let best = null;
   for (const t of remote.values()) {
@@ -335,9 +339,13 @@ function triggerBrasiliaManifestation() {
   // Escolhe o foco da manifestação perto dos jogadores ativos (Torre de TV/Fonte, Rodoviária/Conjunto Nacional ou Esplanada/Congresso)
   const anchors = ctx.targets().filter((t) => t && t.alive && t.body);
   const refZ = anchors.length ? choose(anchors).body.pos.z : player.body.pos.z;
-  let baseZ = 18, zoneLabel = 'NA ESPLANADA';
-  if (refZ < -265) { baseZ = -272; zoneLabel = 'NA TORRE DE TV'; }
-  else if (refZ < -125) { baseZ = -182; zoneLabel = 'NA RODOVIÁRIA'; }
+  // zonas a partir dos marcos do mapa (Torre de TV, Rodoviária, Esplanada)
+  const lmk = level.landmarks || {};
+  const zT = lmk.torre ? lmk.torre.pos.z : -316, zR = lmk.rodoviaria ? lmk.rodoviaria.pos.z : -213, zE = lmk.esplanada ? lmk.esplanada.pos.z : 18;
+  let baseZ = zE, zoneLabel = 'NA ESPLANADA';
+  if (refZ < (zT + zR) / 2) { baseZ = zT + 44; zoneLabel = 'NA TORRE DE TV'; }
+  else if (refZ < (zR + zE) / 2) { baseZ = zR + 34; zoneLabel = 'NA RODOVIÁRIA'; }
+  const snapN = (v) => { const id = nav.nearestNode(v, 6, 4); if (id >= 0) { const nd = nav.nodes[id]; v.set(nd.x, nd.y + 0.05, nd.z); } return v; };
 
   // Manifestantes + Líderes Manifestantes (marcham contra a polícia; não atacam jogadores se não forem provocados!)
   const protOffsets = [
@@ -346,7 +354,7 @@ function triggerBrasiliaManifestation() {
     [-3, 4, 'protester'], [4, 5, 'protester_leader'],
   ];
   for (const [dx, dz, kind] of protOffsets) {
-    const p = enemies.spawn(kind, new THREE.Vector3(dx, 0.25, baseZ + dz));
+    const p = enemies.spawn(kind, snapN(new THREE.Vector3(dx, 0.25, baseZ + dz)));
     p.state = 'hunt';
   }
 
@@ -356,7 +364,7 @@ function triggerBrasiliaManifestation() {
     [-4, 39, 'police_tactical'], [4, 39, 'police'], [0, 42, 'police_chief'],
   ];
   for (const [dx, dz, kind] of polOffsets) {
-    const pol = enemies.spawn(kind, new THREE.Vector3(dx, 0.25, baseZ + dz));
+    const pol = enemies.spawn(kind, snapN(new THREE.Vector3(dx, 0.25, baseZ + dz)));
     pol.state = 'hunt';
   }
 
@@ -369,8 +377,19 @@ function triggerBrasiliaManifestation() {
 
 // Trânsito de Brasília: os veículos empurram/ferem o jogador e atropelam os bots (o host decide os abates)
 const _carDir = new THREE.Vector3();
+// lado/frente do carro em relação a p (carros da malha real andam em qualquer direção: usa o yaw)
+function carLocal(car, p) {
+  const dx = p.x - car.x, dz = p.z - car.z, sy = Math.sin(car.yaw), cy = Math.cos(car.yaw);
+  return { along: dx * sy + dz * cy, side: dx * cy - dz * sy, sy, cy };
+}
+function carPush(car, p, out, sideK, fwdK, up) {
+  if (car.axis === 'free') { const l = carLocal(car, p); const sg = l.side >= 0 ? 1 : -1; return out.set(l.cy * sg * sideK + l.sy * fwdK, up, -l.sy * sg * sideK + l.cy * fwdK); }
+  if (car.axis === 'z') return out.set(p.x > car.x ? sideK : -sideK, up, car.dir * fwdK);
+  return out.set(car.dir * fwdK, up, p.z > car.z ? sideK : -sideK);
+}
 function carOverlap(car, p, r, maxY) {
   if (car.hidden || p.y - car.y > maxY || p.y - car.y < -1) return false;
+  if (car.axis === 'free') { const l = carLocal(car, p); return Math.abs(l.side) < car.w / 2 + r && Math.abs(l.along) < car.d / 2 + r; }
   const hw = car.axis === 'x' ? car.d / 2 : car.w / 2, hd = car.axis === 'x' ? car.w / 2 : car.d / 2;
   return Math.abs(p.x - car.x) < hw + r && Math.abs(p.z - car.z) < hd + r;
 }
@@ -384,13 +403,13 @@ function updateTrafficHits() {
       if (!car._hornT || now - car._hornT > 1000) { car._hornT = now; audio.horn(car.group.position); }
       if (moving && (!car._hitT || now - car._hitT > 450)) {
         car._hitT = now;
-        if (car.axis === 'z') _carDir.set(player.body.pos.x > car.x ? 0.9 : -0.9, 0.35, car.dir * 0.55);
-        else _carDir.set(car.dir * 0.55, 0.35, player.body.pos.z > car.z ? 0.9 : -0.9);
+        carPush(car, player.body.pos, _carDir, 0.9, 0.55, 0.35);
         player.knockback(_carDir.normalize(), car.isBus ? 13 : 9);
         const dmg = car.isBus ? 22 : 14; player.takeDamage(dmg, car.group.position);
         hud.kill((car.isBus ? 'Atropelado pelo ônibus' : 'Atropelado') + ' · -' + dmg + ' Vida', 0);
       } else if (!moving) { // parado no semáforo: só não deixa atravessar a lataria
-        if (car.axis === 'z') player.body.pos.x = car.x + Math.sign(player.body.pos.x - car.x || 1) * (car.w / 2 + 0.56);
+        if (car.axis === 'free') { const l = carLocal(car, player.body.pos); const sg = l.side >= 0 ? 1 : -1, push = car.w / 2 + 0.56 - Math.abs(l.side); player.body.pos.x += l.cy * sg * push; player.body.pos.z -= l.sy * sg * push; }
+        else if (car.axis === 'z') player.body.pos.x = car.x + Math.sign(player.body.pos.x - car.x || 1) * (car.w / 2 + 0.56);
         else player.body.pos.z = car.z + Math.sign(player.body.pos.z - car.z || 1) * (car.w / 2 + 0.56);
       }
     }
@@ -398,7 +417,7 @@ function updateTrafficHits() {
     for (const e of enemies.enemies) {
       if (!e.alive || e.T.flying || e.state === 'spawn') continue;
       if (!carOverlap(car, e.body.pos, e.body.halfW + 0.1, 2.6)) continue;
-      if (car.axis === 'z') _carDir.set(e.body.pos.x > car.x ? 0.6 : -0.6, 0.45, car.dir); else _carDir.set(car.dir, 0.45, e.body.pos.z > car.z ? 0.6 : -0.6);
+      carPush(car, e.body.pos, _carDir, 0.6, 1, 0.45);
       _carDir.normalize();
       if (e.T.isPet) { e.body.pos.x += _carDir.x * 1.2; e.body.pos.z += _carDir.z * 1.2; continue; } // o Orelha sai da frente
       if (e.T.boss) { if (!e._carT || now - e._carT > 800) { e._carT = now; enemies.damage(e, 120, { source: 'car', dir: _carDir.clone(), point: e.center.clone(), part: 'torso' }); } continue; }
@@ -410,7 +429,7 @@ function updateTrafficHits() {
 
 function spawnBrasiliaCivilians() {
   bEvents.reset();
-  const civSpots = [
+  const civSpots = level.civSpots || [
     ['civilian', -84, 0.3, -455],   // Estádio Mané Garrincha
     ['politician', 56, 0, -458],    // Praça do Buriti (GDF)
     ['civilian', 0, 9.5, -402],     // Terraço do Centro de Convenções Ulysses Guimarães
@@ -537,25 +556,34 @@ function applyScores(rows) {
   refreshScoreHud();
 }
 function sortedScores() { return [...scores.entries()].sort((a, b) => b[1].kills - a[1].kills || a[1].deaths - b[1].deaths); }
+const ONLINE_MODES = {
+  ffa: 'Mata-Mata Livre',
+  ctf: 'Pega-Bandeira entre as Asas',
+  koth: 'Rei do Mirante (Torre de TV)',
+  coop: 'Cooperativo (Ondas & Missões)',
+};
 function refreshScoreHud() {
   if (!online()) return;
+  const mLabel = ONLINE_MODES[game.onlineMode] || 'Mata-Mata';
   const rows = sortedScores(); const top = rows.slice(0, 3); const myIdx = rows.findIndex(([id]) => id === net.id);
   if (myIdx >= 3) top.push(rows[myIdx]);
-  hud.setPvpScore(top.map(([id, sc]) => `<div class="row${id === net.id ? ' me' : ''}"><span class="rank">${rows.findIndex(([x]) => x === id) + 1}.</span><span>${esc(sc.name)}${id === net.id ? ' (Você)' : ''}</span><b>${sc.kills}</b></div>`).join('') + `<div class="target">Mata-Mata · Restam ${mmss(matchLeft)}</div>`);
+  hud.setPvpScore(top.map(([id, sc]) => `<div class="row${id === net.id ? ' me' : ''}"><span class="rank">${rows.findIndex(([x]) => x === id) + 1}.</span><span>${esc(sc.name)}${id === net.id ? ' (Você)' : ''}</span><b>${sc.kills}</b></div>`).join('') + `<div class="target">${esc(mLabel)} · Restam ${mmss(matchLeft)}</div>`);
   hud.setModifier('');
-  if (!hud.el.board.hidden) hud.setBoard(boardHTML());
+  if (!hud.el.board.hidden) hud.setBoard(boardHTML(mLabel));
 }
 function boardHTML(title = 'Mata-Mata Livre') {
   const rows = sortedScores();
   const roomCode = esc(String(net.aliasCode || net.code || '').replace(/-\d+$/, ''));
-  return `<h3>${esc(title)}</h3>${rows.map(([id, s]) => `<div class="${id === net.id ? 'me' : ''}"><span>${esc(s.name)}${id === net.id ? ' (Você)' : ''}</span><span>${s.kills} Kills · ${s.deaths} Mortes</span></div>`).join('')}<div class="foot">Mata-Mata até acabar o tempo · Restam ${mmss(matchLeft)} · Sala ${roomCode}</div>`;
+  return `<h3>${esc(title)}</h3>${rows.map(([id, s]) => `<div class="${id === net.id ? 'me' : ''}"><span>${esc(s.name)}${id === net.id ? ' (Você)' : ''}</span><span>${s.kills} Kills · ${s.deaths} Mortes</span></div>`).join('')}<div class="foot">${esc(ONLINE_MODES[game.onlineMode] || title)} · Restam ${mmss(matchLeft)} · Sala ${roomCode}</div>`;
 }
 function endMatch(winner) {
   const w = winner && typeof winner === 'object' ? winner : { id: '', name: 'Alguém' };
   game.over = w; game.overT = 0; game.state = 'over'; endFocus(); input.exitLock(); hud.setBoard(null);
+  const earnedCr = 30 + Math.min(120, (game.kills || 0) * 4);
+  progression.addCredits(earnedCr);
   const wName = sanitizeName(w.name, 'Alguém');
   const title = w.id === net.id ? 'Você Venceu!' : wName + ' Venceu!';
-  hud.setGameplayVisible(false); hud.showScreen(`<div class="p-head"><h1 class="${w.id === net.id ? 't-gold' : ''}">${esc(title)}</h1><h2>Resultado final</h2></div>${scoreRowsHTML()}${net.isHost ? '<div class="m-play"><button type="button" class="btn btn-yellow btn-lg" data-act="go">Voltar à sala</button></div>' : '<div class="foot-hint">Aguardando o anfitrião voltar à sala…</div>'}`);
+  hud.setGameplayVisible(false); hud.showScreen(`<div class="p-head"><h1 class="${w.id === net.id ? 't-gold' : ''}">${esc(title)}</h1><h2>Resultado final · +${earnedCr} CR permanentes (Saldo: ${progression.credits} CR)</h2></div>${scoreRowsHTML()}${net.isHost ? '<div class="m-play"><button type="button" class="btn btn-yellow btn-lg" data-act="go">Voltar à sala</button></div>' : '<div class="foot-hint">Aguardando o anfitrião voltar à sala…</div>'}`);
 }
 
 // ---------------- networking ----------------
@@ -568,7 +596,7 @@ function addRemote(id, name) {
 }
 function removeRemote(id) { const r = remote.get(id); if (r) { r.dispose(); remote.delete(id); } lobby.players.delete(id); scores.delete(id); }
 function lobbyRows() { return [...lobby.players.entries()].map(([id, p]) => ({ id, name: p.name })); }
-function broadcastLobby() { net.send('lobby', { players: lobbyRows(), hostId: net.id, isPublic: lobby.isPublic, map: lobby.map || mapKey, shown: net.aliasCode || net.code }); renderLobby(); }
+function broadcastLobby() { net.send('lobby', { players: lobbyRows(), hostId: net.id, isPublic: lobby.isPublic, map: lobby.map || mapKey, gameMode: lobby.gameMode || 'ffa', shown: net.aliasCode || net.code }); renderLobby(); }
 const inMatch = () => ['play', 'dying', 'over'].includes(game.state);
 net.onPeerLeave = (id) => { const nm = (lobby.players.get(id) || {}).name; removeRemote(id); broadcastLobby(); if (inMatch()) { hud.kill((nm || 'Alguém') + ' saiu da sala', 0); sendScores(); } };
 net.onDisconnect = () => { if (lobby.order && lobby.order.some((id) => id !== lobby.hostId)) migrateHost(); else leaveOnline('O anfitrião saiu da sala'); };
@@ -613,7 +641,7 @@ net.onPeerJoin = (from, meta) => {
   lobby.players.set(from, { name }); addRemote(from, name); broadcastLobby();
   if (game.state === 'play' || game.state === 'dying') {
     if (!scores.has(from)) scores.set(from, { name, kills: 0, deaths: 0 });
-    net.sendTo(from, 'start', { late: true, spawn: farthestSpawnIndex(), map: lobby.map || mapKey, broken: level.breakables.filter((b) => !b.alive).map((b) => b.id) });
+    net.sendTo(from, 'start', { late: true, spawn: farthestSpawnIndex(), map: lobby.map || mapKey, gameMode: lobby.gameMode || 'ffa', broken: level.breakables.filter((b) => !b.alive).map((b) => b.id) });
     // Sincroniza imediatamente todos os bots vivos para o novo jogador:
     if (net.isHost) {
       for (const e of enemies.enemies) {
@@ -628,6 +656,7 @@ net.on('lobby', (d) => {
   if (!d || !Array.isArray(d.players)) return;
   lobby.hostId = typeof d.hostId === 'string' ? d.hostId : net.hostId;
   lobby.isPublic = !!d.isPublic; lobby.code = net.code; lobby.shown = sanitizeText(d.shown || net.code, 16);
+  if (d.gameMode && ONLINE_MODES[d.gameMode]) lobby.gameMode = d.gameMode;
   if (d.map) {
     lobby.map = knownMap(d.map);
     if (game.state === 'lobby' && loadedKey !== lobby.map) { setLevel(lobby.map, true); player.reset(level.playerStart); }
@@ -641,7 +670,7 @@ net.on('lobby', (d) => {
   renderLobby();
 });
 net.on('leave', (d) => { if (!d || typeof d.id !== 'string') return; const nm = (lobby.players.get(d.id) || {}).name; removeRemote(d.id); if (inMatch()) hud.kill((nm || 'Alguém') + ' saiu da sala', 0); renderLobby(); });
-net.on('start', (d) => { if (net.isHost || !d || typeof d !== 'object') return; if (d.map) lobby.map = knownMap(d.map); startMatch(!!d.late, d.spawns ? d.spawns[net.id] : d.spawn, d.map); if (Array.isArray(d.broken)) for (const id of d.broken.slice(0, 500)) { const br = level.breakables[id]; if (br) breakProp(br, null, false, true); } });
+net.on('start', (d) => { if (net.isHost || !d || typeof d !== 'object') return; if (d.map) lobby.map = knownMap(d.map); if (d.gameMode && ONLINE_MODES[d.gameMode]) lobby.gameMode = d.gameMode; startMatch(!!d.late, d.spawns ? d.spawns[net.id] : d.spawn, d.map); if (Array.isArray(d.broken)) for (const id of d.broken.slice(0, 500)) { const br = level.breakables[id]; if (br) breakProp(br, null, false, true); } });
 net.on('startreq', () => { if (net.isHost && game.state === 'lobby') hostStart(); });
 net.on('end', (d) => endMatch(d));
 net.on('backtolobby', () => { if (!net.isHost) toLobbyScreen(); });
@@ -1106,9 +1135,69 @@ const mapName = (k) => (LEVELS.find((m) => m.key === k) || LEVELS[0]).name;
 function mapHTML(sel, canPick) { if (LEVELS.length < 2) return ''; return `<div class="mapsel" id="mapsel">${LEVELS.map((m) => `<button type="button" class="mapbtn${m.key === sel ? ' on' : ''}" data-map="${m.key}" ${canPick ? '' : 'disabled'}><span class="mn">${m.name}</span><span class="mb">${m.blurb}</span></button>`).join('')}</div>`; }
 function wireMap(onPick) { const box = hud.el.panel.querySelector('#mapsel'); if (!box) return; box.addEventListener('click', (e) => { e.stopPropagation(); const b = e.target.closest('.mapbtn'); if (b && !b.disabled) onPick(b.dataset.map); }); }
 
+function progressionHTML() {
+  const cats = [
+    ['weapons', '🔫 Armas Iniciais Permanentes', (c) => c === 'weapons'],
+    ['grapple', '🪝 Melhorias do Gancho', (c) => c === 'grapple'],
+    ['orelha', '🐕 Companheiro Orelha (Combate & Pelagem)', (c) => c === 'orelha' || c === 'orelha_skin'],
+    ['skin', '🎨 Cores de Tinta das Armas', (c) => c === 'skin'],
+  ];
+  const entries = Object.entries(PROG_ITEMS);
+  const cols = cats.map(([, title, matchCat]) => {
+    const items = entries.filter(([, it]) => matchCat(it.cat));
+    const cards = items.map(([id, it]) => {
+      if (it.maxLv) {
+        const lv = progression.levelOf(id);
+        const maxed = lv >= it.maxLv;
+        const cost = maxed ? 0 : it.costs[lv];
+        const priceText = maxed ? 'MÁX' : `${cost} CR`;
+        const btnLabel = maxed ? `Nível Máx (${lv}/${it.maxLv})` : `Melhorar Nv.${lv + 1} (${cost} CR)`;
+        const dis = maxed || progression.credits < cost;
+        return `<div class="bm-card" style="padding:8px 10px; margin-bottom:6px;">
+          <div class="bm-c-top"><span class="bm-c-name">${esc(it.name)} (Nv.${lv}/${it.maxLv})</span><span class="bm-c-price">${esc(priceText)}</span></div>
+          <div class="bm-c-desc">${esc(it.desc)}</div>
+          <button type="button" class="bm-action prog-btn" data-prog="${esc(id)}" ${dis ? 'disabled' : ''}>${esc(btnLabel)}</button>
+        </div>`;
+      }
+      const unlocked = progression.isUnlocked(id);
+      const isSkin = it.cat === 'skin' || it.cat === 'orelha_skin';
+      const equipped = (it.cat === 'skin' && progression.data.equipped.weaponSkin === id) || (it.cat === 'orelha_skin' && progression.data.equipped.orelhaSkin === id);
+      const btnLabel = unlocked ? (isSkin ? (equipped ? 'Equipado' : 'Equipar') : 'Desbloqueado') : `Desbloquear (${it.cost} CR)`;
+      const dis = (unlocked && (!isSkin || equipped)) || (!unlocked && progression.credits < it.cost);
+      return `<div class="bm-card" style="padding:8px 10px; margin-bottom:6px;">
+        <div class="bm-c-top"><span class="bm-c-name">${esc(it.name)}</span><span class="bm-c-price">${unlocked ? '✓' : it.cost + ' CR'}</span></div>
+        <div class="bm-c-desc">${esc(it.desc)}</div>
+        <button type="button" class="bm-action prog-btn" data-prog="${esc(id)}" ${dis ? 'disabled' : ''}>${esc(btnLabel)}</button>
+      </div>`;
+    }).join('');
+    return `<div class="bm-col"><div class="bm-col-title">${title}</div>${cards}</div>`;
+  }).join('');
+  return `<div class="settings" id="progBox">
+    <div class="settings-row" style="justify-content:space-between; margin-bottom:8px;">
+      <span>Ganhe <b>Créditos (CR)</b> permanentes a cada onda, missão e partida (mesmo na derrota)!</span>
+      <span class="chip chip-gold">Saldo Permanente: <b id="progCrVal">${progression.credits} CR</b></span>
+    </div>
+    <div class="bm-columns" style="max-height:310px; overflow-y:auto;">${cols}</div>
+  </div>`;
+}
+function wireProgression() {
+  const box = hud.el.panel.querySelector('#progBox'); if (!box) return;
+  box.addEventListener('click', (e) => {
+    const b = e.target.closest('.prog-btn'); if (!b || b.disabled) return;
+    e.stopPropagation();
+    const res = progression.buyOrEquip(b.dataset.prog);
+    if (res.ok) {
+      audio.pickup();
+      progression.applyToPlayer(player);
+      for (const en of enemies.enemies) if (en.alive && en.T.isPet) progression.applyToOrelha(en);
+      if (game.state === 'start') showStart(); else showPause();
+    } else audio.empty();
+  });
+}
+
 // ---- menus: one header, the main actions as big buttons, and everything else in tabs so the panel
 // never has to scroll through maps, controls and settings at once (the open tab is remembered)
-const uiTab = { main: 'maps', pause: 'controls', mpause: 'board' };
+const uiTab = { main: 'maps', pause: 'progression', mpause: 'board' };
 function tabsHTML(group, tabs) {
   const cur = tabs.some((t) => t[0] === uiTab[group]) ? uiTab[group] : tabs[0][0];
   return `<div class="tabs" data-group="${group}">${tabs.map(([k, label]) => `<button type="button" class="tab${k === cur ? ' on' : ''}" data-tab="${k}">${label}</button>`).join('')}</div>
@@ -1126,14 +1215,14 @@ function mainHTML() {
   return `<div class="m-head"><div class="logo"><span class="l1">FATAL</span><span class="l2">ERROR</span></div><div class="tagline">Tiro arcade e sobrevivência num mundo rabiscado</div></div>
     ${updateBannerHTML()}
     <div class="m-play">
-      <button type="button" class="btn btn-yellow btn-xl" id="soloBtn"><span class="bt">▶ Jogar Solo</span><span class="bs">Sobreviva a ondas de inimigos</span></button>
-      <button type="button" class="btn btn-blue btn-xl" id="onlineBtn"><span class="bt">Jogar Online</span><span class="bs">Mata-mata · até 10 jogadores</span></button>
+      <button type="button" class="btn btn-yellow btn-xl" id="soloBtn"><span class="bt">▶ Jogar Solo</span><span class="bs">Ondas + Missões pela cidade</span></button>
+      <button type="button" class="btn btn-blue btn-xl" id="onlineBtn"><span class="bt">Jogar Online</span><span class="bs">Mata-Mata · Bandeira · Mirante · Coop</span></button>
     </div>
-    <div class="m-info"><span class="chip">Mapa: <b>${esc(mapName(mapKey))}</b></span><span class="chip">Versão <b>v${esc(appVersion)}</b></span>${best ? `<span class="chip chip-gold">Recorde: <b>${best}</b></span>` : ''}</div>
-    ${tabsHTML('main', [['maps', 'Mapas', mapHTML(mapKey, true)], ['controls', 'Controles', CONTROLS_HTML], ['settings', 'Ajustes', settingsHTML()]])}`;
+    <div class="m-info"><span class="chip">Mapa: <b>${esc(mapName(mapKey))}</b></span><span class="chip chip-gold">Créditos: <b>${progression.credits} CR</b></span><span class="chip">Versão <b>v${esc(appVersion)}</b></span>${best ? `<span class="chip chip-gold">Recorde: <b>${best}</b></span>` : ''}</div>
+    ${tabsHTML('main', [['maps', 'Mapas', mapHTML(mapKey, true)], ['progression', 'Progressão (' + progression.credits + ' CR)', progressionHTML()], ['controls', 'Controles', CONTROLS_HTML], ['settings', 'Ajustes', settingsHTML()]])}`;
 }
 function onlineHTML() {
-  return `<h1>Jogar Online</h1><h2>Mata-Mata Livre · Até o tempo acabar (${Math.round(FFA_TIME / 60)} min) + Bots · Até 10 jogadores</h2>
+  return `<h1>Jogar Online</h1><h2>Mata-Mata, Pega-Bandeira entre as Asas, Rei do Mirante e Cooperativo · Até 10 jogadores</h2>
     ${updateBannerHTML()}
     <div class="online" id="online">
       <div class="row"><span>Seu Apelido</span><input type="text" class="namebox" id="setName" maxlength="14" placeholder="Seu apelido" value="${esc(myName)}"></div>
@@ -1152,13 +1241,18 @@ function lobbyHTML() {
   const shownCode = esc(String(net.isHost ? (net.aliasCode || net.code) : (lobby.shown || net.code) || '').replace(/-\d+$/, ''));
   const isGdf = !!(net.isInternal || lobby.isLan);
   const directIp = isGdf && net.lanAddress ? `<span style="margin-left:10px; font-size:16px; color:#1f2937;">IP Direto: <b style="user-select:text;">${esc(net.lanAddress)}</b></span>` : '';
+  const curMode = lobby.gameMode || 'ffa';
+  const modeSel = `<div class="row"><span>Modo de Jogo</span><select id="lobbyModeSel" ${host ? '' : 'disabled'} style="font-size:16px; padding:4px 10px;">
+    ${Object.entries(ONLINE_MODES).map(([k, lbl]) => `<option value="${k}" ${curMode === k ? 'selected' : ''}>${esc(lbl)}</option>`).join('')}
+  </select></div>`;
   const hintText = isGdf
     ? 'Sala : seus colegas podem clicar em "Salas Abertas" ou digitar o Código / IP Direto acima'
     : (lobby.isPublic ? 'Sala pública: qualquer um na rede ou com o código pode entrar' : 'Sala privada: passe este código para seus colegas entrarem');
-  return `<h1>Sala de Espera</h1><h2>Mata-Mata Livre · Até acabar o tempo (${Math.round(FFA_TIME / 60)} min) + Bots · ${n}/${net.maxPlayers} jogadores</h2>
+  return `<h1>Sala de Espera</h1><h2>${esc(ONLINE_MODES[curMode] || 'Mata-Mata Livre')} · ${Math.round(FFA_TIME / 60)} min + Bots · ${n}/${net.maxPlayers} jogadores</h2>
     ${updateBannerHTML()}
     <div class="online" id="online">
       <div class="row"><span>Código</span><span class="code" style="user-select:text;">${shownCode}</span> ${isGdf ? '<b style="color:#0077aa; font-size:20px; margin-left:8px;">[Rede Interna]</b>' : ''}${directIp}</div>
+      ${modeSel}
       ${mapHTML(lobby.map || mapKey, host)}
       <div class="hint">${hintText}</div>
       <div class="plist">${rows.map((p) => `<div class="${p.id === lobby.hostId ? 'host' : ''}${p.id === net.id ? ' me' : ''}"><span>${esc(p.name)}</span><span>${p.id === net.id ? ' (Você)' : ''}</span></div>`).join('')}</div>
@@ -1202,6 +1296,14 @@ function wireOnline() {
   if (q('backBtn')) q('backBtn').addEventListener('click', () => { lobby.status = ''; lobby.rejoinCode = null; screen = 'main'; showStart(); });
   if (q('refreshBtn')) { q('refreshBtn').addEventListener('click', () => refreshLobbies()); if (!lobbyList && !listBusy) refreshLobbies(); }
   if (q('lobbyRows')) q('lobbyRows').addEventListener('click', (e) => { const b = e.target.closest('button[data-join]'); if (b) { lockButtons(box); joinLobby(b.dataset.join, b.dataset.lan === '1'); } });
+  if (q('lobbyModeSel')) {
+    q('lobbyModeSel').addEventListener('change', (e) => {
+      if (net.isHost && ONLINE_MODES[e.target.value]) {
+        lobby.gameMode = e.target.value;
+        broadcastLobby();
+      }
+    });
+  }
   wireMap((k) => {
     if (net.isHost) {
       lobby.map = knownMap(k);
@@ -1227,6 +1329,7 @@ function showStart() {
   const p = hud.el.panel;
   if (screen === 'main') {
     wireSettings();
+    wireProgression();
     wireMap((k) => { mapKey = knownMap(k); lobby.map = mapKey; localStorage.setItem('fatal_map', mapKey); setLevel(mapKey, false); player.reset(level.playerStart); showStart(); });
     p.querySelector('#soloBtn').addEventListener('click', (e) => { e.stopPropagation(); begin(); });
     p.querySelector('#onlineBtn').addEventListener('click', (e) => { e.stopPropagation(); screen = 'online'; showStart(); });
@@ -1237,22 +1340,24 @@ function showPause() {
   const resumeHint = `<div class="foot-hint"><kbd>${hud.key('pause')}</kbd> ou <kbd>${hud.key('confirm')}</kbd> para continuar</div>`;
   if (online()) {
     const pauseCode = esc(String(net.aliasCode || net.code || '').replace(/-\d+$/, ''));
-    hud.showScreen(`<div class="p-head"><h1>Menu</h1><div class="m-info"><span class="chip">Mata-mata livre</span><span class="chip">Sala <b>${pauseCode}</b></span></div></div>
+    hud.showScreen(`<div class="p-head"><h1>Menu</h1><div class="m-info"><span class="chip">${esc(ONLINE_MODES[game.onlineMode] || 'Mata-mata livre')}</span><span class="chip">Sala <b>${pauseCode}</b></span></div></div>
       <div class="m-play" id="online"><button type="button" class="btn btn-yellow btn-lg" data-act="go">▶ Continuar</button><button type="button" class="btn btn-red btn-lg" id="leaveBtn">Sair da partida</button></div>
-      ${tabsHTML('mpause', [['board', 'Placar', scoreRowsHTML()], ['controls', 'Controles', CONTROLS_HTML], ['settings', 'Ajustes', settingsHTML()]])}${resumeHint}`);
-    wireSettings(); wireOnline(); wireTabs(); return;
+      ${tabsHTML('mpause', [['board', 'Placar', scoreRowsHTML()], ['progression', 'Progressão (' + progression.credits + ' CR)', progressionHTML()], ['controls', 'Controles', CONTROLS_HTML], ['settings', 'Ajustes', settingsHTML()]])}${resumeHint}`);
+    wireSettings(); wireProgression(); wireOnline(); wireTabs(); return;
   }
-  hud.showScreen(`<div class="p-head"><h1>Pausado</h1><div class="m-info"><span class="chip">Onda <b>${game.wave}</b></span><span class="chip">Pontos <b>${game.score}</b></span></div></div>
+  hud.showScreen(`<div class="p-head"><h1>Pausado</h1><div class="m-info"><span class="chip">Onda <b>${game.wave}</b></span><span class="chip">Pontos <b>${game.score}</b></span><span class="chip chip-gold">Créditos <b>${progression.credits} CR</b></span></div></div>
     <div class="m-play"><button type="button" class="btn btn-yellow btn-lg" data-act="go">▶ Continuar</button><button type="button" class="btn btn-white btn-lg" id="menuBtn">Menu principal</button></div>
-    ${tabsHTML('pause', [['controls', 'Controles', CONTROLS_HTML], ['settings', 'Ajustes', settingsHTML()]])}${resumeHint}`);
-  wireSettings(); wireMenuBtn(); wireTabs();
+    ${tabsHTML('pause', [['progression', 'Progressão (' + progression.credits + ' CR)', progressionHTML()], ['controls', 'Controles', CONTROLS_HTML], ['settings', 'Ajustes', settingsHTML()]])}${resumeHint}`);
+  wireSettings(); wireProgression(); wireMenuBtn(); wireTabs();
 }
-function showClickToPlay() { hud.showScreen(`<div class="p-head"><h1>Partida iniciada</h1><h2>Mata-mata livre · ${Math.round(FFA_TIME / 60)} min · com bots</h2></div><div class="m-play"><button type="button" class="btn btn-yellow btn-xl" data-act="go"><span class="bt">Lutar!</span></button></div><div class="foot-hint"><kbd>${hud.key('confirm')}</kbd> para começar</div>`); }
+function showClickToPlay() { hud.showScreen(`<div class="p-head"><h1>Partida iniciada</h1><h2>${esc(ONLINE_MODES[game.onlineMode] || 'Mata-mata livre')} · ${Math.round(FFA_TIME / 60)} min · com bots</h2></div><div class="m-play"><button type="button" class="btn btn-yellow btn-xl" data-act="go"><span class="bt">Lutar!</span></button></div><div class="foot-hint"><kbd>${hud.key('confirm')}</kbd> para começar</div>`); }
 function showDead() {
   hud.setGameplayVisible(false); const nb = game.score > best; if (nb) { best = game.score; localStorage.setItem('fatal_best', String(best)); }
+  const earnedCr = 15 + Math.max(0, game.wave - 1) * 10 + Math.min(80, Math.floor((game.kills || 0) * 1.5));
+  progression.addCredits(earnedCr);
   hud.showScreen(`<div class="p-head"><h1 class="t-red">Você foi apagado!</h1></div>
-    <div class="statgrid"><div><b>${game.wave}</b><span>ondas</span></div><div><b>${game.kills}</b><span>eliminações</span></div><div><b>${game.score}</b><span>pontos</span></div></div>
-    <div class="m-info">${nb ? '<span class="chip chip-gold">Novo recorde!</span>' : `<span class="chip">Recorde: <b>${best}</b></span>`}</div>
+    <div class="statgrid"><div><b>${game.wave}</b><span>ondas</span></div><div><b>${game.kills}</b><span>eliminações</span></div><div><b>${game.score}</b><span>pontos</span></div><div><b>+${earnedCr} CR</b><span>créditos ganhos</span></div></div>
+    <div class="m-info">${nb ? '<span class="chip chip-gold">Novo recorde!</span>' : `<span class="chip">Recorde: <b>${best}</b></span>`}<span class="chip chip-gold">Saldo Permanente: <b>${progression.credits} CR</b></span></div>
     <div class="m-play"><button type="button" class="btn btn-yellow btn-lg" data-act="go">↻ Jogar de novo</button><button type="button" class="btn btn-white btn-lg" id="menuBtn">Menu principal</button></div>
     <div class="foot-hint"><kbd>${hud.key('confirm')}</kbd> para recomeçar da onda 1</div>`);
   wireMenuBtn();
@@ -1265,7 +1370,7 @@ function toLobbyScreen() { net.inMatch = false; for (const r of remote.values())
 // ---------------- run control ----------------
 function resetGame() {
   if (level.breakables.some((b) => !b.alive)) setLevel(loadedKey, arenaLoaded, true);
-  enemies.clear(); effects.clear(); survival.clearPickups();
+  enemies.clear(); effects.clear(); survival.clearPickups(); missions.clear();
   ctx.protestersRiot = false; ctx.playerWanted = false;
   player.maxHp = online() ? 110 : 120; player.regenDelay = online() ? 4 : 4.5; player.regenRate = online() ? 14 : 11;
   player.reset(level.playerStart); player.name = myName; player.lastHitBy = null; player.lastHit = null; enemies.mods.speed = 1; enemies.mods.damage = 1; hud.setModifier(''); hud.setBoss(null, null); game.boss = null; endFocus(); game.katanaStreak = 0;
@@ -1273,7 +1378,7 @@ function resetGame() {
 }
 function beginCommon() { audio.init(); audio.resume(); if (!input.usingGamepad) input.requestLock(); if (musicWanted && !audio.musicPlaying) audio.musicOn(true); hud.hideScreen(); hud.setGameplayVisible(true); game.menu = false; }
 function begin() {
-  game.mode = 'solo'; setArena(false); beginCommon();
+  game.mode = 'solo'; game.onlineMode = 'solo'; setArena(false); beginCommon();
   if (game.state === 'start' || game.state === 'dead') {
     resetGame();
     if (level.key === 'brasilia') spawnBrasiliaCivilians();
@@ -1282,7 +1387,7 @@ function begin() {
   game.state = 'play';
 }
 function beginAtWave(n) {
-  game.mode = 'solo'; setArena(false); beginCommon(); resetGame();
+  game.mode = 'solo'; game.onlineMode = 'solo'; setArena(false); beginCommon(); resetGame();
   if (level.key === 'brasilia') spawnBrasiliaCivilians();
   startWave(n); game.state = 'play';
 }
@@ -1295,23 +1400,28 @@ function hostStart() {
   // deal everyone a different spot, shuffled so the same people do not always start together
   const order = spawnSpots().map((_, i) => i); for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
   const spawns = {}; [...lobby.players.keys()].forEach((id, i) => { spawns[id] = order[i % order.length]; });
-  net.send('start', { spawns, map: lobby.map }); startMatch(false, spawns[net.id], lobby.map); sendScores();
+  net.send('start', { spawns, map: lobby.map, gameMode: lobby.gameMode || 'ffa' }); startMatch(false, spawns[net.id], lobby.map); sendScores();
 }
 function startMatch(late, spawnIdx, forcedMap) {
   if (forcedMap) lobby.map = knownMap(forcedMap);
   const chosenMap = knownMap(lobby.map || mapKey);
   lobby.map = chosenMap;
-  net.inMatch = true; game.mode = 'ffa'; enemies.mirror = !net.isHost;
+  net.inMatch = true; game.mode = 'ffa'; game.onlineMode = lobby.gameMode || 'ffa'; enemies.mirror = !net.isHost;
   setLevel(chosenMap, true); resetGame(); matchLeft = FFA_TIME; clockT = 0; game.clockStarted = true; clockRunning = true;
   // nobody sends snapshots in the lobby, so the silence clock restarts here or the sweep would drop everyone
   for (const r of remote.values()) r.lastSeen = performance.now();
   if (!scores.size) for (const [id, p] of lobby.players) scores.set(id, { name: p.name, kills: 0, deaths: 0 });
-  const spots = spawnSpots(); player.reset(spawnIdx != null && spots[spawnIdx] ? spots[spawnIdx].clone() : arenaSpawn()); beginCommon(); game.state = 'play'; screen = 'lobby'; player.shieldT = 2;
+  const spots = spawnSpots(); player.reset(spawnIdx != null && spots[spawnIdx] ? spots[spawnIdx].clone() : arenaSpawn());
+  player.team = [...lobby.players.keys()].indexOf(net.id);
+  if (player.team < 0) player.team = 0;
+  beginCommon(); game.state = 'play'; screen = 'lobby'; player.shieldT = 2;
+  if (game.onlineMode === 'ctf' || game.onlineMode === 'koth') missions.startOnlineMode(game.onlineMode);
   if (net.isHost) {
     if (level.key === 'brasilia') spawnBrasiliaCivilians();
     startWave(1);
   }
-  refreshScoreHud(); hud.message('Mata-Mata Livre', late ? 'Você entrou em uma partida em andamento' : 'Mata-Mata até acabar o tempo (' + Math.round(FFA_TIME / 60) + ' min) · Junto com os Bots!', 3);
+  const modeTitle = ONLINE_MODES[game.onlineMode] || 'Mata-Mata Livre';
+  refreshScoreHud(); hud.message(modeTitle, late ? 'Você entrou em uma partida em andamento' : modeTitle + ' (' + Math.round(FFA_TIME / 60) + ' min) · Junto com os Bots!', 3);
   hud.tip(`Segure <b>${hud.key('score')}</b> para ver o placar`, 5);
   // a match started by someone else's click cannot grab the mouse: ask for a click
   setTimeout(() => { if (game.state === 'play' && !input.pointerLocked && !input.usingGamepad) { game.menu = true; showClickToPlay(); } }, 250);
@@ -1459,7 +1569,7 @@ function stepInner(now) {
     musicHealT -= dt; if (musicHealT <= 0) { musicHealT = 2; if (musicWanted && st === 'play' && !audio.musicPlaying && audio.ctx) audio.musicOn(true); if (input.anyInput) audio.resume(); }
     { const B = level.bounds, bp = player.body.pos; if (bp.x < B.minX - 8 || bp.x > B.maxX + 8 || bp.z < B.minZ - 8 || bp.z > B.maxZ + 8 || bp.y > 150) bp.y = -100; }
     if (level.cars && playing) updateTrafficHits();
-    player.update(sdt); safeEnemies(sdt); effects.update(sdt); bEvents.update(sdt); updatePickups(sdt); netUpdate(dt);
+    player.update(sdt); safeEnemies(sdt); effects.update(sdt); bEvents.update(sdt); missions.update(sdt); updatePickups(sdt); netUpdate(dt);
     if (st === 'play' && (!online() || net.isHost)) {
       updateWaves(sdt);
       if (level.key === 'brasilia') bEvents.hostTick(sdt);
@@ -1503,7 +1613,7 @@ function stepInner(now) {
   else hud.setFocusMeter(playing && (w.kind === 'katana' || game.katanaStreak > 0 || game.focus.active), game.focus.active ? 1 : clamp(game.katanaStreak / KATANA_CHARGE_KILLS, 0, 1), game.focus.active, 'Katana');
   if (game.boss) { if (game.boss.alive) hud.setBoss(game.boss.T.name, game.boss.hp / game.boss.maxHp); else { hud.setBoss(null, null); game.boss = null; } }
   audio.setIntensity(clamp((enemies.alive + game.queue.length + remote.size * 2) / 12, 0, 1) * (game.intermission > 0 ? 0.25 : 1));
-  if (minimap) minimap.update(dt, player, enemies.enemies, remote.values());
+  if (minimap) minimap.update(dt, player, enemies.enemies, remote.values(), missions.markers);
   R.render(game.time, { hurt: player.hurtFx, flash: player.flashFx, slow: scale < 1 ? 1 : 0, lowHp: player.alive && player.hp < 30 ? 1 - player.hp / 30 : 0 });
 }
 requestAnimationFrame(tick);

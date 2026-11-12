@@ -1,18 +1,63 @@
 // The shared level builder: every map is merged ink geometry plus axis-aligned box colliders,
 // which is what the navigation grid is generated from. createBuilder returns the primitive
 // helpers (box, wall, stairs, rail, …) each map draws with, and finish() merges and finalizes.
+// Includes:
+// - 80m Distance LOD tiles (`nearGeo`, `nearBox`, `nearCyl`) for fine street/facade details
+// - GPU InstancedMesh batching (`addInstance`) for repeated trees, poles, bus stops, benches
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { makeInkMaterial, INK } from '../render.js';
 
 export function createBuilder(scene, world) {
-  const geos = {}; const L = { rings: [], spawns: [], snipers: [], pickups: [], animated: [], meshes: [], playerStart: new THREE.Vector3(0, 0, 42), bounds: { minX: -55, maxX: 55, minZ: -55, maxZ: 55 }, arenaSpawns: [], grappleMovers: [], breakables: [], key: 'district' };
+  const geos = {};
+  const nearGeos = {}; // Geometrias de detalhe fino visíveis apenas a <= 82m do jogador
+  const instGroups = new Map(); // Agrupamento de objetos repetidos em InstancedMesh único por tipo
+
+  const L = {
+    rings: [], spawns: [], snipers: [], pickups: [], animated: [], meshes: [],
+    playerStart: new THREE.Vector3(0, 0, 42),
+    bounds: { minX: -55, maxX: 55, minZ: -55, maxZ: 55 },
+    navBounds: null,
+    busStops: [],
+    landmarks: {},
+    arenaSpawns: [], grappleMovers: [], breakables: [], key: 'district',
+  };
+
   const addGeo = (g, ink) => (geos[ink] || (geos[ink] = [])).push(g);
+  // geometria em cor chapada (asfalto escuro, faixas pintadas): material 'fill'
+  const addGeoFill = (g, ink) => (geos['f' + ink] || (geos['f' + ink] = [])).push(g);
+  const addNearGeo = (g, ink) => (nearGeos[ink] || (nearGeos[ink] = [])).push(g);
   const collider = (x, y, z, w, h, d, o = {}) => world.addBox({ x: x - w / 2, y, z: z - d / 2 }, { x: x + w / 2, y: y + h, z: z + d / 2 }, { noNav: !!o.noNav, noShoot: !!o.noShoot, noGrapple: !!o.noGrapple, tag: o.tag });
+
   function box(x, y, z, w, h, d, o = {}) {
-    const g = new THREE.BoxGeometry(w, h, d); g.translate(x, y + h / 2, z); addGeo(g, o.ink ?? INK.BLUE);
-    if (!o.noCollide) collider(x, y, z, w, h, d, o);
+    const g = new THREE.BoxGeometry(w, h, d); g.translate(x, y + h / 2, z);
+    if (o.near) addNearGeo(g, o.ink ?? INK.BLUE);
+    else if (o.fill) addGeoFill(g, o.ink ?? INK.BLUE);
+    else addGeo(g, o.ink ?? INK.BLUE);
+    if (!o.noCollide && !o.near) collider(x, y, z, w, h, d, o);
   }
+
+  // Detalhe fino sem colisão, só desenhado quando o jogador está a menos de ~80m
+  function nearBox(x, y, z, w, h, d, o = {}) {
+    const g = new THREE.BoxGeometry(w, h, d); g.translate(x, y + h / 2, z);
+    addNearGeo(g, o.ink ?? INK.BLUE);
+  }
+  function nearCyl(x, y, z, r, h, o = {}) {
+    const g = new THREE.CylinderGeometry(r, r, h, o.seg ?? 8); g.translate(x, y + h / 2, z);
+    addNearGeo(g, o.ink ?? INK.BLUE);
+  }
+
+  // Registra uma instância de um objeto repetido (árvore, poste, parada, banco, lixeira).
+  // protoFn() deve retornar um array de { geo, ink, fill }. Todas as cópias viram um único desenho por peça!
+  function addInstance(kind, protoFn, x, y, z, rotY = 0, sx = 1, sy = 1, sz = 1, colorOverride = null) {
+    let grp = instGroups.get(kind);
+    if (!grp) {
+      grp = { parts: protoFn(), items: [] };
+      instGroups.set(kind, grp);
+    }
+    grp.items.push({ x, y, z, rotY, sx, sy, sz, colorOverride });
+  }
+
   const slab = (x1, z1, x2, z2, y, t, o = {}) => box((x1 + x2) / 2, y - t, (z1 + z2) / 2, x2 - x1, t, z2 - z1, o); // top surface at y
   // Wall pieces along an axis with rectangular gaps [a1, a2, yBottom = 0, yTop = h]; gaps may overlap.
   function wallPieces(a1, a2, h, gaps) {
@@ -57,10 +102,16 @@ export function createBuilder(scene, world) {
     collider(cx, y, cz, ax ? len : 0.12, 1.0, ax ? 0.12 : len, { noNav: true, noShoot: true });
   }
   function cyl(x, y, z, r, h, o = {}) {
-    const g = new THREE.CylinderGeometry(r, r, h, o.seg ?? 12); g.translate(x, y + h / 2, z); addGeo(g, o.ink ?? INK.BLUE);
-    if (!o.noCollide) collider(x, y, z, r * 1.6, h, r * 1.6, o);
+    const g = new THREE.CylinderGeometry(r, r, h, o.seg ?? 12); g.translate(x, y + h / 2, z);
+    if (o.near) addNearGeo(g, o.ink ?? INK.BLUE);
+    else addGeo(g, o.ink ?? INK.BLUE);
+    if (!o.noCollide && !o.near) collider(x, y, z, r * 1.6, h, r * 1.6, o);
   }
-  function sphere(x, y, z, r, o = {}) { const g = new THREE.SphereGeometry(r, o.seg ?? 10, o.seg ?? 8); g.translate(x, y, z); addGeo(g, o.ink ?? INK.BLUE); }
+  function sphere(x, y, z, r, o = {}) {
+    const g = new THREE.SphereGeometry(r, o.seg ?? 10, o.seg ?? 8); g.translate(x, y, z);
+    if (o.near) addNearGeo(g, o.ink ?? INK.BLUE);
+    else addGeo(g, o.ink ?? INK.BLUE);
+  }
   function ring(x, y, z, axis = 'z') {
     const g = new THREE.TorusGeometry(0.6, 0.1, 8, 20);
     if (axis === 'x') g.rotateY(Math.PI / 2); else if (axis === 'y') g.rotateX(Math.PI / 2);
@@ -70,11 +121,8 @@ export function createBuilder(scene, world) {
   const spawn = (x, y, z) => L.spawns.push(new THREE.Vector3(x, y, z));
   const sniper = (x, y, z) => L.snipers.push(new THREE.Vector3(x, y, z));
   const pickup = (x, y, z) => L.pickups.push(new THREE.Vector3(x, y, z));
+
   // ---------------- shared finish ----------------
-  // The map is merged per ink AND per ~110 m tile. One mesh per ink spanned the whole map, so the
-  // camera could never skip anything: the whole Esplanada was drawn even while looking at a wall.
-  // With tiles, frustum culling skips what is behind or beside you and the far plane drops what is
-  // beyond sight; pieces bigger than a tile (ground, roads, boundary walls) stay in one shared mesh.
   function finish() {
     const CELL = 160, buckets = new Map(), mats = {};
     for (const ink in geos) for (const g of geos[ink]) {
@@ -84,12 +132,80 @@ export function createBuilder(scene, world) {
       let list = buckets.get(key); if (!list) buckets.set(key, list = []); list.push(g);
     }
     for (const [key, list] of buckets) {
-      const ink = Number(key.slice(0, key.indexOf(':')));
+      const ik = key.slice(0, key.indexOf(':')); const fill = ik[0] === 'f'; const ink = Number(fill ? ik.slice(1) : ik);
       const merged = list.length === 1 ? list[0] : mergeGeometries(list, false);
       if (merged !== list[0]) for (const g of list) g.dispose();
-      const mesh = new THREE.Mesh(merged, mats[ink] || (mats[ink] = makeInkMaterial({ ink })));
+      const mesh = new THREE.Mesh(merged, mats[ik] || (mats[ik] = makeInkMaterial({ ink, fill, side: fill ? THREE.DoubleSide : THREE.FrontSide })));
       merged.computeBoundingSphere(); mesh.matrixAutoUpdate = false; scene.add(mesh); L.meshes.push(mesh);
     }
+
+    // 1. Detalhe por distância (~80m): agrupa pequenos objetos em blocos de 52m e só desenha os que estão a <= 82m da câmera!
+    const NEAR_CELL = 52, nearBuckets = new Map(), nearTiles = [];
+    for (const ink in nearGeos) for (const g of nearGeos[ink]) {
+      g.computeBoundingBox(); const bb = g.boundingBox;
+      const tx = Math.floor((bb.min.x + bb.max.x) / 2 / NEAR_CELL);
+      const tz = Math.floor((bb.min.z + bb.max.z) / 2 / NEAR_CELL);
+      const key = ink + ':' + tx + ',' + tz;
+      let b = nearBuckets.get(key);
+      if (!b) nearBuckets.set(key, b = { ink: Number(ink), cx: (tx + 0.5) * NEAR_CELL, cz: (tz + 0.5) * NEAR_CELL, list: [] });
+      b.list.push(g);
+    }
+    for (const b of nearBuckets.values()) {
+      const merged = b.list.length === 1 ? b.list[0] : mergeGeometries(b.list, false);
+      if (merged !== b.list[0]) for (const g of b.list) g.dispose();
+      const mesh = new THREE.Mesh(merged, mats[b.ink] || (mats[b.ink] = makeInkMaterial({ ink: b.ink })));
+      merged.computeBoundingSphere();
+      mesh.matrixAutoUpdate = false;
+      scene.add(mesh);
+      L.meshes.push(mesh);
+      nearTiles.push({ mesh, cx: b.cx, cz: b.cz });
+    }
+    if (nearTiles.length) {
+      const LOD_DIST_SQ = 86 * 86; // ~80m de raio efetivo até o centro do bloco
+      L.animated.push({
+        mesh: null,
+        update: () => {
+          const cam = typeof window !== 'undefined' && window.__game && window.__game.ctx && window.__game.ctx.camera;
+          if (!cam) return;
+          const px = cam.position.x, pz = cam.position.z;
+          for (let i = 0; i < nearTiles.length; i++) {
+            const tile = nearTiles[i];
+            const dx = tile.cx - px, dz = tile.cz - pz;
+            const vis = dx * dx + dz * dz <= LOD_DIST_SQ;
+            if (tile.mesh.visible !== vis) tile.mesh.visible = vis;
+          }
+        },
+      });
+    }
+
+    // 2. Objetos repetidos agrupados (InstancedMesh único por peça: árvores, postes, paradas, bancos)
+    const dummy = new THREE.Object3D();
+    const instMat = makeInkMaterial({ ink: INK.BLACK, side: THREE.DoubleSide });
+    for (const grp of instGroups.values()) {
+      const n = grp.items.length;
+      if (!n) continue;
+      for (const part of grp.parts) {
+        const im = new THREE.InstancedMesh(part.geo, instMat, n);
+        im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
+        for (let i = 0; i < n; i++) {
+          const it = grp.items[i];
+          dummy.position.set(it.x, it.y, it.z);
+          dummy.rotation.set(0, it.rotY || 0, 0);
+          dummy.scale.set(it.sx || 1, it.sy || 1, it.sz || 1);
+          dummy.updateMatrix();
+          im.setMatrixAt(i, dummy.matrix);
+          const ink = (part.allowOverride && it.colorOverride != null) ? it.colorOverride : (part.ink ?? INK.BLACK);
+          im.instanceColor.setXYZ(i, ink, part.fill ? 1 : 0, 0);
+        }
+        im.instanceMatrix.needsUpdate = true;
+        im.instanceColor.needsUpdate = true;
+        im.frustumCulled = false;
+        im.matrixAutoUpdate = false;
+        scene.add(im);
+        L.meshes.push(im);
+      }
+    }
+
     world.finalize();
     return L;
   }
@@ -104,5 +220,5 @@ export function createBuilder(scene, world) {
       L.animated.push({ mesh: m, update: (t) => { const a = t * sp + ph; m.position.set(Math.cos(a) * r, h + Math.sin(a * 2.3) * 3, Math.sin(a) * r * 0.7); m.lookAt(Math.cos(a + 0.05) * r, h + Math.sin((a + 0.05) * 2.3) * 3, Math.sin(a + 0.05) * r * 0.7); m.rotateZ(Math.sin(a * 3) * 0.6); } });
     }
   }
-  return { L, addGeo, collider, box, slab, wallX, wallZ, stairs, rail, cyl, sphere, ring, spawn, sniper, pickup, finish, planes, scene, world };
+  return { L, addGeo, addGeoFill, addNearGeo, collider, box, nearBox, nearCyl, addInstance, slab, wallX, wallZ, stairs, rail, cyl, sphere, ring, spawn, sniper, pickup, finish, planes, scene, world };
 }

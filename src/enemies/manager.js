@@ -7,6 +7,7 @@ import { makeBody, SEE_THROUGH } from '../physics.js';
 import { rand, randInt, clamp, damp, wrapAngle, angleLerp, alignYAxis, TAU } from '../util.js';
 import { audio } from '../audio.js';
 import { TYPES, STATE_CODES, STATE_NAMES } from './types.js';
+import { progression } from '../game/progression.js';
 const TYPE_KEYS = Object.keys(TYPES);
 // danos que não são culpa de um jogador (outro bot, queda, trânsito, desastre de evento): não revoltam a multidão nem chamam a polícia
 const COLLATERAL = new Set(['bot', 'fall', 'car', 'event']);
@@ -124,6 +125,7 @@ export class EnemyManager {
       this.damage(e, dmg, { source: 'bot', dir: _v.subVectors(e.center, from).normalize(), point: e.center.clone() });
     };
     e.body.alwaysStep = true; if (T.flying) e.body.noSnap = true; e.root.position.copy(pos); e.root.scale.setScalar(0.001);
+    if (T.isPet) progression.applyToOrelha(e);
     this.ctx.scene.add(e.root); this.enemies.push(e); this.alive++;
     if (this.ctx.batcher) this.ctx.batcher.register(e); // drawn through shared instanced meshes
     if (this.onSpawn && !this.mirror) this.onSpawn(e);
@@ -530,10 +532,44 @@ export class EnemyManager {
     b.vel.z = damp(b.vel.z, Math.cos(e.walkDir) * spd, 6, dt);
     e.yawT = e.walkDir;
   }
-  // Orelha: segue o jogador mais perto, cheira por perto quando chega e corre atrás quando fica longe
+  // Orelha: segue o jogador mais perto, mas entra em combate mordendo e atordoando bots hostis próximos!
   _thinkPet(e, dt, pp, dist, dx, dz) {
     const b = e.body; e.aimAmt = 0;
+    progression.applyToOrelha(e);
     if (dist > 70) { b.pos.set(pp.x + 2, pp.y + 0.4, pp.z + 2); b.vel.set(0, 0, 0); e.path = null; return; }
+    e.biteCool = Math.max(0, (e.biteCool || 0) - dt);
+    // Procura um inimigo hostil próximo ao jogador (<= 22m) ou ao próprio Orelha (<= 16m)
+    let prey = null, bestD2 = 22 * 22;
+    for (const o of this.enemies) {
+      if (!o.alive || o === e || o.T.isPet || o.T.isCivilian || o.T.flying || o.state === 'spawn') continue;
+      if (o.T.isPolice && !this.ctx.playerWanted) continue;
+      if (o.T.isProtester && !this.ctx.protestersRiot) continue;
+      if (Math.abs(o.body.pos.y - b.pos.y) > 3.2) continue;
+      const dPlayer2 = o.body.pos.distanceToSquared(pp);
+      const dPet2 = o.body.pos.distanceToSquared(b.pos);
+      const score = Math.min(dPlayer2, dPet2 * 1.15);
+      if (score < bestD2) { bestD2 = score; prey = o; }
+    }
+    if (prey && dist < 32) {
+      const pdx = prey.body.pos.x - b.pos.x, pdz = prey.body.pos.z - b.pos.z;
+      const pDist = Math.hypot(pdx, pdz);
+      if (pDist < 2.35) {
+        e.yawT = Math.atan2(pdx, pdz);
+        if (e.biteCool <= 0) {
+          e.biteCool = 1.05;
+          const biteDmg = Math.round(38 * (e.biteMul || progression.orelhaBiteMul || 1));
+          if (b.onGround) { b.vel.x += (pdx / (pDist || 1)) * 5.5; b.vel.z += (pdz / (pDist || 1)) * 5.5; b.vel.y = 4.6; b.onGround = false; }
+          this.damage(prey, biteDmg, { source: 'bot', point: prey.center.clone(), dir: _v.subVectors(prey.center, e.center).normalize(), part: 'torso', crit: false });
+          if (prey.alive && !prey.T.boss) { prey.state = 'stunned'; prey.t = 0; prey.stunDur = 0.65; }
+          this.ctx.effects.strokeBurst(prey.center, INK.ORANGE, 12, 5, { life: 0.25, size: 0.035 });
+          audio.lunge(e.center);
+        }
+        return;
+      }
+      this._steer(e, dt, prey.body.pos.x, prey.body.pos.z, e.T.speed * 1.38, 46);
+      if (b.onGround && pDist < 4.4 && e.biteCool <= 0.2) { b.vel.y = 5.2; b.onGround = false; }
+      return;
+    }
     if (dist > 7) { this._follow(e, dt, pp, dist > 20 ? e.T.speed * 1.25 : e.T.speed); return; }
     if (dist < 2.2) { this._steer(e, dt, b.pos.x - dx, b.pos.z - dz, 2.5, 20); e.yawT = Math.atan2(dx, dz); return; }
     e.walkTimer = (e.walkTimer || 0) - dt;
@@ -558,24 +594,72 @@ export class EnemyManager {
         const tx = threat.body.pos.x - b.pos.x, tz = threat.body.pos.z - b.pos.z;
         this._steer(e, dt, b.pos.x - tx * 3, b.pos.z - tz * 3, T.speed * 1.6, 45); e.yawT = Math.atan2(-tx, -tz); return;
       }
-      // If injured or player/threat is close, civilian panics and flees
-      if (e.scared || dist < 20 || e.hp < T.hp) {
+      // Se machucado ou tiro perto, entra em pânico e corre
+      if (e.scared || (dist < 16 && P.shooting) || e.hp < T.hp) {
         e.scared = true;
-        const fleeX = b.pos.x - dx;
-        const fleeZ = b.pos.z - dz;
-        this._steer(e, dt, fleeX, fleeZ, T.speed * 1.5, 45);
+        this._steer(e, dt, b.pos.x - dx, b.pos.z - dz, T.speed * 1.5, 45);
         e.yawT = Math.atan2(-dx, -dz);
-      } else {
-        // Peaceful civilian stroll around Brasilia
-        e.walkTimer = (e.walkTimer || 0) - dt;
-        if (e.walkTimer <= 0) {
-          e.walkTimer = rand(3, 6);
-          e.walkDir = rand(0, TAU);
-        }
-        b.vel.x = Math.sin(e.walkDir) * (T.speed * 0.55);
-        b.vel.z = Math.cos(e.walkDir) * (T.speed * 0.55);
-        e.yawT = e.walkDir;
+        return;
       }
+      // Rotina de Passageiro de Ônibus (pessoas comuns indo até a parada, esperando na fila e pegando ônibus!)
+      const stops = ctx.level && ctx.level.busStops;
+      if (stops && stops.length > 1 && e.isCommuter !== false) {
+        if (e.isCommuter === undefined) e.isCommuter = (e.id % 4) !== 0; // 75% dos civis pegam ônibus
+        if (e.isCommuter) {
+          if (!e.busStop) {
+            let bestS = null, bestSD = 130 * 130;
+            for (let i = 0; i < stops.length; i++) {
+              const s = stops[i];
+              const d2 = (s.waitX - b.pos.x) ** 2 + (s.waitZ - b.pos.z) ** 2;
+              if (d2 < bestSD && Math.abs((s.y || 0) - b.pos.y) < 3.5) { bestSD = d2; bestS = s; }
+            }
+            e.busStop = bestS || stops[e.id % stops.length];
+            e.stopSlotOff = ((e.id % 5) - 2) * 0.85;
+          }
+          const st = e.busStop;
+          const wx = st.waitX + (st.dx !== undefined ? st.dx * e.stopSlotOff : st.axis === 'x' ? e.stopSlotOff : 0);
+          const wz = st.waitZ + (st.dz !== undefined ? st.dz * e.stopSlotOff : st.axis === 'z' ? e.stopSlotOff : 0);
+          const dStop = Math.hypot(wx - b.pos.x, wz - b.pos.z);
+          if (dStop > 2.4) {
+            this._steer(e, dt, wx, wz, T.speed * 0.65, 25);
+            return;
+          }
+          // Chegou na parada: fica aguardando olhando para a rua e procura um ônibus parado na baia
+          b.vel.x = damp(b.vel.x, 0, 8, dt); b.vel.z = damp(b.vel.z, 0, 8, dt);
+          e.yawT = st.faceYaw !== undefined ? st.faceYaw : st.axis === 'z' ? (st.dir > 0 ? -Math.PI / 2 : Math.PI / 2) : (st.dir > 0 ? 0 : Math.PI);
+          const cars = ctx.level && ctx.level.cars;
+          if (cars) {
+            let boardingBus = null, bd2 = 12 * 12;
+            for (let i = 0; i < cars.length; i++) {
+              const c = cars[i];
+              if (!c.isBus || !c.alive || c.speed > 2.4) continue;
+              const cd2 = (c.x - b.pos.x) ** 2 + (c.z - b.pos.z) ** 2;
+              if (cd2 < bd2 && Math.abs((c.y || 0) - b.pos.y) < 2.8) { bd2 = cd2; boardingBus = c; }
+            }
+            if (boardingBus) {
+              this._steer(e, dt, boardingBus.x, boardingBus.z, T.speed * 0.85, 32);
+              if (bd2 < 3.2 * 3.2) {
+                // Embarcou no ônibus! Desembarca em outra parada de Brasília para manter a cidade viva
+                const nextStop = stops[(stops.indexOf(st) + 3 + (e.id % 5)) % stops.length];
+                b.pos.set(nextStop.waitX + rand(-2, 2), (nextStop.y || 0) + 0.25, nextStop.waitZ + rand(-2, 2));
+                b.vel.set(0, 0, 0);
+                e.busStop = stops[(stops.indexOf(nextStop) + 2) % stops.length];
+                this.ctx.effects.strokeBurst(b.pos.clone().add(_v.set(0, 1, 0)), INK.BLUE, 8, 3, { life: 0.3, size: 0.025 });
+              }
+            }
+          }
+          return;
+        }
+      }
+      // Passeio tranquilo pelas calçadas de Brasília
+      e.walkTimer = (e.walkTimer || 0) - dt;
+      if (e.walkTimer <= 0 || b.hitWall) {
+        e.walkTimer = rand(3, 6);
+        e.walkDir = b.hitWall && e.walkDir !== undefined ? wrapAngle(e.walkDir + Math.PI + rand(-0.5, 0.5)) : rand(0, TAU);
+      }
+      b.vel.x = Math.sin(e.walkDir) * (T.speed * 0.55);
+      b.vel.z = Math.cos(e.walkDir) * (T.speed * 0.55);
+      e.yawT = e.walkDir;
       return;
     }
     if (T.weapon === 'bomb') {
@@ -583,6 +667,23 @@ export class EnemyManager {
       if (dist < T.fuseRange && Math.abs(dy) < 2.2 && e.los) { e.fuseT = T.fuse; audio.fuse(e.center); return; }
       if (e.los && dist < 12 && Math.abs(dy) < 1.5) this._steer(e, dt, pp.x, pp.z, T.speed, 45); else this._follow(e, dt, pp, T.speed);
       return;
+    }
+    // Inteligência progressiva por onda: bots esquivam quando mirados, buscam cobertura quando feridos e flanqueiam melhor
+    const wave = (ctx.game && ctx.game.wave) || 1;
+    const smart = clamp((wave - 1) / 8, 0, 1);
+    e.dodgeCool = Math.max(0, (e.dodgeCool || 0) - dt);
+    if (smart > 0.12 && e.los && dist < 38 && b.onGround && e.dodgeCool <= 0 && P.forward && P.eye) {
+      _v.subVectors(e.center, P.eye).normalize();
+      if (_v.dot(P.forward) > 0.955) {
+        e.dodgeCool = rand(1.6, 2.8) * (1.25 - smart * 0.45);
+        e.strafeDir = Math.random() < 0.5 ? 1 : -1;
+        const juke = (6.5 + smart * 4.5) * this.mods.speed;
+        const lnx = -dz / (dist || 1) * e.strafeDir, lnz = dx / (dist || 1) * e.strafeDir;
+        if (this._groundAhead(e, lnx, lnz)) {
+          b.vel.x += lnx * juke; b.vel.z += lnz * juke;
+          if (smart > 0.45 && Math.random() < 0.4) { b.vel.y = 5.4; b.onGround = false; }
+        }
+      }
     }
     if (T.weapon === 'blade' || T.weapon === 'flag') {
       e.aimAmt = damp(e.aimAmt, 0, 8, dt);
@@ -617,7 +718,7 @@ export class EnemyManager {
       // wind up from just outside arm's length, with a clear telegraph before the swing lands
       if (dist < T.lunge && Math.abs(dy) < 1.7 && e.cool <= 0 && e.los) {
         e.attackT = 0.55; e.attackHit = false; audio.lunge(e.center);
-        b.vel.x += (dx / dist) * 2.5; b.vel.z += (dz / dist) * 2.5;
+        b.vel.x += (dx / dist) * (2.5 + smart * 1.6); b.vel.z += (dz / dist) * (2.5 + smart * 1.6);
         return;
       }
       // hold at swinging distance rather than trying to stand inside the player
@@ -629,10 +730,10 @@ export class EnemyManager {
           e.yawT = yawTo;
         } else {
           const g = dist > 4.5 ? this._approachPoint(e, dt, pp, _goal) : pp;
-          this._steer(e, dt, g.x, g.z, T.speed, 45);
+          this._steer(e, dt, g.x, g.z, T.speed * (1 + smart * 0.15), 45);
           if (b.onGround && b.hitWall) { e.stuckT += dt; if (e.stuckT > 0.25) { b.vel.y = 9; e.stuckT = 0; } }
         }
-      } else this._follow(e, dt, pp, T.speed);
+      } else this._follow(e, dt, pp, T.speed * (1 + smart * 0.12));
       return;
     }
     if (T.weapon === 'boss') { this._thinkBoss(e, dt, pp, pc, dist, dy, yawTo, P); return; }
@@ -640,22 +741,23 @@ export class EnemyManager {
     if (inRange) {
       e.aimAmt = damp(e.aimAmt, 1, 8, dt); e.yawT = yawTo;
       let mx = 0, mz = 0; const nx = dx / dist, nz = dz / dist;
+      const lowHp = e.hp < e.maxHp * 0.45 && smart > 0.2;
       if (T.stationary) { mx = 0; mz = 0; }
-      else if (dist > T.stop * e.keepMul) { this._follow(e, dt, pp, T.speed * 0.8); this._shoot(e, dt, pc, P); e.yawT = yawTo; return; }
+      else if (dist > T.stop * e.keepMul) { this._follow(e, dt, pp, T.speed * 0.85); this._shoot(e, dt, pc, P); e.yawT = yawTo; return; }
       // if the player is up on something, keep working the route up rather than strafing along
       // a ramp edge and falling off it; they still shoot on the way
       else if (Math.abs(dy) > 1.2) { this._follow(e, dt, pp, T.speed * 0.85); this._shoot(e, dt, pc, P); e.yawT = yawTo; return; }
-      else if (dist < T.keep * e.keepMul) { mx = -nx; mz = -nz; }
-      else if (dist > T.range * 0.7 && T.weapon === 'shotgun') { mx = nx; mz = nz; }
-      else { e.strafeT -= dt; if (e.strafeT <= 0) { e.strafeT = rand(0.8, 2); e.strafeDir *= -1; } mx = -nz * e.strafeDir; mz = nx * e.strafeDir; }
-      const spd = T.weapon === 'shotgun' ? T.speed : T.speed * 0.5;
-      if ((mx || mz) && this._groundAhead(e, mx, mz)) { const a = 30 * dt; b.vel.x += clamp(mx * spd - b.vel.x, -a, a); b.vel.z += clamp(mz * spd - b.vel.z, -a, a); }
+      else if (dist < T.keep * e.keepMul || (lowHp && dist < T.range * 0.65)) { mx = -nx + (-nz * e.strafeDir * 0.6); mz = -nz + (nx * e.strafeDir * 0.6); }
+      else if (dist > T.range * 0.7 && T.weapon === 'shotgun') { mx = nx + (-nz * e.strafeDir * 0.45); mz = nz + (nx * e.strafeDir * 0.45); }
+      else { e.strafeT -= dt; if (e.strafeT <= 0) { e.strafeT = rand(0.6, 1.7) * (1 - smart * 0.25); e.strafeDir *= -1; } mx = -nz * e.strafeDir; mz = nx * e.strafeDir; }
+      const spd = (T.weapon === 'shotgun' ? T.speed : T.speed * (0.52 + smart * 0.28)) * (lowHp ? 1.25 : 1);
+      if ((mx || mz) && this._groundAhead(e, mx, mz)) { const a = (30 + smart * 14) * dt; b.vel.x += clamp(mx * spd - b.vel.x, -a, a); b.vel.z += clamp(mz * spd - b.vel.z, -a, a); }
       else { b.vel.x = damp(b.vel.x, 0, 8, dt); b.vel.z = damp(b.vel.z, 0, 8, dt); }
       this._shoot(e, dt, pc, P);
     } else {
       e.aimAmt = damp(e.aimAmt, 0, 5, dt); e.burstLeft = 0; e.aimT = 0; e.aimPoint = null; this._hideLaser(e);
       if (T.stationary && e.t < 5) { b.vel.x = damp(b.vel.x, 0, 8, dt); b.vel.z = damp(b.vel.z, 0, 8, dt); e.yawT = yawTo; }
-      else this._follow(e, dt, pp, T.speed);
+      else this._follow(e, dt, pp, T.speed * (1 + smart * 0.1));
       if (e.los) e.yawT = yawTo;
     }
   }
@@ -826,9 +928,20 @@ export class EnemyManager {
   }
   _hideLaser(e) { if (e.laser) e.laser.visible = false; }
   _removeLaser(e) { if (e.laser) { this.ctx.scene.remove(e.laser); e.laser.geometry.dispose(); e.laser = null; } }
-  _fireOne(e, muzzle, pc, spread, speed, dmg, thick, P = this.ctx.player) { _d.subVectors(pc, muzzle); _d.y += rand(-0.2, 0.3); _d.normalize();
-    const pSpd = (P.body && P.body.vel) ? Math.hypot(P.body.vel.x, P.body.vel.z) : (P.speed || 0);
-    const sp = spread * (1 + pSpd * 0.06); _d.x += rand(-sp, sp); _d.y += rand(-sp, sp); _d.z += rand(-sp, sp); _d.normalize();
+  _fireOne(e, muzzle, pc, spread, speed, dmg, thick, P = this.ctx.player) {
+    const wave = (this.ctx.game && this.ctx.game.wave) || 1;
+    const smart = clamp((wave - 1) / 8, 0, 1);
+    const pVel = (P && P.body && P.body.vel) ? P.body.vel : null;
+    if (pVel && smart > 0.1 && e.T.weapon !== 'sniper') {
+      const leadT = muzzle.distanceTo(pc) / Math.max(12, speed || 30) * smart * 0.58;
+      _v3.copy(pc).addScaledVector(pVel, leadT);
+      _d.subVectors(_v3, muzzle);
+    } else {
+      _d.subVectors(pc, muzzle);
+    }
+    _d.y += rand(-0.2, 0.3); _d.normalize();
+    const pSpd = pVel ? Math.hypot(pVel.x, pVel.z) : (P.speed || 0);
+    const sp = spread * (1 + pSpd * 0.05) * (1 - smart * 0.28); _d.x += rand(-sp, sp); _d.y += rand(-sp, sp); _d.z += rand(-sp, sp); _d.normalize();
     const pInk = e.T.weapon === 'laser' ? INK.ORANGE : INK.RED;
     this.projectiles.fire(muzzle, _d, speed, dmg * this.mods.damage, e, pInk, e.T.weapon === 'laser' ? 0.06 : thick); this.ctx.effects.strokeBurst(muzzle, INK.ORANGE, 4, 4, { life: 0.07, size: 0.03 });
   }

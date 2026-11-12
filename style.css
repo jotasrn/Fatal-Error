@@ -73,6 +73,10 @@ kbd { display: inline-block; min-width: 1.2em; padding: 1px 7px 2px; font: 600 0
 .pvpscore .row.me { color: var(--ui-blue-d); font-weight: 700; }
 .pvpscore .row .rank { color: var(--ui-muted); }
 .pvpscore .target { font-size: 13px; color: var(--ui-muted); margin-top: 4px; text-align: center; }
+.mission-card { min-width: 180px; max-width: 260px; padding: 7px 12px; background: var(--ui-cream); border-color: var(--ui-ink); text-align: right; }
+.mission-card[hidden] { display: none; }
+.mission-card .mc-title { font-size: 15px; font-weight: 700; color: var(--ui-ink); line-height: 1.2; margin-top: 2px; }
+.mission-card .mc-status { font-size: 14px; font-weight: 700; color: var(--ui-blue-d); margin-top: 2px; }
 
 /* health / armor / grenades */
 .vitals { display: flex; flex-direction: column; gap: 7px; min-width: 300px; padding: 10px 14px; }

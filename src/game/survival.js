@@ -183,6 +183,7 @@ export function createSurvival(ctx, deps) {
     player.grenades = Math.min(player.maxGrenades, player.grenades + 1);
     const nPick = big ? 11 : 7;
     for (let i = 0; i < nPick; i++) spawnPickup(i < Math.ceil(nPick * 0.7) ? 'ammo' : 'health', choose(ctx.level.pickups));
+    if (ctx.missions && (!online() || game.onlineMode === 'coop')) ctx.missions.startWaveMission(n);
     if (net.active && net.isHost) net.send('ewave', { wave: n, name: boss ? enemyName(bossFor(n)) : (mod.name || '') });
   }
   function pickSpawn(type) {
@@ -230,8 +231,9 @@ export function createSurvival(ctx, deps) {
       }
     }
     if (!game.queue.length && aliveWaveCount === 0) {
-      game.intermission = 8; hud.message('Onda ' + game.wave + ' Concluída', 'Respire um pouco · +' + 200 * game.wave + ' pts', 2.5);
+      game.intermission = 8; hud.message('Onda ' + game.wave + ' Concluída', 'Respire um pouco · +' + 200 * game.wave + ' pts · +' + (25 + game.wave * 5) + ' CR', 2.5);
       game.addScore(200 * game.wave, null); audio.waveClear(); player.hp = Math.min(player.maxHp, player.hp + 40); player.addCash(300 + 50 * game.wave, 'Onda Concluída');
+      if (ctx.progression) ctx.progression.addCredits(25 + game.wave * 5);
       if (net.active && net.isHost) net.send('ewaveclear', { wave: game.wave });
     }
     hud.setWave(game.wave, aliveWaveCount + game.queue.length);

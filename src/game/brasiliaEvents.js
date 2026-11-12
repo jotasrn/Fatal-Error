@@ -86,29 +86,39 @@ export function createBrasiliaEvents(ctx, deps) {
 
   // ---------------- 7 de Setembro: o voo ----------------
   const TORRE = new THREE.Vector3(0, 60, -316), H = new THREE.Vector3(5.5, 34, 195);
+  let Z0 = -600, PASS_Z = -260, AXX = 0;
+  // posições reais vêm dos marcos do mapa (Torre de TV, Congresso, Praça dos Três Poderes, Esplanada)
+  const lm = (k) => { const L = ctx.level && ctx.level.landmarks; return L && L[k] && L[k].pos; };
+  function placeShow() {
+    const t = lm('torre'), cg = lm('congresso');
+    if (t) TORRE.set(t.x, 58, t.z);
+    if (cg) H.set(cg.x + 5.5, 34, cg.z + 22);
+    AXX = t ? t.x : 0; Z0 = TORRE.z - 284; PASS_Z = TORRE.z + 56;
+  }
   function startShow() {
+    placeShow();
     if (show) for (const pl of show.planes) scene.remove(pl.g);
     const planes = [];
     const offs = [[0, 0], [-7, -6], [7, -6], [-14, -12], [14, -12], [-21, -18], [21, -18]];
     for (let i = 0; i < offs.length; i++) planes.push({ g: makePlane(), ox: offs[i][0], oz: offs[i][1], role: i === 1 ? 'torre' : i === 2 ? 'h' : 'pass', done: false, spin: 0, ink: [INK.GREEN, INK.ORANGE, INK.BLUE][i % 3] });
     show = { t: 0, planes, puffT: 0, msgA: false, msgB: false };
   }
-  const SPEED = 46, Z0 = -600, ALT = 48;
+  const SPEED = 46, ALT = 48;
   function planeAt(pl, t, out) {
     const zf = Z0 + SPEED * t; // posição do líder
-    out.set(pl.ox, ALT + Math.sin(t * 0.7 + pl.ox) * 0.6, zf + pl.oz);
+    out.set(AXX + pl.ox, ALT + Math.sin(t * 0.7 + pl.ox) * 0.6, zf + pl.oz);
     if (pl.role === 'torre') { // perde o controle perto da torre e mergulha no mirante alto
       const t0 = (TORRE.z - 95 - Z0 - pl.oz) / SPEED, t1 = t0 + 2.6;
-      if (t > t0) { const f = Math.min(1, (t - t0) / (t1 - t0)); const ease = f * f; _v.set(pl.ox, ALT, Z0 + SPEED * t0 + pl.oz); out.lerpVectors(_v, TORRE, ease); out.x += Math.sin(f * 9) * 4 * (1 - f); out.z = THREE.MathUtils.lerp(_v.z, TORRE.z, f); }
+      if (t > t0) { const f = Math.min(1, (t - t0) / (t1 - t0)); const ease = f * f; _v.set(AXX + pl.ox, ALT, Z0 + SPEED * t0 + pl.oz); out.lerpVectors(_v, TORRE, ease); out.x += Math.sin(f * 9) * 4 * (1 - f); out.z = THREE.MathUtils.lerp(_v.z, TORRE.z, f); }
       return t > t1;
     }
     if (pl.role === 'h') { // segue o Eixo e despenca no "H" do Congresso
       const t0 = (H.z - 150 - Z0 - pl.oz) / SPEED, t1 = t0 + 4.2;
-      if (t > t0) { const f = Math.min(1, (t - t0) / (t1 - t0)); _v.set(pl.ox, ALT, Z0 + SPEED * t0 + pl.oz); out.set(THREE.MathUtils.lerp(_v.x, H.x, f) + Math.sin(f * 12) * 3 * (1 - f), THREE.MathUtils.lerp(_v.y, H.y, f * f), THREE.MathUtils.lerp(_v.z, H.z, f)); }
+      if (t > t0) { const f = Math.min(1, (t - t0) / (t1 - t0)); _v.set(AXX + pl.ox, ALT, Z0 + SPEED * t0 + pl.oz); out.set(THREE.MathUtils.lerp(_v.x, H.x, f) + Math.sin(f * 12) * 3 * (1 - f), THREE.MathUtils.lerp(_v.y, H.y, f * f), THREE.MathUtils.lerp(_v.z, H.z, f)); }
       return t > t1;
     }
     // o resto da esquadrilha arremete depois da Torre e some no céu
-    const tUp = (-260 - Z0) / SPEED; if (t > tUp) out.y += (t - tUp) * (t - tUp) * 2.2;
+    const tUp = (PASS_Z - Z0) / SPEED; if (t > tUp) out.y += (t - tUp) * (t - tUp) * 2.2;
     return out.y > 260;
   }
   function updateShow(dt) {
@@ -138,12 +148,13 @@ export function createBrasiliaEvents(ctx, deps) {
   function start8jan() {
     const k = deps.crowd ? deps.crowd() : 1;
     const n = Math.round(12 * Math.min(2.4, k));
+    const pr = lm('praca3p') || new THREE.Vector3(0, 0, 222), cg = lm('congresso') || new THREE.Vector3(0, 0, 173);
     for (let i = 0; i < n; i++) {
       const kind = i % 9 === 0 ? 'invasor_lider' : i % 3 === 1 ? 'invasor_vandalo' : 'invasor';
-      const e = enemies.spawn(kind, snap(new THREE.Vector3(rand(-40, 40), 0, rand(196, 238)))); e.state = 'hunt';
+      const e = enemies.spawn(kind, snap(new THREE.Vector3(pr.x + rand(-40, 40), 0, pr.z + rand(-26, 16)))); e.state = 'hunt';
     }
-    for (const [x, z, kind] of [[-8, 128, 'police'], [8, 128, 'police'], [0, 124, 'police_chief'], [-30, 150, 'police_tactical'], [30, 150, 'police_tactical']]) { const p = enemies.spawn(kind, snap(new THREE.Vector3(x, 0, z))); p.state = 'hunt'; }
-    audio.siren(new THREE.Vector3(0, 0, 200));
+    for (const [x, z, kind] of [[-8, -45, 'police'], [8, -45, 'police'], [0, -49, 'police_chief'], [-30, -23, 'police_tactical'], [30, -23, 'police_tactical']]) { const p = enemies.spawn(kind, snap(new THREE.Vector3(cg.x + x, 0, cg.z + z))); p.state = 'hunt'; }
+    audio.siren(new THREE.Vector3(pr.x, 0, pr.z - 22));
     say8jan();
     if (net.active && net.isHost) net.send('bevent', { k: '8jan' });
   }
@@ -153,8 +164,9 @@ export function createBrasiliaEvents(ctx, deps) {
   function start7set() {
     const k = deps.crowd ? deps.crowd() : 1;
     const n = Math.round(12 * Math.min(2, k));
-    for (let i = 0; i < n; i++) { const s = i % 2 ? 1 : -1; const e = enemies.spawn(i % 4 === 3 ? 'civilian' : 'espectador', snap(new THREE.Vector3(s * rand(42, 46), 0, rand(-70, 80)))); e.state = 'hunt'; }
-    for (const [x, z] of [[-44, -40], [44, 0], [-44, 40]]) { const p = enemies.spawn('police', snap(new THREE.Vector3(x, 0, z))); p.state = 'hunt'; }
+    const es = lm('esplanada'), ex = es ? es.x : 0, ez = es ? es.z : 0, hw = es ? 50 : 44, span = es ? 130 : 75;
+    for (let i = 0; i < n; i++) { const s = i % 2 ? 1 : -1; const e = enemies.spawn(i % 4 === 3 ? 'civilian' : 'espectador', snap(new THREE.Vector3(ex + s * rand(hw - 2, hw + 2), 0, ez + rand(-span, span)))); e.state = 'hunt'; }
+    for (const [x, z] of [[-1, -0.5], [1, 0], [-1, 0.5]]) { const p = enemies.spawn('police', snap(new THREE.Vector3(ex + x * hw, 0, ez + z * span))); p.state = 'hunt'; }
     say7set(); startShow();
     if (net.active && net.isHost) net.send('bevent', { k: '7set' });
   }
