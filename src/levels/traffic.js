@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { INK, makeInkMaterial } from '../render.js';
+import { terrainHeight as TH } from './brasiliaElev.js';
 
 const { BLUE: BL, RED: RD, BLACK: BK, ORANGE: OR, GREEN: GN, PINK: PK } = INK;
 // a colour is [ink, filled]: unfilled slate reads as white paint, unfilled amber as yellow
@@ -294,7 +295,7 @@ export function buildGraphTraffic(B, net, opts = {}) {
         const pa = P[Math.max(0, i - 1)], pb = P[Math.min(P.length - 1, i + 1)];
         let tx = pb[0] - pa[0], tz = pb[2] - pa[2]; const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl;
         // direita de quem anda em (tx, tz) no plano xz: (-tz, tx)
-        pts.push(P[i][0] - tz * off, P[i][1], P[i][2] + tx * off);
+        { const lx = P[i][0] - tz * off, lz = P[i][2] + tx * off; pts.push(lx, P[i][1] + TH(lx, lz), lz); }
         if (i) cum.push(cum[i - 1] + Math.hypot(pts[i * 3] - pts[i * 3 - 3], pts[i * 3 + 2] - pts[i * 3 - 1]));
       }
       lanes.push({ pts, cum, len: cum[cum.length - 1], cars: [] });

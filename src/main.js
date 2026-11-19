@@ -1716,7 +1716,7 @@ function stepInner(now) {
     }
     if (slotSig !== hud._lastSlotSig) {
       hud._lastSlotSig = slotSig;
-      hud.setSlots(player.weapons.map((wp, i) => ({ name: wp.name, active: i === player.weaponIndex, ammo: wp.owned ? (wp.isGun ? wp.mag + '/' + wp.reserve : '∞') : 'Bloqueada', empty: wp.isGun && wp.mag === 0 && wp.reserve === 0, locked: !wp.owned })));
+      hud.setSlots(player.weapons.map((wp, i) => ({ num: i + 1, name: wp.name, active: i === player.weaponIndex, ammo: wp.owned ? (wp.isGun ? wp.mag + '/' + wp.reserve : '∞') : 'Bloqueada', empty: wp.isGun && wp.mag === 0 && wp.reserve === 0, locked: !wp.owned })));
     }
   }
   hud.setGrenades(player.grenades); hud.setGrappleStamina(player.grapStam); hud.setHealth(player.hp, player.maxHp); hud.setSpread(w.spreadPx); hud.update(dt);

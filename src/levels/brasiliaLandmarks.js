@@ -4,41 +4,43 @@
 import * as THREE from 'three';
 import { INK } from '../render.js';
 import { rand, TAU } from '../util.js';
+import { terrainHeight } from './brasiliaElev.js';
 
 const { BLUE: BL, RED: RD, BLACK: BK, ORANGE: OR, GREEN: GN, PINK: PK } = INK;
 
 // API do builder com tudo deslocado de (ox, oz)
 export function shifted(B, ox, oz) {
   const { L } = B;
+  const oy = terrainHeight(ox, oz);   // monumento assenta no relevo real (DEM)
   const A = {
     L, scene: B.scene,
-    box: (x, y, z, w, h, d, o) => B.box(x + ox, y, z + oz, w, h, d, o),
-    slab: (x1, z1, x2, z2, y, t, o) => B.slab(x1 + ox, z1 + oz, x2 + ox, z2 + oz, y, t, o),
-    stairs: (x, y, z, dir, n, w, o) => { const r = B.stairs(x + ox, y, z + oz, dir, n, w, o); return { x: r.x - ox, z: r.z - oz, y: r.y }; },
-    rail: (x1, z1, x2, z2, y, o) => B.rail(x1 + ox, z1 + oz, x2 + ox, z2 + oz, y, o),
-    cyl: (x, y, z, r, h, o) => B.cyl(x + ox, y, z + oz, r, h, o),
-    sphere: (x, y, z, r, o) => B.sphere(x + ox, y, z + oz, r, o),
-    ring: (x, y, z, a) => B.ring(x + ox, y, z + oz, a),
-    spawn: (x, y, z) => B.spawn(x + ox, y, z + oz),
-    sniper: (x, y, z) => B.sniper(x + ox, y, z + oz),
-    pickup: (x, y, z) => B.pickup(x + ox, y, z + oz),
-    collider: (x, y, z, w, h, d, o) => B.collider(x + ox, y, z + oz, w, h, d, o),
-    deco: (g, ink) => { g.translate(ox, 0, oz); B.addGeo(g, ink); },
-    arena: (x, y, z) => L.arenaSpawns.push(new THREE.Vector3(x + ox, y, z + oz)),
+    box: (x, y, z, w, h, d, o) => B.box(x + ox, y + oy, z + oz, w, h, d, o),
+    slab: (x1, z1, x2, z2, y, t, o) => B.slab(x1 + ox, z1 + oz, x2 + ox, z2 + oz, y + oy, t, o),
+    stairs: (x, y, z, dir, n, w, o) => { const r = B.stairs(x + ox, y + oy, z + oz, dir, n, w, o); return { x: r.x - ox, z: r.z - oz, y: r.y - oy }; },
+    rail: (x1, z1, x2, z2, y, o) => B.rail(x1 + ox, z1 + oz, x2 + ox, z2 + oz, y + oy, o),
+    cyl: (x, y, z, r, h, o) => B.cyl(x + ox, y + oy, z + oz, r, h, o),
+    sphere: (x, y, z, r, o) => B.sphere(x + ox, y + oy, z + oz, r, o),
+    ring: (x, y, z, a) => B.ring(x + ox, y + oy, z + oz, a),
+    spawn: (x, y, z) => B.spawn(x + ox, y + oy, z + oz),
+    sniper: (x, y, z) => B.sniper(x + ox, y + oy, z + oz),
+    pickup: (x, y, z) => B.pickup(x + ox, y + oy, z + oz),
+    collider: (x, y, z, w, h, d, o) => B.collider(x + ox, y + oy, z + oz, w, h, d, o),
+    deco: (g, ink) => { g.translate(ox, oy, oz); B.addGeo(g, ink); },
+    arena: (x, y, z) => L.arenaSpawns.push(new THREE.Vector3(x + ox, y + oy, z + oz)),
   };
   // fachada modernista: faixas por andar e montantes (desenho fino só de perto)
   A.facade = (cx, cz, w, d, h, floorH, ink = BK, mull = 3.2) => {
-    for (let y = floorH; y < h - 0.3; y += floorH) B.box(cx + ox, y - 0.12, cz + oz, w + 0.35, 0.24, d + 0.35, { ink, noCollide: true });
-    for (let x = cx - w / 2 + mull / 2; x < cx + w / 2; x += mull) for (const s of [-1, 1]) B.nearBox(x + ox, 0.4, cz + s * (d / 2 + 0.08) + oz, 0.14, h - 0.6, 0.16, { ink });
+    for (let y = floorH; y < h - 0.3; y += floorH) B.box(cx + ox, y - 0.12 + oy, cz + oz, w + 0.35, 0.24, d + 0.35, { ink, noCollide: true });
+    for (let x = cx - w / 2 + mull / 2; x < cx + w / 2; x += mull) for (const s of [-1, 1]) B.nearBox(x + ox, 0.4 + oy, cz + s * (d / 2 + 0.08) + oz, 0.14, h - 0.6, 0.16, { ink });
   };
   A.domeCollider = (x, y0, z, r, n = 6, o = {}) => {
-    for (let i = 0; i < n; i++) { const yb = (i / n) * r, rr = Math.sqrt(Math.max(0, r * r - yb * yb)) * 0.86; B.collider(x + ox, y0 + yb, z + oz, rr * 2, r / n, rr * 2, o); }
+    for (let i = 0; i < n; i++) { const yb = (i / n) * r, rr = Math.sqrt(Math.max(0, r * r - yb * yb)) * 0.86; B.collider(x + ox, y0 + yb + oy, z + oz, rr * 2, r / n, rr * 2, o); }
   };
   return A;
 }
 // Versão espelhada em X: x -> c - x. Os blocos abaixo foram desenhados com o norte em -X; no mapa
 // real (sem espelhar) o norte fica em +X, então eles são refletidos em torno do próprio centro.
-function mirrored(B, c, oz) {
+function mirrored(B, c, oz, oy = 0) {
   const { L } = B; const mx = (x) => c - x;
   const flipGeo = (g) => {
     g.scale(-1, 1, 1);
@@ -48,31 +50,31 @@ function mirrored(B, c, oz) {
   };
   const A = {
     L, scene: B.scene,
-    box: (x, y, z, w, h, d, o) => B.box(mx(x), y, z + oz, w, h, d, o),
-    slab: (x1, z1, x2, z2, y, t, o) => B.slab(mx(x2), z1 + oz, mx(x1), z2 + oz, y, t, o),
-    stairs: (x, y, z, dir, n, w, o) => { const nd = dir === '+x' ? '-x' : dir === '-x' ? '+x' : dir; const r = B.stairs(mx(x), y, z + oz, nd, n, w, o); return { x: mx(r.x), z: r.z - oz, y: r.y }; },
-    rail: (x1, z1, x2, z2, y, o) => B.rail(mx(x1), z1 + oz, mx(x2), z2 + oz, y, o),
-    cyl: (x, y, z, r, h, o) => B.cyl(mx(x), y, z + oz, r, h, o),
-    sphere: (x, y, z, r, o) => B.sphere(mx(x), y, z + oz, r, o),
-    ring: (x, y, z, a) => B.ring(mx(x), y, z + oz, a),
-    spawn: (x, y, z) => B.spawn(mx(x), y, z + oz),
-    sniper: (x, y, z) => B.sniper(mx(x), y, z + oz),
-    pickup: (x, y, z) => B.pickup(mx(x), y, z + oz),
-    collider: (x, y, z, w, h, d, o) => B.collider(mx(x), y, z + oz, w, h, d, o),
-    deco: (g, ink) => { flipGeo(g); g.translate(c, 0, oz); B.addGeo(g, ink); },
-    arena: (x, y, z) => L.arenaSpawns.push(new THREE.Vector3(mx(x), y, z + oz)),
+    box: (x, y, z, w, h, d, o) => B.box(mx(x), y + oy, z + oz, w, h, d, o),
+    slab: (x1, z1, x2, z2, y, t, o) => B.slab(mx(x2), z1 + oz, mx(x1), z2 + oz, y + oy, t, o),
+    stairs: (x, y, z, dir, n, w, o) => { const nd = dir === '+x' ? '-x' : dir === '-x' ? '+x' : dir; const r = B.stairs(mx(x), y + oy, z + oz, nd, n, w, o); return { x: mx(r.x), z: r.z - oz, y: r.y - oy }; },
+    rail: (x1, z1, x2, z2, y, o) => B.rail(mx(x1), z1 + oz, mx(x2), z2 + oz, y + oy, o),
+    cyl: (x, y, z, r, h, o) => B.cyl(mx(x), y + oy, z + oz, r, h, o),
+    sphere: (x, y, z, r, o) => B.sphere(mx(x), y + oy, z + oz, r, o),
+    ring: (x, y, z, a) => B.ring(mx(x), y + oy, z + oz, a),
+    spawn: (x, y, z) => B.spawn(mx(x), y + oy, z + oz),
+    sniper: (x, y, z) => B.sniper(mx(x), y + oy, z + oz),
+    pickup: (x, y, z) => B.pickup(mx(x), y + oy, z + oz),
+    collider: (x, y, z, w, h, d, o) => B.collider(mx(x), y + oy, z + oz, w, h, d, o),
+    deco: (g, ink) => { flipGeo(g); g.translate(c, oy, oz); B.addGeo(g, ink); },
+    arena: (x, y, z) => L.arenaSpawns.push(new THREE.Vector3(mx(x), y + oy, z + oz)),
   };
   A.facade = (cx, cz, w, d, h, floorH, ink = BK, mull = 3.2) => {
-    for (let y = floorH; y < h - 0.3; y += floorH) B.box(mx(cx), y - 0.12, cz + oz, w + 0.35, 0.24, d + 0.35, { ink, noCollide: true });
-    for (let x = cx - w / 2 + mull / 2; x < cx + w / 2; x += mull) for (const s of [-1, 1]) B.nearBox(mx(x), 0.4, cz + s * (d / 2 + 0.08) + oz, 0.14, h - 0.6, 0.16, { ink });
+    for (let y = floorH; y < h - 0.3; y += floorH) B.box(mx(cx), y - 0.12 + oy, cz + oz, w + 0.35, 0.24, d + 0.35, { ink, noCollide: true });
+    for (let x = cx - w / 2 + mull / 2; x < cx + w / 2; x += mull) for (const s of [-1, 1]) B.nearBox(mx(x), 0.4 + oy, cz + s * (d / 2 + 0.08) + oz, 0.14, h - 0.6, 0.16, { ink });
   };
   A.domeCollider = (x, y0, z, r, n = 6, o = {}) => {
-    for (let i = 0; i < n; i++) { const yb = (i / n) * r, rr = Math.sqrt(Math.max(0, r * r - yb * yb)) * 0.86; B.collider(mx(x), y0 + yb, z + oz, rr * 2, r / n, rr * 2, o); }
+    for (let i = 0; i < n; i++) { const yb = (i / n) * r, rr = Math.sqrt(Math.max(0, r * r - yb * yb)) * 0.86; B.collider(mx(x), y0 + yb + oy, z + oz, rr * 2, r / n, rr * 2, o); }
   };
   return A;
 }
 // coloca um bloco desenhado em torno de (px, pz) na posição real (x, z), espelhado (norte em +X)
-const at = (B, x, z, px, pz) => mirrored(B, x + px, z - pz);
+const at = (B, x, z, px, pz) => mirrored(B, x + px, z - pz, terrainHeight(x, z));
 
 export function torreDeTV(B, x, z) {
   const A = at(B, x, z, 0, -316);
@@ -446,12 +448,13 @@ export function panteao(B, x, z) {
 // Lago Paranoá ao fundo (leste), Palácio da Alvorada e Ponte JK como paisagem (sem malha de bots)
 export function lagoParanoa(B, zEdge, xMin, xMax) {
   const { box, cyl, addGeo, collider } = B;
-  const g = new THREE.PlaneGeometry(xMax - xMin + 900, 1300); g.rotateX(-Math.PI / 2); g.translate((xMin + xMax) / 2, -0.4, zEdge + 30 + 650); addGeo(g, BL);
+  const oy = terrainHeight((xMin + xMax) / 2, zEdge);   // orla acompanha o relevo da borda leste (caimento pro lago)
+  const g = new THREE.PlaneGeometry(xMax - xMin + 900, 1300); g.rotateX(-Math.PI / 2); g.translate((xMin + xMax) / 2, -0.4 + oy, zEdge + 30 + 650); addGeo(g, BL);
   // orla com calçadão, gramado e mureta protetora sólida
-  box((xMin + xMax) / 2, -0.85, zEdge + 15, xMax - xMin + 200, 0.85, 30, { ink: GN });
-  box((xMin + xMax) / 2, 0, zEdge + 29.5, xMax - xMin + 200, 1.2, 0.8, { ink: BK });
+  box((xMin + xMax) / 2, -0.85 + oy, zEdge + 15, xMax - xMin + 200, 0.85, 30, { ink: GN });
+  box((xMin + xMax) / 2, oy, zEdge + 29.5, xMax - xMin + 200, 1.2, 0.8, { ink: BK });
   // Colisor plano de água para evitar queda no abismo do mapa
-  collider((xMin + xMax) / 2, -1.2, zEdge + 30 + 650, xMax - xMin + 900, 0.8, 1300, { noNav: true, noGrapple: true });
+  collider((xMin + xMax) / 2, -1.2 + oy, zEdge + 30 + 650, xMax - xMin + 900, 0.8, 1300, { noNav: true, noGrapple: true });
   // Palácio da Alvorada (colunas em "vela" sobre o espelho) à esquerda, na outra margem
   const ax = 420, az = zEdge + 420; // margem norte
   box(ax, 0, az, 30, 6, 10, { ink: BK, noCollide: true });

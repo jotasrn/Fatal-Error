@@ -282,8 +282,10 @@ export class HUD {
     return open;
   }
   setSlots(slots) {
-    const key = slots.map((s) => `${s.name}|${s.active ? 1 : 0}|${s.ammo}|${s.locked ? 1 : 0}`).join(';'); if (key === this._lastSlots) return; this._lastSlots = key;
-    this.el.slots.innerHTML = slots.map((s, i) => `<div class="slot${s.active ? ' active' : ''}${s.empty ? ' empty' : ''}${s.locked ? ' locked' : ''}" title="${s.name}${s.locked ? ' (bloqueada)' : ''}"><span class="num">${i + 1}</span><span class="sname">${s.name}</span><span class="sammo">${s.ammo}</span></div>`).join('');
+    // só mostra as armas que o jogador possui; cada uma mantém o seu número real de slot
+    const owned = slots.filter((s) => !s.locked);
+    const key = owned.map((s) => `${s.num}|${s.name}|${s.active ? 1 : 0}|${s.ammo}`).join(';'); if (key === this._lastSlots) return; this._lastSlots = key;
+    this.el.slots.innerHTML = owned.map((s) => `<div class="slot${s.active ? ' active' : ''}${s.empty ? ' empty' : ''}" title="${s.name}"><span class="num">${s.num}</span><span class="sname">${s.name}</span><span class="sammo">${s.ammo}</span></div>`).join('');
   }
   setHealth(hp, max) {
     const hInt = Math.ceil(hp);

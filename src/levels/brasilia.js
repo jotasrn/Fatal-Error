@@ -14,17 +14,18 @@ import { TAU } from '../util.js';
 import { BRASILIA as D } from './brasiliaData.js';
 import { buildGraphTraffic } from './traffic.js';
 import * as M from './brasiliaLandmarks.js';
+import { terrainHeight as TH } from './brasiliaElev.js';
 
 const { BLUE: BL, RED: RD, BLACK: BK, ORANGE: OR, GREEN: GN, PINK: PK } = INK;
 
 export function buildBrasilia(B, arena = false) {
   const { L, box, slab, cyl, sphere, ring, spawn, sniper, pickup, collider, addGeo, addGeoFill, addNearGeo, addInstance, scene } = B;
   L.key = 'brasilia';
-  L.bounds = { ...D.bounds, minY: -9 };
-  L.navBounds = { ...D.nav, minY: -9 };
-  L.killY = -11;
+  L.bounds = { ...D.bounds, minY: -45 };
+  L.navBounds = { ...D.nav, minY: -45 };
+  L.killY = -45;
   const LM = D.landmarks;
-  const lmPos = (k, y = 0) => new THREE.Vector3(LM[k].x, y, LM[k].z);
+  const lmPos = (k, y = 0) => new THREE.Vector3(LM[k].x, y + TH(LM[k].x, LM[k].z), LM[k].z);
 
   // ------------------------------------------------------------------ acumuladores de malha por bloco (culling)
   const TILE = 110, accs = new Map();
@@ -58,8 +59,20 @@ export function buildBrasilia(B, arena = false) {
   // ------------------------------------------------------------------ chão, limites e paisagem
   // Base contínua de segurança abaixo do nível dos túneis para impedir queda no vazio absoluto
   const Bd = D.bounds;
-  box((Bd.minX + Bd.maxX) / 2, -8.2, (Bd.minZ + Bd.maxZ) / 2, Bd.maxX - Bd.minX + 40, 0.4, Bd.maxZ - Bd.minZ + 40, { ink: GN, noNav: true });
-  for (const [x1, z1, x2, z2] of D.ground) box((x1 + x2) / 2, -0.85, (z1 + z2) / 2, x2 - x1, 0.85, z2 - z1, { ink: GN, noCollide: true });
+  box((Bd.minX + Bd.maxX) / 2, -44, (Bd.minZ + Bd.maxZ) / 2, Bd.maxX - Bd.minX + 40, 0.4, Bd.maxZ - Bd.minZ + 40, { ink: GN, noNav: true });
+  // relevo real (DEM): superfície verde CONTÍNUA e suave — cada célula usa a altura real nos 4 cantos,
+  // então células vizinhas se encaixam sem degrau (sem facetamento). O acabamento das vias (meio-fio
+  // elevado) é que garante a borda limpa onde o asfalto encontra a grama.
+  for (const [x1, z1, x2, z2] of D.ground) {
+    const w = x2 - x1, d = z2 - z1;
+    const nxc = Math.max(1, Math.min(64, Math.ceil(w / 11))), nzc = Math.max(1, Math.min(64, Math.ceil(d / 11)));
+    const cxg = (x1 + x2) / 2, czg = (z1 + z2) / 2;
+    for (let iz = 0; iz < nzc; iz++) for (let ix = 0; ix < nxc; ix++) {
+      const ax = x1 + w * ix / nxc, bx = x1 + w * (ix + 1) / nxc;
+      const az = z1 + d * iz / nzc, bz = z1 + d * (iz + 1) / nzc;
+      quad(acc('u:' + GN, cxg, czg), [ax, TH(ax, az) - 0.06, az], [bx, TH(bx, az) - 0.06, az], [bx, TH(bx, bz) - 0.06, bz], [ax, TH(ax, bz) - 0.06, bz], UP);
+    }
+  }
   // Barreiras perimetrais sólidas e visíveis (muralha de contenção urbana de 4.5m intransponível)
   const T = 6, PH = 70, WALL_H = 4.5;
   for (const [x, z, w, d] of [
@@ -68,19 +81,20 @@ export function buildBrasilia(B, arena = false) {
     [Bd.minX - T / 2, (Bd.minZ + Bd.maxZ) / 2, T, Bd.maxZ - Bd.minZ],
     [Bd.maxX + T / 2, (Bd.minZ + Bd.maxZ) / 2, T, Bd.maxZ - Bd.minZ]
   ]) {
-    collider(x, -10, z, w, PH, d, { noGrapple: true, noNav: true });
-    box(x, 0, z, w, 2.2, d, { ink: BK });
-    box(x, 2.2, z, w, WALL_H - 2.2, Math.max(0.6, d * 0.35), { ink: OR, noCollide: true });
+    const tw = TH(x, z);
+    collider(x, -35, z, w, PH + 35, d, { noGrapple: true, noNav: true });
+    box(x, tw - 32, z, w, 32 + 2.2, d, { ink: BK, noCollide: true });
+    box(x, tw + 2.2, z, w, WALL_H - 2.2, Math.max(0.6, d * 0.35), { ink: OR, noCollide: true });
   }
   collider((Bd.minX + Bd.maxX) / 2, 90, (Bd.minZ + Bd.maxZ) / 2, Bd.maxX - Bd.minX + 40, 8, Bd.maxZ - Bd.minZ + 40, { noNav: true, noGrapple: true });
   M.lagoParanoa(B, Bd.maxZ + T, Bd.minX, Bd.maxX);
   // espelhos d'água reais
   for (const w of D.water) {
     const shape = new THREE.Shape(); for (let i = 0; i < w.length; i += 2) { if (i === 0) shape.moveTo(w[i], -w[i + 1]); else shape.lineTo(w[i], -w[i + 1]); }
-    const g = new THREE.ShapeGeometry(shape); g.rotateX(-Math.PI / 2); g.translate(0, 0.07, 0); addGeo(g, BL);
+    const g = new THREE.ShapeGeometry(shape); g.rotateX(-Math.PI / 2); g.translate(0, 0.07 + TH(w[0], -w[1]), 0); addGeo(g, BL);
   }
   // praças pavimentadas em volta dos monumentos
-  const pave = (k, w, d, dx = 0, dz = 0) => box(LM[k].x + dx, 0, LM[k].z + dz, w, 0.06, d, { ink: BK, noCollide: true });
+  const pave = (k, w, d, dx = 0, dz = 0) => box(LM[k].x + dx, TH(LM[k].x + dx, LM[k].z + dz), LM[k].z + dz, w, 0.06, d, { ink: BK, noCollide: true });
   pave('praca3p', 110, 70, 0, -5); pave('torre', 46, 70, 0, 8); pave('rodoviaria', 70, 64); pave('catedral', 44, 44); pave('memorialjk', 50, 50);
 
   // ------------------------------------------------------------------ vias
@@ -116,7 +130,7 @@ export function buildBrasilia(B, arena = false) {
     for (let i = 0; i < n - 1; i++) {
       const ax = pts[i * 3], ay = pts[i * 3 + 1], az = pts[i * 3 + 2];
       const bx = pts[(i + 1) * 3], by = pts[(i + 1) * 3 + 1], bz = pts[(i + 1) * 3 + 2];
-      const seg = [ax, az, bx, bz, hw, ay, by];
+      const seg = [ax, az, bx, bz, hw, ay + TH(ax, az), by + TH(bx, bz)];
       allRoadSegs.push(seg);
       if (lanes > 0) allDriveSegs.push(seg);
       if (Math.abs(ay) <= 0.15 && Math.abs(by) <= 0.15) flatSegs.push(seg);
@@ -161,16 +175,17 @@ export function buildBrasilia(B, arena = false) {
     let x1 = ox1, x2 = ox2, z1 = oz1, z2 = oz2;
     if (z2 - z1 <= 14) {
       const cz = (z1 + z2) / 2, d = z2 - z1;
-      while (x2 - x1 > 1.2 && obstructsLowerRoad(x1 + 0.4, cz, 0, Math.max(1.2, d), 0.85)) x1 += 1.0;
-      while (x2 - x1 > 1.2 && obstructsLowerRoad(x2 - 0.4, cz, 0, Math.max(1.2, d), 0.85)) x2 -= 1.0;
+      while (x2 - x1 > 1.2 && obstructsLowerRoad(x1 + 0.4, cz, TH(x1 + 0.4, cz), Math.max(1.2, d), 0.85)) x1 += 1.0;
+      while (x2 - x1 > 1.2 && obstructsLowerRoad(x2 - 0.4, cz, TH(x2 - 0.4, cz), Math.max(1.2, d), 0.85)) x2 -= 1.0;
     }
     if (x2 - x1 <= 14) {
       const cx = (x1 + x2) / 2, w = x2 - x1;
-      while (z2 - z1 > 1.2 && obstructsLowerRoad(cx, z1 + 0.4, 0, Math.max(1.2, w), 0.85)) z1 += 1.0;
-      while (z2 - z1 > 1.2 && obstructsLowerRoad(cx, z2 - 0.4, 0, Math.max(1.2, w), 0.85)) z2 -= 1.0;
+      while (z2 - z1 > 1.2 && obstructsLowerRoad(cx, z1 + 0.4, TH(cx, z1 + 0.4), Math.max(1.2, w), 0.85)) z1 += 1.0;
+      while (z2 - z1 > 1.2 && obstructsLowerRoad(cx, z2 - 0.4, TH(cx, z2 - 0.4), Math.max(1.2, w), 0.85)) z2 -= 1.0;
     }
-    if (x2 - x1 <= 8 && z2 - z1 <= 8 && obstructsLowerRoad((x1 + x2) / 2, (z1 + z2) / 2, 0, Math.max(x2 - x1, z2 - z1), 0.85)) continue;
-    if (x2 > x1 + 0.2 && z2 > z1 + 0.2) collider((x1 + x2) / 2, -0.85, (z1 + z2) / 2, x2 - x1, 0.85, z2 - z1);
+    const gcx = (x1 + x2) / 2, gcz = (z1 + z2) / 2, gty = TH(gcx, gcz);
+    if (x2 - x1 <= 8 && z2 - z1 <= 8 && obstructsLowerRoad(gcx, gcz, gty, Math.max(x2 - x1, z2 - z1), 0.85)) continue;
+    if (x2 > x1 + 0.2 && z2 > z1 + 0.2) collider(gcx, gty - 0.85, gcz, x2 - x1, 0.85, z2 - z1);
   }
   function boxHitsRoad(x1, z1, x2, z2, pad = 0.35) {
     const cx = (x1 + x2) / 2, cz = (z1 + z2) / 2, hw = (x2 - x1) / 2, hd = (z2 - z1) / 2;
@@ -213,32 +228,52 @@ export function buildBrasilia(B, arena = false) {
     for (let i = 0; i < n - 1; i++) {
       const a = P[i], b = P[i + 1], na = N[i], nb = N[i + 1];
       const cxm = (a[0] + b[0]) / 2, czm = (a[2] + b[2]) / 2;
-      const La = [a[0] + na[0] * hw, a[1] + yo, a[2] + na[1] * hw], Ra = [a[0] - na[0] * hw, a[1] + yo, a[2] - na[1] * hw];
-      const Lb = [b[0] + nb[0] * hw, b[1] + yo, b[2] + nb[1] * hw], Rb = [b[0] - nb[0] * hw, b[1] + yo, b[2] - nb[1] * hw];
+      const ta = TH(a[0], a[2]), tb = TH(b[0], b[2]);                 // terreno (DEM) nos extremos do segmento
+      const aAbs = [a[0], a[1] + ta, a[2]], bAbs = [b[0], b[1] + tb, b[2]];
+      const La = [a[0] + na[0] * hw, a[1] + yo + ta, a[2] + na[1] * hw], Ra = [a[0] - na[0] * hw, a[1] + yo + ta, a[2] - na[1] * hw];
+      const Lb = [b[0] + nb[0] * hw, b[1] + yo + tb, b[2] + nb[1] * hw], Rb = [b[0] - nb[0] * hw, b[1] + yo + tb, b[2] - nb[1] * hw];
       // superfície: asfalto escuro (via) ou piso claro (calçadão/serviço)
       quad(acc(drive ? 'f:' + BK : 'u:' + BK, cxm, czm), La, Lb, Rb, Ra, UP);
       const hA = a[1], hB = b[1], up = Math.min(hA, hB) > 0.25 || Math.max(hA, hB) > 0.25, down = Math.min(hA, hB) < -0.25;
+      // meio-fio elevado (concreto) nas duas bordas das vias de superfície: faixa fina, levemente
+      // acima do asfalto, com face externa que desce abaixo da grama — borda reta e limpa, acabamento
+      // urbano de Brasília, sem pesar o visual.
+      if (!up && !down && !tunnel) {
+        const SW = 1.6, LIFT = 0.16, cb = 0.8, inL = [-(na[0] + nb[0]), 0, -(na[1] + nb[1])], outL = [na[0] + nb[0], 0, na[1] + nb[1]];
+        // esquerda
+        const Li = [La[0], La[1] + LIFT, La[2]], Lj = [Lb[0], Lb[1] + LIFT, Lb[2]];
+        const LiO = [La[0] + na[0] * SW, La[1] + LIFT, La[2] + na[1] * SW], LjO = [Lb[0] + nb[0] * SW, Lb[1] + LIFT, Lb[2] + nb[1] * SW];
+        quad(acc('u:' + BK, cxm, czm), Li, Lj, LjO, LiO, UP);                                   // topo do meio-fio
+        quad(acc('u:' + BK, cxm, czm), La, Lb, Lj, Li, inL);                                     // face interna (asfalto→meio-fio)
+        quad(acc('u:' + BK, cxm, czm), LiO, LjO, [LjO[0], LjO[1] - cb, LjO[2]], [LiO[0], LiO[1] - cb, LiO[2]], outL); // face externa (desce p/ grama)
+        // direita
+        const Ri = [Ra[0], Ra[1] + LIFT, Ra[2]], Rj = [Rb[0], Rb[1] + LIFT, Rb[2]];
+        const RiO = [Ra[0] - na[0] * SW, Ra[1] + LIFT, Ra[2] - na[1] * SW], RjO = [Rb[0] - nb[0] * SW, Rb[1] + LIFT, Rb[2] - nb[1] * SW];
+        quad(acc('u:' + BK, cxm, czm), Ri, RiO, RjO, Rj, UP);                                   // topo do meio-fio
+        quad(acc('u:' + BK, cxm, czm), Ra, Ri, Rj, Rb, outL);                                    // face interna
+        quad(acc('u:' + BK, cxm, czm), RiO, [RiO[0], RiO[1] - cb, RiO[2]], [RjO[0], RjO[1] - cb, RjO[2]], RjO, inL); // face externa
+      }
       if (up) {
         // laterais (viaduto: viga de 0,9 m; aterro/rampa: muro até o chão) e guarda-corpo
         const bot = (h) => bridge ? h - 0.9 : 0;
         for (const [p0, p1, side] of [[La, Lb, 1], [Ra, Rb, -1]]) {
           const out = [side * (na[0] + nb[0]) / 2, 0, side * (na[1] + nb[1]) / 2];
-          quad(acc('u:' + BK, cxm, czm), [p0[0], bot(hA), p0[2]], [p1[0], bot(hB), p1[2]], [p1[0], p1[1], p1[2]], [p0[0], p0[1], p0[2]], out);
+          quad(acc('u:' + BK, cxm, czm), [p0[0], bot(hA) + ta, p0[2]], [p1[0], bot(hB) + tb, p1[2]], [p1[0], p1[1], p1[2]], [p0[0], p0[1], p0[2]], out);
           if (!nearJunction(cxm, czm) && Math.min(hA, hB) > 0.6) quad(acc('f:' + BK, cxm, czm), [p0[0], p0[1], p0[2]], [p1[0], p1[1], p1[2]], [p1[0], p1[1] + 1.0, p1[2]], [p0[0], p0[1] + 1.0, p0[2]], out);
         }
-        if (bridge) quad(acc('u:' + BK, cxm, czm), [La[0], hA - 0.9, La[2]], [Lb[0], hB - 0.9, Lb[2]], [Rb[0], hB - 0.9, Rb[2]], [Ra[0], hA - 0.9, Ra[2]], DOWN);
+        if (bridge) quad(acc('u:' + BK, cxm, czm), [La[0], hA - 0.9 + ta, La[2]], [Lb[0], hB - 0.9 + tb, Lb[2]], [Rb[0], hB - 0.9 + tb, Rb[2]], [Ra[0], hA - 0.9 + ta, Ra[2]], DOWN);
       }
       if (tunnel) {
         // paredes e teto do túnel (o teto é a laje do chão; aqui só o acabamento claro por dentro)
         const off = hw + 1.2;
         for (const side of [1, -1]) {
           const pa = [a[0] + na[0] * off * side, 0, a[2] + na[1] * off * side], pb = [b[0] + nb[0] * off * side, 0, b[2] + nb[1] * off * side];
-          quad(acc('u:' + BK, cxm, czm), [pa[0], hA, pa[2]], [pb[0], hB, pb[2]], [pb[0], -0.9, pb[2]], [pa[0], -0.9, pa[2]], [-side * na[0], 0, -side * na[1]]);
+          quad(acc('u:' + BK, cxm, czm), [pa[0], hA + ta, pa[2]], [pb[0], hB + tb, pb[2]], [pb[0], -0.9 + tb, pb[2]], [pa[0], -0.9 + ta, pa[2]], [-side * na[0], 0, -side * na[1]]);
         }
-        const Lc = [a[0] + na[0] * off, -0.9, a[2] + na[1] * off], Rc = [a[0] - na[0] * off, -0.9, a[2] - na[1] * off];
-        const Ld = [b[0] + nb[0] * off, -0.9, b[2] + nb[1] * off], Rd = [b[0] - nb[0] * off, -0.9, b[2] - nb[1] * off];
-        if (Math.max(hA, hB) < -4.5) quad(acc('u:' + BK, cxm, czm), Lc.map((v, i) => i === 1 ? -0.88 : v), Ld.map((v, i) => i === 1 ? -0.88 : v), Rd.map((v, i) => i === 1 ? -0.88 : v), Rc.map((v, i) => i === 1 ? -0.88 : v), DOWN); // teto
-        quad(acc('f:' + OR, cxm, czm), [(Lc[0] + Rc[0]) / 2 + na[0] * 0.3, -0.92, (Lc[2] + Rc[2]) / 2 + na[1] * 0.3], [(Ld[0] + Rd[0]) / 2 + nb[0] * 0.3, -0.92, (Ld[2] + Rd[2]) / 2 + nb[1] * 0.3], [(Ld[0] + Rd[0]) / 2 - nb[0] * 0.3, -0.92, (Ld[2] + Rd[2]) / 2 - nb[1] * 0.3], [(Lc[0] + Rc[0]) / 2 - na[0] * 0.3, -0.92, (Lc[2] + Rc[2]) / 2 - na[1] * 0.3], DOWN); // luminárias
+        const Lc = [a[0] + na[0] * off, -0.9 + ta, a[2] + na[1] * off], Rc = [a[0] - na[0] * off, -0.9 + ta, a[2] - na[1] * off];
+        const Ld = [b[0] + nb[0] * off, -0.9 + tb, b[2] + nb[1] * off], Rd = [b[0] - nb[0] * off, -0.9 + tb, b[2] - nb[1] * off];
+        if (Math.max(hA, hB) < -4.5) quad(acc('u:' + BK, cxm, czm), Lc.map((v, i) => i === 1 ? ta - 0.88 : v), Ld.map((v, i) => i === 1 ? tb - 0.88 : v), Rd.map((v, i) => i === 1 ? tb - 0.88 : v), Rc.map((v, i) => i === 1 ? ta - 0.88 : v), DOWN); // teto
+        quad(acc('f:' + OR, cxm, czm), [(Lc[0] + Rc[0]) / 2 + na[0] * 0.3, ta - 0.92, (Lc[2] + Rc[2]) / 2 + na[1] * 0.3], [(Ld[0] + Rd[0]) / 2 + nb[0] * 0.3, tb - 0.92, (Ld[2] + Rd[2]) / 2 + nb[1] * 0.3], [(Ld[0] + Rd[0]) / 2 - nb[0] * 0.3, tb - 0.92, (Ld[2] + Rd[2]) / 2 - nb[1] * 0.3], [(Lc[0] + Rc[0]) / 2 - na[0] * 0.3, ta - 0.92, (Lc[2] + Rc[2]) / 2 - na[1] * 0.3], DOWN); // luminárias
       }
       // faixas pintadas (só desenhadas de perto)
       if (drive && lanes > 1 && Math.hypot(b[0] - a[0], b[2] - a[2]) > 0.6) {
@@ -249,8 +284,8 @@ export function buildBrasilia(B, arena = false) {
         for (const [off, col] of lines) {
           const step = col === 'y' ? segL : 7, dash = col === 'y' ? segL : 3;
           for (let s = col === 'y' ? 0 : 1; s + dash <= segL + 0.01; s += step) {
-            const x0 = a[0] + tx * s - tz * off, z0 = a[2] + tz * s + tx * off, y0 = a[1] + (b[1] - a[1]) * (s / segL) + yo + 0.02;
-            const x1 = x0 + tx * dash, z1 = z0 + tz * dash, y1 = a[1] + (b[1] - a[1]) * ((s + dash) / segL) + yo + 0.02;
+            const x0 = a[0] + tx * s - tz * off, z0 = a[2] + tz * s + tx * off, y0 = a[1] + (b[1] - a[1]) * (s / segL) + yo + 0.02 + ta + (tb - ta) * (s / segL);
+            const x1 = x0 + tx * dash, z1 = z0 + tz * dash, y1 = a[1] + (b[1] - a[1]) * ((s + dash) / segL) + yo + 0.02 + ta + (tb - ta) * ((s + dash) / segL);
             const w2 = col === 'y' ? 0.12 : 0.09;
             quad(acc('u:' + (col === 'y' ? OR : BK) + ':n', x0, z0), [x0 + tz * w2, y0, z0 - tx * w2], [x1 + tz * w2, y1, z1 - tx * w2], [x1 - tz * w2, y1, z1 + tx * w2], [x0 - tz * w2, y0, z0 + tx * w2], UP);
           }
@@ -276,24 +311,24 @@ export function buildBrasilia(B, arena = false) {
         const kW = Math.max(1, Math.round((effHw * 2) / stepW));
         const slabH = 0.28;
         for (let j = 0; j <= kL; j++) {
-          const t = j / kL, cx = a[0] + (b[0] - a[0]) * t, cz = a[2] + (b[2] - a[2]) * t, h = a[1] + (b[1] - a[1]) * t;
+          const t = j / kL, cx = a[0] + (b[0] - a[0]) * t, cz = a[2] + (b[2] - a[2]) * t, h = a[1] + (b[1] - a[1]) * t, habs = h + ta + (tb - ta) * t;
           if (!down && !hasCutBelow && h <= 0.08) continue;
           if (hasCutBelow && !localCuts.some(([x1, z1, x2, z2]) => cx + hw + 2.5 >= x1 && cx - hw - 2.5 <= x2 && cz + hw + 2.5 >= z1 && cz - hw - 2.5 <= z2)) continue;
           for (let iw = 0; iw <= kW; iw++) {
             const u = -effHw + (iw / kW) * (effHw * 2);
             const px = cx + nx * u, pz = cz + nz * u;
-            if (obstructsLowerRoad(px, pz, h, boxS, slabH, a, b)) continue;
-            collider(px, h - slabH, pz, boxS, slabH, boxS, { noNav: false });
+            if (obstructsLowerRoad(px, pz, habs, boxS, slabH, aAbs, bAbs)) continue;
+            collider(px, habs - slabH, pz, boxS, slabH, boxS, { noNav: false });
           }
         }
         if (tunnel) for (let j = 0; j <= Math.ceil(segL / 1.4); j++) { // paredes laterais do túnel
-          const t = j / Math.ceil(segL / 1.4), x = a[0] + (b[0] - a[0]) * t, z = a[2] + (b[2] - a[2]) * t, h = a[1] + (b[1] - a[1]) * t;
+          const t = j / Math.ceil(segL / 1.4), x = a[0] + (b[0] - a[0]) * t, z = a[2] + (b[2] - a[2]) * t, h = a[1] + (b[1] - a[1]) * t, habs = h + ta + (tb - ta) * t;
           if (h > -2.2) continue;
           const mx = na[0] + (nb[0] - na[0]) * t, mz = na[1] + (nb[1] - na[1]) * t;
           for (const s of [1, -1]) {
             const wx = x + mx * (hw + 1.8) * s, wz = z + mz * (hw + 1.8) * s;
             if (!nearJunction(wx, wz) && !inSegList(allRoadSegs, wx, wz, 1.45, 1.45)) {
-              collider(wx, h, wz, 1.1, Math.max(0.5, -0.85 - h), 1.1, { noNav: true });
+              collider(wx, habs, wz, 1.1, Math.max(0.5, -0.85 - h), 1.1, { noNav: true });
             }
           }
         }
@@ -306,7 +341,7 @@ export function buildBrasilia(B, arena = false) {
         const a = P[i], b = P[i + 1], segL = Math.hypot(b[0] - a[0], b[2] - a[2]);
         for (let s = 14 - acc2; s < segL; s += 14) {
           const t = s / segL, x = a[0] + (b[0] - a[0]) * t, z = a[2] + (b[2] - a[2]) * t, h = a[1] + (b[1] - a[1]) * t - 0.9;
-          if (h > 2 && !onRoadBelow(x, z, h)) cyl(x, 0, z, 0.8, h, { ink: BK, seg: 8 });
+          if (h > 2 && !onRoadBelow(x, z, h)) cyl(x, TH(x, z), z, 0.8, h, { ink: BK, seg: 8 });
         }
         acc2 = (acc2 + segL) % 14;
       }
@@ -318,21 +353,23 @@ export function buildBrasilia(B, arena = false) {
   }
   // trincheiras: piso visual + colisor levemente rebaixado para não criar degraus sobre as rampas suaves
   for (const [x1, z1, x2, z2, h] of D.cutFloor) {
-    const cx = (x1 + x2) / 2, cz = (z1 + z2) / 2, w = x2 - x1, d = z2 - z1;
-    box(cx, h - 0.9, cz, w, 0.9, d, { ink: BK, noCollide: true });
-    if (!obstructsLowerRoad(cx, cz, h - 0.25, Math.max(w, d), 0.9)) {
-      collider(cx, h - 1.15, cz, w, 0.9, d);
+    const cx = (x1 + x2) / 2, cz = (z1 + z2) / 2, w = x2 - x1, d = z2 - z1, tc = TH(cx, cz);
+    box(cx, h - 0.9 + tc, cz, w, 0.9, d, { ink: BK, noCollide: true });
+    if (!obstructsLowerRoad(cx, cz, h - 0.25 + tc, Math.max(w, d), 0.9)) {
+      collider(cx, h - 1.15 + tc, cz, w, 0.9, d);
     }
   }
   for (const w of D.cutWalls) {
     for (let i = 0; i + 5 < w.length; i += 3) {
       const ax = w[i], az = w[i + 1], ah = w[i + 2], bx = w[i + 3], bz = w[i + 4], bh = w[i + 5];
-      quad(acc('u:' + BK, ax, az), [ax, Math.min(ah, bh) - 0.4, az], [bx, Math.min(ah, bh) - 0.4, bz], [bx, 1.0, bz], [ax, 1.0, az], null);
-      quad(acc('u:' + BK, ax, az), [ax, 1.0, az], [bx, 1.0, bz], [bx, 1.0, bz], [ax, 1.0, az], UP);
+      const taw = TH(ax, az), tbw = TH(bx, bz);
+      quad(acc('u:' + BK, ax, az), [ax, Math.min(ah, bh) - 0.4 + taw, az], [bx, Math.min(ah, bh) - 0.4 + tbw, bz], [bx, 1.0 + tbw, bz], [ax, 1.0 + taw, az], null);
+      quad(acc('u:' + BK, ax, az), [ax, 1.0 + taw, az], [bx, 1.0 + tbw, bz], [bx, 1.0 + tbw, bz], [ax, 1.0 + taw, az], UP);
     }
     for (let i = 0; i < w.length; i += 3) {
       if (!inSegList(allRoadSegs, w[i], w[i + 1], 1.45, 1.45)) {
-        collider(w[i], w[i + 2], w[i + 1], 1.1, 1.0 - w[i + 2], 1.1, { noNav: true });
+        const twc = TH(w[i], w[i + 1]);
+        collider(w[i], w[i + 2] + twc, w[i + 1], 1.1, 1.0 - w[i + 2], 1.1, { noNav: true });
       }
     }
   }
@@ -356,47 +393,50 @@ export function buildBrasilia(B, arena = false) {
     bi++;
     if (b[0] === 'r') {
       const [, st, cx, cz, Lg, Dp, ang, h, pil] = b;
+      const ty = TH(cx, cz);                                         // base do prédio sobre o relevo real
       const S = STYLE[st] || STYLE.gen, body = S.body[bi % S.body.length], trim = S.trim[(bi * 7) % S.trim.length];
       const ca = Math.cos(ang), sa = Math.sin(ang);
       const L2 = (u, v) => [cx + ca * u - sa * v, cz + sa * u + ca * v];
-      boxRot(cx, pil, cz, Lg, h - pil, Dp, ang, body);
+      boxRot(cx, pil + ty, cz, Lg, h - pil, Dp, ang, body);
       if (pil > 0) { // pilotis: colunas e portaria de vidro
-        for (let u = -Lg / 2 + 1; u <= Lg / 2 - 1 + 0.01; u += Math.max(3, (Lg - 2) / 5)) for (const v of [-Dp / 2 + 0.8, Dp / 2 - 0.8]) { const [px, pz] = L2(u, v); box(px, 0, pz, 0.55, pil, 0.55, { ink: BK, noCollide: true }); }
-        boxRot(cx, 0, cz, Math.min(5, Lg * 0.25), pil, Dp * 0.6, ang, BL);
+        for (let u = -Lg / 2 + 1; u <= Lg / 2 - 1 + 0.01; u += Math.max(3, (Lg - 2) / 5)) for (const v of [-Dp / 2 + 0.8, Dp / 2 - 0.8]) { const [px, pz] = L2(u, v); box(px, ty, pz, 0.55, pil, 0.55, { ink: BK, noCollide: true }); }
+        boxRot(cx, ty, cz, Math.min(5, Lg * 0.25), pil, Dp * 0.6, ang, BL);
       }
       // faixas dos andares / brises (só de perto)
-      if (h > 4) for (let y = pil + FLOOR; y < h - 0.4; y += FLOOR) boxRot(cx, y - 0.1, cz, Lg + 0.25, 0.2, Dp + 0.25, ang, trim, true);
+      if (h > 4) for (let y = pil + FLOOR; y < h - 0.4; y += FLOOR) boxRot(cx, y - 0.1 + ty, cz, Lg + 0.25, 0.2, Dp + 0.25, ang, trim, true);
       if (st === 'res' || st === 'min' || (st === 'gen' && h > 9)) {
         const stepU = st === 'min' ? 2.2 : 2.6;
         for (let u = -Lg / 2 + stepU / 2; u < Lg / 2; u += stepU) for (const v of [-Dp / 2 - 0.1, Dp / 2 + 0.1]) {
-          const [px, pz] = L2(u, v); boxRot(px, pil + 0.3, pz, 0.16, h - pil - 0.6, 0.22, ang, st === 'res' ? (bi % 3 ? BK : trim) : BK, true);
+          const [px, pz] = L2(u, v); boxRot(px, pil + 0.3 + ty, pz, 0.16, h - pil - 0.6, 0.22, ang, st === 'res' ? (bi % 3 ? BK : trim) : BK, true);
         }
       }
       if (st === 'min') { // empenas cegas brancas nas pontas e heliponto
-        for (const u of [-Lg / 2, Lg / 2]) { const [px, pz] = L2(u, 0); boxRot(px, 0, pz, 0.6, h + 0.3, Dp + 0.3, ang, BK); }
-        if (bi % 2) { boxRot(cx, h, cz, 6, 0.3, Math.min(6, Dp), ang, BK); boxRot(cx, h + 0.3, cz, 2.2, 0.05, 0.4, ang, OR, true); }
+        for (const u of [-Lg / 2, Lg / 2]) { const [px, pz] = L2(u, 0); boxRot(px, ty, pz, 0.6, h + 0.3, Dp + 0.3, ang, BK); }
+        if (bi % 2) { boxRot(cx, h + ty, cz, 6, 0.3, Math.min(6, Dp), ang, BK); boxRot(cx, h + 0.3 + ty, cz, 2.2, 0.05, 0.4, ang, OR, true); }
       }
-      if (st === 'cn') for (let u = -Lg / 2 + 2; u < Lg / 2 - 1; u += 3.6) for (let y = 3; y < h - 1; y += 2.6) { const [px, pz] = L2(u, Dp / 2 + 0.2); const g = new THREE.BoxGeometry(3.1, 2.1, 0.3); g.rotateY(-ang); g.translate(px, y + 1, pz); addGeoFill(g, [RD, OR, GN, BL, PK][Math.floor(u + y) % 5 >>> 0]); }
-      if (st === 'res' && h > 8) { const [px, pz] = L2(Lg * 0.25, 0); boxRot(px, h, pz, 3.2, 1.8, Math.min(3, Dp), ang, BK); } // caixa d'água
-      if (st === 'house') { const g = new THREE.ConeGeometry(Math.hypot(Lg, Dp) / 2 * 1.02, 1.6, 4); g.rotateY(Math.PI / 4 - ang); g.scale(Lg / Math.hypot(Lg, Dp) * 1.42, 1, Dp / Math.hypot(Lg, Dp) * 1.42); g.translate(cx, h + 0.8, cz); addGeo(g, RD); }
-      if (h > 12) roofs.push([cx, h, cz]);
+      if (st === 'cn') for (let u = -Lg / 2 + 2; u < Lg / 2 - 1; u += 3.6) for (let y = 3; y < h - 1; y += 2.6) { const [px, pz] = L2(u, Dp / 2 + 0.2); const g = new THREE.BoxGeometry(3.1, 2.1, 0.3); g.rotateY(-ang); g.translate(px, y + 1 + ty, pz); addGeoFill(g, [RD, OR, GN, BL, PK][Math.floor(u + y) % 5 >>> 0]); }
+      if (st === 'res' && h > 8) { const [px, pz] = L2(Lg * 0.25, 0); boxRot(px, h + ty, pz, 3.2, 1.8, Math.min(3, Dp), ang, BK); } // caixa d'água
+      if (st === 'house') { const g = new THREE.ConeGeometry(Math.hypot(Lg, Dp) / 2 * 1.02, 1.6, 4); g.rotateY(Math.PI / 4 - ang); g.scale(Lg / Math.hypot(Lg, Dp) * 1.42, 1, Dp / Math.hypot(Lg, Dp) * 1.42); g.translate(cx, h + 0.8 + ty, cz); addGeo(g, RD); }
+      if (h > 12) roofs.push([cx, h + ty, cz]);
     } else {
       const [, st, h, ring2] = b;
       const S = STYLE[st] || STYLE.gen, body = S.body[bi % S.body.length], trim = S.trim[(bi * 7) % S.trim.length];
       const pts = []; for (let i = 0; i < ring2.length; i += 2) pts.push(new THREE.Vector2(ring2[i], ring2[i + 1]));
       if (THREE.ShapeUtils.isClockWise(pts)) pts.reverse();
       const n = pts.length; let cx = 0, cz = 0; for (const p of pts) { cx += p.x / n; cz += p.y / n; }
+      const ty = TH(cx, cz);                                         // base do prédio sobre o relevo real
       const a = acc('u:' + body, cx, cz);
-      for (let i = 0; i < n; i++) { const p = pts[i], q = pts[(i + 1) % n]; quad(a, [p.x, 0, p.y], [q.x, 0, q.y], [q.x, h, q.y], [p.x, h, p.y], [q.y - p.y, 0, -(q.x - p.x)]); }
+      for (let i = 0; i < n; i++) { const p = pts[i], q = pts[(i + 1) % n]; quad(a, [p.x, ty, p.y], [q.x, ty, q.y], [q.x, h + ty, q.y], [p.x, h + ty, p.y], [q.y - p.y, 0, -(q.x - p.x)]); }
       const tris = THREE.ShapeUtils.triangulateShape(pts, []);
-      for (const [i0, i1, i2] of tris) { const base = a.pos.length / 3; for (const k of [i0, i2, i1]) a.pos.push(pts[k].x, h, pts[k].y); a.idx.push(base, base + 1, base + 2); }
-      if (h > 4) { const an = acc('u:' + trim + ':n', cx, cz); for (let y = FLOOR; y < h - 0.4; y += FLOOR) for (let i = 0; i < n; i++) { const p = pts[i], q = pts[(i + 1) % n]; const ox = (q.y - p.y), oz = -(q.x - p.x), ol = Math.hypot(ox, oz) || 1; const ex = ox / ol * 0.12, ez = oz / ol * 0.12; quad(an, [p.x + ex, y - 0.1, p.y + ez], [q.x + ex, y - 0.1, q.y + ez], [q.x + ex, y + 0.1, q.y + ez], [p.x + ex, y + 0.1, p.y + ez], [ox, 0, oz]); } }
-      if (h > 12) roofs.push([cx, h, cz]);
+      for (const [i0, i1, i2] of tris) { const base = a.pos.length / 3; for (const k of [i0, i2, i1]) a.pos.push(pts[k].x, h + ty, pts[k].y); a.idx.push(base, base + 1, base + 2); }
+      if (h > 4) { const an = acc('u:' + trim + ':n', cx, cz); for (let y = FLOOR; y < h - 0.4; y += FLOOR) for (let i = 0; i < n; i++) { const p = pts[i], q = pts[(i + 1) % n]; const ox = (q.y - p.y), oz = -(q.x - p.x), ol = Math.hypot(ox, oz) || 1; const ex = ox / ol * 0.12, ez = oz / ol * 0.12; quad(an, [p.x + ex, y - 0.1 + ty, p.y + ez], [q.x + ex, y - 0.1 + ty, q.y + ez], [q.x + ex, y + 0.1 + ty, q.y + ez], [p.x + ex, y + 0.1 + ty, p.y + ez], [ox, 0, oz]); } }
+      if (h > 12) roofs.push([cx, h + ty, cz]);
     }
   }
   for (const [x1, z1, x2, z2, y0, h] of D.bcol) {
     if (y0 < 2.2 && boxHitsRoad(x1, z1, x2, z2, 0.35)) continue;
-    collider((x1 + x2) / 2, y0, (z1 + z2) / 2, x2 - x1, h - y0, z2 - z1);
+    const bty = TH((x1 + x2) / 2, (z1 + z2) / 2);
+    collider((x1 + x2) / 2, y0 + bty, (z1 + z2) / 2, x2 - x1, h - y0, z2 - z1);
   }
   const inNav = (x, z, pad = 0) => x > D.nav.minX + pad && x < D.nav.maxX - pad && z > D.nav.minZ + pad && z < D.nav.maxZ - pad;
   let ri = 0; for (const [x, h, z] of roofs) if (inNav(x, z, 10)) { if (ri % 3 === 0) ring(x, h + 6, z, 'y'); if (ri % 4 === 0) sniper(x, h, z); ri++; }
@@ -424,6 +464,7 @@ export function buildBrasilia(B, arena = false) {
   {
     const glassMat = makeInkMaterial({ ink: BL }), barMat = makeInkMaterial({ ink: BK });
     const breakable = (kind, x, y, z, w, h, d) => {
+      y += TH(x, z);
       const g = new THREE.Group();
       if (kind === 'glass') { g.add(new THREE.Mesh(new THREE.BoxGeometry(w, h, d).translate(0, h / 2, 0), glassMat)); g.add(new THREE.Mesh(new THREE.BoxGeometry(w + 0.1, 0.16, d + 0.08).translate(0, h, 0), barMat)); }
       else { g.add(new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.12).translate(0, h / 2, 0), barMat)); }
@@ -451,8 +492,9 @@ export function buildBrasilia(B, arena = false) {
   for (const [x, z, t] of D.trees) {
     if (Math.abs(x) < 18 && z > -350 && z < 660) continue;
     const s = t < 2 ? 1.25 + ((x * 7 + z * 3) % 1 + 1) % 1 * 0.5 : 0.95;
-    addInstance('tree', treeProto, x, 0, z, (x + z) % TAU, s, s * (t < 2 ? 1.15 : 1), s, TREE_INK[t]);
-    if (inNav(x, z) && !inSegList(allRoadSegs, x, z, 0.85)) collider(x, 0, z, 0.6, 3, 0.6, { noNav: false });
+    const tty = TH(x, z);
+    addInstance('tree', treeProto, x, tty, z, (x + z) % TAU, s, s * (t < 2 ? 1.15 : 1), s, TREE_INK[t]);
+    if (inNav(x, z) && !inSegList(allRoadSegs, x, z, 0.85)) collider(x, tty, z, 0.6, 3, 0.6, { noNav: false });
   }
   const lampProto = () => {
     const pole = new THREE.CylinderGeometry(0.1, 0.14, 8, 6); pole.translate(0, 4, 0);
@@ -460,7 +502,7 @@ export function buildBrasilia(B, arena = false) {
     const lamp = new THREE.BoxGeometry(0.5, 0.25, 0.7); lamp.translate(0, 7.75, -2.0);
     return [{ geo: pole, ink: BK, fill: true }, { geo: arm, ink: BK, fill: true }, { geo: lamp, ink: OR, fill: true }];
   };
-  for (const [x, z, a] of D.lamps) addInstance('lamp', lampProto, x, 0, z, a + Math.PI, 1, 1, 1);
+  for (const [x, z, a] of D.lamps) addInstance('lamp', lampProto, x, TH(x, z), z, a + Math.PI, 1, 1, 1);
   const stopProto = () => {
     const roof = new THREE.BoxGeometry(3.8, 0.16, 1.9); roof.translate(0, 2.7, 0.15);
     const back = new THREE.BoxGeometry(3.8, 2.4, 0.08); back.translate(0, 1.3, 0.95);
@@ -471,9 +513,10 @@ export function buildBrasilia(B, arena = false) {
   };
   L.busStops = [];
   for (const [x, z, nx, nz, dx, dz, edges] of D.stops) {
-    addInstance('stop', stopProto, x, 0, z, Math.atan2(nx, nz), 1, 1, 1);
-    collider(x + nx * 0.95, 0, z + nz * 0.95, 1.6, 2.4, 1.6, { noNav: true });
-    L.busStops.push({ x, z, y: 0, waitX: x + nx * 0.3, waitZ: z + nz * 0.3, faceYaw: Math.atan2(-nx, -nz), dx, dz, edges });
+    const sty = TH(x, z);
+    addInstance('stop', stopProto, x, sty, z, Math.atan2(nx, nz), 1, 1, 1);
+    collider(x + nx * 0.95, sty, z + nz * 0.95, 1.6, 2.4, 1.6, { noNav: true });
+    L.busStops.push({ x, z, y: sty, waitX: x + nx * 0.3, waitZ: z + nz * 0.3, faceYaw: Math.atan2(-nx, -nz), dx, dz, edges });
   }
 
   // ------------------------------------------------------------------ trânsito na rede real
@@ -492,18 +535,18 @@ export function buildBrasilia(B, arena = false) {
     const isX = ex < ez;
     const px = isX ? (x < 0 ? Bd.minX - 0.2 : Bd.maxX + 0.2) : x;
     const pz = isX ? z : (z < 0 ? Bd.minZ - 0.2 : Bd.maxZ + 0.2);
-    const pw = isX ? 2.5 : 18, pd = isX ? 18 : 2.5;
-    collider(px, -2, pz, pw, 10, pd, { noGrapple: true, noNav: true });
+    const pw = isX ? 2.5 : 18, pd = isX ? 18 : 2.5, pty = TH(px, pz);
+    collider(px, -2 + pty, pz, pw, 10, pd, { noGrapple: true, noNav: true });
     const m = new THREE.Mesh(new THREE.BoxGeometry(isX ? 1.2 : 18, 7, isX ? 18 : 1.2), darkMat);
-    m.position.set(px, 3.5, pz);
+    m.position.set(px, 3.5 + pty, pz);
     m.matrixAutoUpdate = false; m.updateMatrix(); scene.add(m); L.meshes.push(m);
   }
 
   // ------------------------------------------------------------------ jogo: spawns, itens, início, pontos de referência
-  for (const [x, z] of D.spawns) spawn(x, 0, z);
-  for (const [x, z] of D.pickups) pickup(x, 0.2, z);
-  for (let i = 0; i < D.spawns.length; i += 5) L.arenaSpawns.push(new THREE.Vector3(D.spawns[i][0], 0, D.spawns[i][1]));
-  L.playerStart.set(LM.torre.x + 2, 0, (LM.torre.z + LM.rodoviaria.z) / 2);
+  for (const [x, z] of D.spawns) spawn(x, TH(x, z), z);
+  for (const [x, z] of D.pickups) pickup(x, 0.2 + TH(x, z), z);
+  for (let i = 0; i < D.spawns.length; i += 5) L.arenaSpawns.push(new THREE.Vector3(D.spawns[i][0], TH(D.spawns[i][0], D.spawns[i][1]), D.spawns[i][1]));
+  { const psx = LM.torre.x + 2, psz = (LM.torre.z + LM.rodoviaria.z) / 2; L.playerStart.set(psx, TH(psx, psz) + 0.5, psz); }
   L.landmarks = {
     rodoviaria: { pos: lmPos('rodoviaria', 6.5), r: 22, name: 'Plataforma da Rodoviária' },
     rodoviariaChao: { pos: lmPos('rodoviaria', 0.3), r: 18, name: 'Embarque da Rodoviária' },
@@ -511,7 +554,7 @@ export function buildBrasilia(B, arena = false) {
     torreMirante: { pos: lmPos('torre', 20.2), r: 10, name: 'Mirante da Torre de TV' },
     torreAlto: { pos: lmPos('torre', 58.2), r: 7, name: 'Mirante alto da Torre de TV' },
     praca3p: { pos: lmPos('praca3p', 0), r: 26, name: 'Praça dos Três Poderes' },
-    congresso: { pos: new THREE.Vector3(LM.congresso.x, 5.2, LM.congresso.z), r: 14, name: 'Laje do Congresso Nacional' },
+    congresso: { pos: new THREE.Vector3(LM.congresso.x, 5.2 + TH(LM.congresso.x, LM.congresso.z), LM.congresso.z), r: 14, name: 'Laje do Congresso Nacional' },
     catedral: { pos: lmPos('catedral', 0.4), r: 12, name: 'Catedral' },
     museu: { pos: lmPos('museu', 0.3), r: 12, name: 'Museu Nacional' },
     esplanada: { pos: lmPos('esplanada', 0.3), r: 24, name: 'Esplanada dos Ministérios' },
@@ -523,9 +566,9 @@ export function buildBrasilia(B, arena = false) {
   };
   // pontos das asas encaixados no spawn de rua mais próximo (nunca dentro de prédio)
   const nearSpawn = (x, z) => { let best = null, bd = 1e18; for (const [sx, sz] of D.spawns) { const d = (sx - x) ** 2 + (sz - z) ** 2; if (d < bd) { bd = d; best = [sx, sz]; } } return best; };
-  for (const k of ['asaNorte', 'asaSul']) { const p = L.landmarks[k].pos, q = nearSpawn(p.x, p.z); if (q) p.set(q[0], 0.2, q[1]); }
+  for (const k of ['asaNorte', 'asaSul']) { const p = L.landmarks[k].pos, q = nearSpawn(p.x, p.z); if (q) p.set(q[0], 0.2 + TH(q[0], q[1]), q[1]); }
   const ministerios = D.blds.filter((b) => b[0] === 'r' && b[1] === 'min' && inNav(b[2], b[3], 20));
-  L.landmarks.ministerios = ministerios.slice(0, 8).map((b) => ({ pos: new THREE.Vector3(b[2], b[7] + 0.2, b[3]), r: 9, name: 'Teto de Ministério (use o gancho)' }));
+  L.landmarks.ministerios = ministerios.slice(0, 8).map((b) => ({ pos: new THREE.Vector3(b[2], b[7] + 0.2 + TH(b[2], b[3]), b[3]), r: 9, name: 'Teto de Ministério (use o gancho)' }));
   // pontos de civis espalhados densamente pelos lugares movimentados da capital
   L.civSpots = [
     // Feirinha e base da Torre de TV
@@ -559,6 +602,8 @@ export function buildBrasilia(B, arena = false) {
     // Paradas de ônibus de toda a área jogável
     ...L.busStops.filter((s) => inNav(s.x, s.z)).slice(0, 32).map((s, idx) => [idx % 5 === 0 ? 'vendor' : 'civilian', s.waitX + s.dx * 1.5, 0, s.waitZ + s.dz * 1.5]),
   ];
+  // civis assentam no relevo real (DEM)
+  L.civSpots = L.civSpots.map(([kind, x, y, z]) => [kind, x, y + TH(x, z), z]);
   // mapinha: desenha as vias de verdade
   L.drawMinimap = (g, b, k) => {
     g.lineCap = 'round'; g.lineJoin = 'round';
