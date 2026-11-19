@@ -14,7 +14,10 @@ export class HUD {
       <div class="hud-tl">
         <div class="card stat-card"><div class="stat score"><span class="lbl">Pontos</span><b id="score">0</b></div><div class="stat money"><span class="lbl">Dinheiro</span><b id="money">$300</b></div></div>
         <div class="money-flash" id="mflash"></div><div class="combo" id="combo"></div>
-        <div class="shop-hint" id="shopHintBtn"><kbd>B</kbd> Loja</div>
+        <div class="hints-row">
+          <div class="shop-hint" id="shopHintBtn"><kbd>B</kbd> Loja</div>
+          <div class="map-hint" id="mapHintBtn"><kbd>M</kbd> Mapa</div>
+        </div>
       </div>
       <div class="hud-tr">
         <div class="card wave-card"><div class="wave"><span class="lbl">Onda</span><b id="wave">1</b></div><div class="left"><b id="left">0</b> inimigos</div></div>
@@ -45,6 +48,25 @@ export class HUD {
       <div class="tip" id="tip"></div>
       <div class="message"><div class="msg-main" id="msg"></div><div class="msg-sub" id="msgsub"></div></div>
       <div class="killfeed" id="killfeed"></div>
+      <div class="fullmap-modal" id="fullmapModal" hidden>
+        <div class="fm-box">
+          <div class="fm-header">
+            <div class="fm-title">🗺️ MAPA TÁTICO — BRASÍLIA · PLANO PILOTO</div>
+            <div class="fm-sub" id="fmSub">Pressione M ou ESC para fechar</div>
+            <button class="fm-close" id="fmCloseBtn">✕ Fechar [M / ESC]</button>
+          </div>
+          <div class="fm-canvas-wrap">
+            <canvas id="fullmapCanvas" width="960" height="600"></canvas>
+          </div>
+          <div class="fm-legend">
+            <span class="fml"><i class="fml-p"></i> Você</span>
+            <span class="fml"><i class="fml-lm"></i> Marco Histórico</span>
+            <span class="fml"><i class="fml-ms"></i> Missão</span>
+            <span class="fml"><i class="fml-cv"></i> Civis</span>
+            <span class="fml"><i class="fml-en"></i> Inimigos</span>
+          </div>
+        </div>
+      </div>
       <div class="screen" id="screen"><div class="panel" id="panel"></div></div>
       <div class="buymenu" id="buymenu" hidden>
         <div class="bm-box">

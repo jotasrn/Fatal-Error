@@ -56,12 +56,21 @@ export function buildBrasilia(B, arena = false) {
   const UP = [0, 1, 0], DOWN = [0, -1, 0];
 
   // ------------------------------------------------------------------ chão, limites e paisagem
-  for (const [x1, z1, x2, z2] of D.ground) box((x1 + x2) / 2, -0.85, (z1 + z2) / 2, x2 - x1, 0.85, z2 - z1, { ink: GN });
-  const Bd = D.bounds, T = 4, PH = 40;
-  for (const [x, z, w, d] of [[(Bd.minX + Bd.maxX) / 2, Bd.minZ - T / 2, Bd.maxX - Bd.minX + 2 * T, T], [(Bd.minX + Bd.maxX) / 2, Bd.maxZ + T / 2, Bd.maxX - Bd.minX + 2 * T, T],
-    [Bd.minX - T / 2, (Bd.minZ + Bd.maxZ) / 2, T, Bd.maxZ - Bd.minZ], [Bd.maxX + T / 2, (Bd.minZ + Bd.maxZ) / 2, T, Bd.maxZ - Bd.minZ]]) {
-    collider(x, -8, z, w, PH, d, { noGrapple: true });
-    box(x, 0, z, w, 1.1, d, { ink: BK, noCollide: true }); // mureta visível
+  // Base contínua de segurança abaixo do nível dos túneis para impedir queda no vazio absoluto
+  const Bd = D.bounds;
+  box((Bd.minX + Bd.maxX) / 2, -8.2, (Bd.minZ + Bd.maxZ) / 2, Bd.maxX - Bd.minX + 40, 0.4, Bd.maxZ - Bd.minZ + 40, { ink: GN, noNav: true });
+  for (const [x1, z1, x2, z2] of D.ground) box((x1 + x2) / 2, -0.85, (z1 + z2) / 2, x2 - x1, 0.85, z2 - z1, { ink: GN, noCollide: true });
+  // Barreiras perimetrais sólidas e visíveis (muralha de contenção urbana de 4.5m intransponível)
+  const T = 6, PH = 70, WALL_H = 4.5;
+  for (const [x, z, w, d] of [
+    [(Bd.minX + Bd.maxX) / 2, Bd.minZ - T / 2, Bd.maxX - Bd.minX + 2 * T, T],
+    [(Bd.minX + Bd.maxX) / 2, Bd.maxZ + T / 2, Bd.maxX - Bd.minX + 2 * T, T],
+    [Bd.minX - T / 2, (Bd.minZ + Bd.maxZ) / 2, T, Bd.maxZ - Bd.minZ],
+    [Bd.maxX + T / 2, (Bd.minZ + Bd.maxZ) / 2, T, Bd.maxZ - Bd.minZ]
+  ]) {
+    collider(x, -10, z, w, PH, d, { noGrapple: true, noNav: true });
+    box(x, 0, z, w, 2.2, d, { ink: BK });
+    box(x, 2.2, z, w, WALL_H - 2.2, Math.max(0.6, d * 0.35), { ink: OR, noCollide: true });
   }
   collider((Bd.minX + Bd.maxX) / 2, 90, (Bd.minZ + Bd.maxZ) / 2, Bd.maxX - Bd.minX + 40, 8, Bd.maxZ - Bd.minZ + 40, { noNav: true, noGrapple: true });
   M.lagoParanoa(B, Bd.maxZ + T, Bd.minX, Bd.maxX);
@@ -76,10 +85,110 @@ export function buildBrasilia(B, arena = false) {
 
   // ------------------------------------------------------------------ vias
   const CLS = D.cls, roads = [];
+  // Nivelamento do cruzamento N1/S1 com L2 na Esplanada (evita parede vertical de 6.5m em 3.5m no meio da N1/S1)
+  for (const r of D.roads) {
+    const p = r[5];
+    let flattened = false;
+    for (let i = 0; i < p.length; i += 3) {
+      if (Math.abs(p[i]) < 55 && p[i + 2] > 220 && p[i + 2] < 280 && p[i + 1] > 0.1) {
+        p[i + 1] = 0;
+        flattened = true;
+      } else if (Math.abs(p[i]) < 15 && p[i + 1] > 0.1 && p[i + 1] < 1.2) {
+        p[i + 1] = 0;
+      }
+    }
+    if (flattened) r[2] &= ~2;
+  }
+  if (D.traffic && D.traffic.nodes) {
+    for (const nd of D.traffic.nodes) {
+      if (Math.abs(nd[0]) < 55 && nd[2] > 220 && nd[2] < 280 && nd[1] > 0.1) nd[1] = 0;
+    }
+  }
   const nodeDeg = new Map(); const nk = (x, z) => x.toFixed(1) + ',' + z.toFixed(1);
   for (const r of D.roads) { const p = r[5]; for (const i of [0, p.length - 3]) { const k = nk(p[i], p[i + 2]); nodeDeg.set(k, (nodeDeg.get(k) || 0) + 1); } }
   const nearJunction = (x, z) => { for (const [k, n] of nodeDeg) { if (n < 3) continue; const [jx, jz] = k.split(',').map(Number); if ((jx - x) ** 2 + (jz - z) ** 2 < 64) return true; } return false; };
   const RANK = { trunk: 6, trunk_link: 5, primary: 5, primary_link: 4, secondary: 4, secondary_link: 3, tertiary: 3, tertiary_link: 2 };
+  // Pré-indexação das vias para evitar que rampas, muros de trincheira ou quinas AABB de prédios invadam pistas vizinhas
+  const flatSegs = [], shallowDownSegs = [], allDriveSegs = [], allRoadSegs = [];
+  for (const r of D.roads) {
+    const lanes = r[3], width = r[4], pts = r[5], hw = width / 2;
+    const n = pts.length / 3;
+    for (let i = 0; i < n - 1; i++) {
+      const ax = pts[i * 3], ay = pts[i * 3 + 1], az = pts[i * 3 + 2];
+      const bx = pts[(i + 1) * 3], by = pts[(i + 1) * 3 + 1], bz = pts[(i + 1) * 3 + 2];
+      const seg = [ax, az, bx, bz, hw, ay, by];
+      allRoadSegs.push(seg);
+      if (lanes > 0) allDriveSegs.push(seg);
+      if (Math.abs(ay) <= 0.15 && Math.abs(by) <= 0.15) flatSegs.push(seg);
+      if (Math.min(ay, by) < -0.12 && Math.max(ay, by) > -2.6) shallowDownSegs.push(seg);
+    }
+  }
+  function inSegList(list, x, z, pad = 0, endPad = 0.35) {
+    for (let i = 0; i < list.length; i++) {
+      const s = list[i], ax = s[0], az = s[1], bx = s[2], bz = s[3], r = s[4] + pad;
+      if (x < Math.min(ax, bx) - r || x > Math.max(ax, bx) + r || z < Math.min(az, bz) - r || z > Math.max(az, bz) + r) continue;
+      const dx = bx - ax, dz = bz - az, len = Math.hypot(dx, dz);
+      if (len < 1e-4) continue;
+      const uL = ((x - ax) * dx + (z - az) * dz) / len;
+      if (uL < -endPad || uL > len + endPad) continue;
+      const uW = Math.abs(-(x - ax) * dz + (z - az) * dx) / len;
+      if (uW < r) return true;
+    }
+    return false;
+  }
+  function obstructsLowerRoad(x, z, h, boxS = 1.24, slabH = 0.28, exA = null, exB = null) {
+    const half = boxS * 0.5 + 0.48;
+    const maxDiff = 2.12 + slabH;
+    for (let i = 0; i < allRoadSegs.length; i++) {
+      const s = allRoadSegs[i], ax = s[0], az = s[1], bx = s[2], bz = s[3];
+      if (x < Math.min(ax, bx) - half || x > Math.max(ax, bx) + half || z < Math.min(az, bz) - half || z > Math.max(az, bz) + half) continue;
+      if (Math.min(s[5], s[6]) >= h - 0.12 || Math.max(s[5], s[6]) <= h - maxDiff - 0.1) continue;
+      const dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz || 1;
+      const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / l2));
+      const qx = ax + dx * t, qz = az + dz * t;
+      if (Math.abs(x - qx) >= half || Math.abs(z - qz) >= half) continue;
+      const ho = s[5] + (s[6] - s[5]) * t;
+      const diff = h - ho;
+      if (exA && exB && Math.hypot(ax - exA[0], az - exA[2]) < 0.1 && Math.hypot(bx - exB[0], bz - exB[2]) < 0.1) continue;
+      const sharedNode = (exA && Math.hypot(qx - exA[0], qz - exA[2]) < 0.55 && Math.abs(ho - exA[1]) < 0.25) ||
+                         (exB && Math.hypot(qx - exB[0], qz - exB[2]) < 0.55 && Math.abs(ho - exB[1]) < 0.25);
+      const minDiff = sharedNode ? 0.53 : 0.14;
+      if (diff > minDiff && diff < maxDiff) return true;
+    }
+    return false;
+  }
+  for (const [ox1, oz1, ox2, oz2] of D.ground) {
+    let x1 = ox1, x2 = ox2, z1 = oz1, z2 = oz2;
+    if (z2 - z1 <= 14) {
+      const cz = (z1 + z2) / 2, d = z2 - z1;
+      while (x2 - x1 > 1.2 && obstructsLowerRoad(x1 + 0.4, cz, 0, Math.max(1.2, d), 0.85)) x1 += 1.0;
+      while (x2 - x1 > 1.2 && obstructsLowerRoad(x2 - 0.4, cz, 0, Math.max(1.2, d), 0.85)) x2 -= 1.0;
+    }
+    if (x2 - x1 <= 14) {
+      const cx = (x1 + x2) / 2, w = x2 - x1;
+      while (z2 - z1 > 1.2 && obstructsLowerRoad(cx, z1 + 0.4, 0, Math.max(1.2, w), 0.85)) z1 += 1.0;
+      while (z2 - z1 > 1.2 && obstructsLowerRoad(cx, z2 - 0.4, 0, Math.max(1.2, w), 0.85)) z2 -= 1.0;
+    }
+    if (x2 - x1 <= 8 && z2 - z1 <= 8 && obstructsLowerRoad((x1 + x2) / 2, (z1 + z2) / 2, 0, Math.max(x2 - x1, z2 - z1), 0.85)) continue;
+    if (x2 > x1 + 0.2 && z2 > z1 + 0.2) collider((x1 + x2) / 2, -0.85, (z1 + z2) / 2, x2 - x1, 0.85, z2 - z1);
+  }
+  function boxHitsRoad(x1, z1, x2, z2, pad = 0.35) {
+    const cx = (x1 + x2) / 2, cz = (z1 + z2) / 2, hw = (x2 - x1) / 2, hd = (z2 - z1) / 2;
+    const rad = Math.hypot(hw, hd);
+    for (let i = 0; i < allRoadSegs.length; i++) {
+      const s = allRoadSegs[i], ax = s[0], az = s[1], bx = s[2], bz = s[3], r = s[4] + pad;
+      if (cx + rad < Math.min(ax, bx) - r || cx - rad > Math.max(ax, bx) + r || cz + rad < Math.min(az, bz) - r || cz - rad > Math.max(az, bz) + r) continue;
+      for (const [px, pz] of [[cx, cz], [x1, z1], [x2, z1], [x1, z2], [x2, z2], [(x1 + cx) / 2, (z1 + cz) / 2], [(x2 + cx) / 2, (z2 + cz) / 2]]) {
+        const dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz || 1;
+        const t = Math.max(0, Math.min(1, ((px - ax) * dx + (pz - az) * dz) / l2));
+        const h = s[5] + (s[6] - s[5]) * t;
+        if (h < -1.5) continue;
+        const qx = ax + dx * t - px, qz = az + dz * t - pz;
+        if (qx * qx + qz * qz < r * r) return true;
+      }
+    }
+    return false;
+  }
   for (const r of D.roads) {
     const cls = CLS[r[0]], name = r[1] >= 0 ? D.names[r[1]] : '', flags = r[2], lanes = r[3], width = r[4], pts = r[5];
     const oneway = !!(flags & 1), bridge = !!(flags & 2), tunnel = !!(flags & 4);
@@ -147,25 +256,46 @@ export function buildBrasilia(B, arena = false) {
           }
         }
       }
-      // colisores: pista elevada/rebaixada (no nível do chão a via é só desenho)
+      // colisores: malha orientada de lajes finas (evita degraus altos nas rampas e libera viadutos/passagens inferiores)
       const segL = Math.hypot(b[0] - a[0], b[2] - a[2]);
-      if (up || (tunnel && down)) {
-        const wide = tunnel ? width + 3.6 : width;
-        const step = Math.max(1.2, Math.min(3, wide * 0.5)); const k = Math.max(1, Math.ceil(segL / step));
-        for (let j = 0; j <= k; j++) {
-          const t = j / k, x = a[0] + (b[0] - a[0]) * t, z = a[2] + (b[2] - a[2]) * t, h = a[1] + (b[1] - a[1]) * t;
-          if (up && h > 0.15) collider(x, bridge ? h - 0.9 : 0, z, wide, bridge ? 0.9 : h, wide, { noNav: false });
-          else if (tunnel) collider(x, h - 0.9, z, wide, 0.9, wide);
+      const sMinX = Math.min(a[0], b[0]) - hw - 2, sMaxX = Math.max(a[0], b[0]) + hw + 2;
+      const sMinZ = Math.min(a[2], b[2]) - hw - 2, sMaxZ = Math.max(a[2], b[2]) + hw + 2;
+      const localCuts = (!up && !down) ? D.cutFloor.filter(([x1, z1, x2, z2]) => sMaxX >= x1 && sMinX <= x2 && sMaxZ >= z1 && sMinZ <= z2) : [];
+      const hasCutBelow = localCuts.length > 0;
+      if ((up || down || hasCutBelow) && segL > 0.05) {
+        const tx = (b[0] - a[0]) / segL, tz = (b[2] - a[2]) / segL;
+        const nx = -tz, nz = tx;
+        const dh = Math.abs(hB - hA);
+        const sloped = dh > 0.08;
+        const steep = dh / segL > 0.22;
+        const stepL = steep ? 0.45 : sloped ? 0.65 : 1.2;
+        const kL = Math.max(1, Math.ceil(segL / stepL), Math.ceil(dh / 0.14));
+        const boxS = steep ? 0.95 : sloped ? 1.24 : 1.7;
+        const effHw = Math.max(0.15, hw - (up ? boxS * 0.35 : 0.02));
+        const stepW = steep ? 0.55 : 0.78;
+        const kW = Math.max(1, Math.round((effHw * 2) / stepW));
+        const slabH = 0.28;
+        for (let j = 0; j <= kL; j++) {
+          const t = j / kL, cx = a[0] + (b[0] - a[0]) * t, cz = a[2] + (b[2] - a[2]) * t, h = a[1] + (b[1] - a[1]) * t;
+          if (!down && !hasCutBelow && h <= 0.08) continue;
+          if (hasCutBelow && !localCuts.some(([x1, z1, x2, z2]) => cx + hw + 2.5 >= x1 && cx - hw - 2.5 <= x2 && cz + hw + 2.5 >= z1 && cz - hw - 2.5 <= z2)) continue;
+          for (let iw = 0; iw <= kW; iw++) {
+            const u = -effHw + (iw / kW) * (effHw * 2);
+            const px = cx + nx * u, pz = cz + nz * u;
+            if (obstructsLowerRoad(px, pz, h, boxS, slabH, a, b)) continue;
+            collider(px, h - slabH, pz, boxS, slabH, boxS, { noNav: false });
+          }
         }
-        if (tunnel) for (let j = 0; j <= Math.ceil(segL / 1.2); j++) { // paredes do túnel
-          const t = j / Math.ceil(segL / 1.2), x = a[0] + (b[0] - a[0]) * t, z = a[2] + (b[2] - a[2]) * t, h = a[1] + (b[1] - a[1]) * t;
+        if (tunnel) for (let j = 0; j <= Math.ceil(segL / 1.4); j++) { // paredes laterais do túnel
+          const t = j / Math.ceil(segL / 1.4), x = a[0] + (b[0] - a[0]) * t, z = a[2] + (b[2] - a[2]) * t, h = a[1] + (b[1] - a[1]) * t;
+          if (h > -2.2) continue;
           const mx = na[0] + (nb[0] - na[0]) * t, mz = na[1] + (nb[1] - na[1]) * t;
-          for (const s of [1, -1]) collider(x + mx * (hw + 1.8) * s, h, z + mz * (hw + 1.8) * s, 1.3, -0.85 - h, 1.3, { noNav: true });
-        }
-        if (up && Math.min(hA, hB) > 0.6 && !nearJunction(cxm, czm)) for (let j = 0; j <= Math.ceil(segL / 1.3); j++) { // guarda-corpo
-          const t = j / Math.ceil(segL / 1.3), x = a[0] + (b[0] - a[0]) * t, z = a[2] + (b[2] - a[2]) * t, h = a[1] + (b[1] - a[1]) * t;
-          const mx = na[0] + (nb[0] - na[0]) * t, mz = na[1] + (nb[1] - na[1]) * t;
-          for (const s of [1, -1]) collider(x + mx * (hw - 0.1) * s, h, z + mz * (hw - 0.1) * s, 0.35, 1.0, 0.35, { noNav: true, noShoot: true });
+          for (const s of [1, -1]) {
+            const wx = x + mx * (hw + 1.8) * s, wz = z + mz * (hw + 1.8) * s;
+            if (!nearJunction(wx, wz) && !inSegList(allRoadSegs, wx, wz, 1.45, 1.45)) {
+              collider(wx, h, wz, 1.1, Math.max(0.5, -0.85 - h), 1.1, { noNav: true });
+            }
+          }
         }
       }
     }
@@ -183,27 +313,28 @@ export function buildBrasilia(B, arena = false) {
     }
   }
   // pista no chão embaixo deste ponto? (pilar não pode nascer no meio de outra via)
-  function onRoadBelow(x, z, h) {
-    for (const r of roads) {
-      const p = r.pts; if (r.lanes === 0) continue;
-      for (let i = 0; i < p.length - 3; i += 3) {
-        const ax = p[i], az = p[i + 2], bx = p[i + 3], bz = p[i + 5];
-        if (Math.max(p[i + 1], p[i + 4]) > h - 1) continue;
-        const dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz || 1; let t = ((x - ax) * dx + (z - az) * dz) / l2; t = Math.max(0, Math.min(1, t));
-        const qx = ax + dx * t - x, qz = az + dz * t - z; if (qx * qx + qz * qz < (r.width / 2 + 1.5) ** 2) return true;
-      }
-    }
-    return false;
+  function onRoadBelow(x, z, _h) {
+    return inSegList(allRoadSegs, x, z, 1.6, 1.6);
   }
-  // trincheiras: piso e muros de arrimo
-  for (const [x1, z1, x2, z2, h] of D.cutFloor) box((x1 + x2) / 2, h - 0.9, (z1 + z2) / 2, x2 - x1, 0.9, z2 - z1, { ink: BK });
+  // trincheiras: piso visual + colisor levemente rebaixado para não criar degraus sobre as rampas suaves
+  for (const [x1, z1, x2, z2, h] of D.cutFloor) {
+    const cx = (x1 + x2) / 2, cz = (z1 + z2) / 2, w = x2 - x1, d = z2 - z1;
+    box(cx, h - 0.9, cz, w, 0.9, d, { ink: BK, noCollide: true });
+    if (!obstructsLowerRoad(cx, cz, h - 0.25, Math.max(w, d), 0.9)) {
+      collider(cx, h - 1.15, cz, w, 0.9, d);
+    }
+  }
   for (const w of D.cutWalls) {
     for (let i = 0; i + 5 < w.length; i += 3) {
       const ax = w[i], az = w[i + 1], ah = w[i + 2], bx = w[i + 3], bz = w[i + 4], bh = w[i + 5];
       quad(acc('u:' + BK, ax, az), [ax, Math.min(ah, bh) - 0.4, az], [bx, Math.min(ah, bh) - 0.4, bz], [bx, 1.0, bz], [ax, 1.0, az], null);
       quad(acc('u:' + BK, ax, az), [ax, 1.0, az], [bx, 1.0, bz], [bx, 1.0, bz], [ax, 1.0, az], UP);
     }
-    for (let i = 0; i < w.length; i += 3) collider(w[i], w[i + 2], w[i + 1], 1.1, 1.0 - w[i + 2], 1.1, { noNav: true });
+    for (let i = 0; i < w.length; i += 3) {
+      if (!inSegList(allRoadSegs, w[i], w[i + 1], 1.45, 1.45)) {
+        collider(w[i], w[i + 2], w[i + 1], 1.1, 1.0 - w[i + 2], 1.1, { noNav: true });
+      }
+    }
   }
 
   // ------------------------------------------------------------------ prédios (planta do OSM)
@@ -263,7 +394,10 @@ export function buildBrasilia(B, arena = false) {
       if (h > 12) roofs.push([cx, h, cz]);
     }
   }
-  for (const [x1, z1, x2, z2, y0, h] of D.bcol) collider((x1 + x2) / 2, y0, (z1 + z2) / 2, x2 - x1, h - y0, z2 - z1);
+  for (const [x1, z1, x2, z2, y0, h] of D.bcol) {
+    if (y0 < 2.2 && boxHitsRoad(x1, z1, x2, z2, 0.35)) continue;
+    collider((x1 + x2) / 2, y0, (z1 + z2) / 2, x2 - x1, h - y0, z2 - z1);
+  }
   const inNav = (x, z, pad = 0) => x > D.nav.minX + pad && x < D.nav.maxX - pad && z > D.nav.minZ + pad && z < D.nav.maxZ - pad;
   let ri = 0; for (const [x, h, z] of roofs) if (inNav(x, z, 10)) { if (ri % 3 === 0) ring(x, h + 6, z, 'y'); if (ri % 4 === 0) sniper(x, h, z); ri++; }
 
@@ -303,7 +437,7 @@ export function buildBrasilia(B, arena = false) {
     for (let zz = -plL / 2 + 6; zz <= plL / 2 - 6; zz += 4.4) breakable('glass', pl.x + sP * ((plDx - 5) / 2 + 0.3), 3, pl.z + zz, 0.3, 7, 4);
     const sfDx = Math.max(16, sf.w - 6), sfL = Math.max(16, sf.d - 2);
     for (let zz = -sfL / 2 + 4; zz <= sfL / 2 - 4; zz += 4) breakable('glass', sf.x + sS * ((sfDx - 5) / 2 + 0.3), 1.2, sf.z + zz, 0.3, 5.5, 3.8);
-    for (const sx of [-1, 1]) for (let i = 1; i <= 6; i++) breakable('glass', cg.x + sx * i * 6, 0.2, cg.z - 13.25, 5.6, 3.8, 0.3);
+    for (const sx of [-1, 1]) for (let i = 1; i <= 4; i++) breakable('glass', cg.x + sx * i * 6, 0.2, cg.z - 13.25, 5.6, 3.8, 0.3);
     for (let x = -17; x <= 17; x += 3.8) if (Math.abs(x) > 2) breakable('fence', cg.x + x, 0.22, cg.z - 34, 3.2, 1.15, 0.22);
   }
 
@@ -315,9 +449,10 @@ export function buildBrasilia(B, arena = false) {
   };
   const TREE_INK = [GN, GN, OR, PK, PK, BK];
   for (const [x, z, t] of D.trees) {
+    if (Math.abs(x) < 18 && z > -350 && z < 660) continue;
     const s = t < 2 ? 1.25 + ((x * 7 + z * 3) % 1 + 1) % 1 * 0.5 : 0.95;
     addInstance('tree', treeProto, x, 0, z, (x + z) % TAU, s, s * (t < 2 ? 1.15 : 1), s, TREE_INK[t]);
-    if (inNav(x, z)) collider(x, 0, z, 0.6, 3, 0.6, { noNav: false });
+    if (inNav(x, z) && !inSegList(allRoadSegs, x, z, 0.85)) collider(x, 0, z, 0.6, 3, 0.6, { noNav: false });
   }
   const lampProto = () => {
     const pole = new THREE.CylinderGeometry(0.1, 0.14, 8, 6); pole.translate(0, 4, 0);
@@ -345,17 +480,22 @@ export function buildBrasilia(B, arena = false) {
   const tnet = { nodes: D.tnodes, edges: D.tedges, sources: D.tsources, sinks: D.tsinks, speed: D.speed,
     roads: roads.map((r) => ({ pts: r.pts, lanes: r.lanes, width: r.width, oneway: r.oneway, cls: r.cls, name: r.name })),
     stops: L.busStops.map((s) => ({ edges: s.edges })) };
-  const traffic = buildGraphTraffic(B, tnet, { count: arena ? 110 : 150, targets: () => (L.targetsFn ? L.targetsFn() : []) });
+  const traffic = buildGraphTraffic(B, tnet, { count: arena ? 160 : 280, targets: () => (L.targetsFn ? L.targetsFn() : []) });
   L.animated.push({ mesh: null, update: (t) => traffic.update(t) });
   L.cars = traffic.cars;
   L.allBusStops = L.busStops; L.busStops = L.busStops.filter((s) => inNav(s.x, s.z, 6)); // passageiros só usam as paradas da área jogável
-  // bocas de túnel escuras onde as vias saem do mapa
+  // Portais de túnel sólidos com colisão onde as vias saem do mapa
   const darkMat = makeInkMaterial({ ink: BK, fill: true });
   for (const n of [...new Set([...D.tsources, ...D.tsinks])]) {
     const [x, z] = D.tnodes[n];
     const ex = Math.min(x - Bd.minX, Bd.maxX - x), ez = Math.min(z - Bd.minZ, Bd.maxZ - z);
-    const m = new THREE.Mesh(new THREE.BoxGeometry(ex < ez ? 0.6 : 16, 6, ex < ez ? 16 : 0.6), darkMat);
-    m.position.set(ex < ez ? (x < 0 ? Bd.minX - 0.2 : Bd.maxX + 0.2) : x, 3, ex < ez ? z : (z < 0 ? Bd.minZ - 0.2 : Bd.maxZ + 0.2));
+    const isX = ex < ez;
+    const px = isX ? (x < 0 ? Bd.minX - 0.2 : Bd.maxX + 0.2) : x;
+    const pz = isX ? z : (z < 0 ? Bd.minZ - 0.2 : Bd.maxZ + 0.2);
+    const pw = isX ? 2.5 : 18, pd = isX ? 18 : 2.5;
+    collider(px, -2, pz, pw, 10, pd, { noGrapple: true, noNav: true });
+    const m = new THREE.Mesh(new THREE.BoxGeometry(isX ? 1.2 : 18, 7, isX ? 18 : 1.2), darkMat);
+    m.position.set(px, 3.5, pz);
     m.matrixAutoUpdate = false; m.updateMatrix(); scene.add(m); L.meshes.push(m);
   }
 
@@ -386,14 +526,38 @@ export function buildBrasilia(B, arena = false) {
   for (const k of ['asaNorte', 'asaSul']) { const p = L.landmarks[k].pos, q = nearSpawn(p.x, p.z); if (q) p.set(q[0], 0.2, q[1]); }
   const ministerios = D.blds.filter((b) => b[0] === 'r' && b[1] === 'min' && inNav(b[2], b[3], 20));
   L.landmarks.ministerios = ministerios.slice(0, 8).map((b) => ({ pos: new THREE.Vector3(b[2], b[7] + 0.2, b[3]), r: 9, name: 'Teto de Ministério (use o gancho)' }));
-  // pontos de civis espalhados pelos lugares movimentados
+  // pontos de civis espalhados densamente pelos lugares movimentados da capital
   L.civSpots = [
+    // Feirinha e base da Torre de TV
     ['vendor', LM.torre.x + 4, 0, LM.torre.z - 30], ['vendor', LM.torre.x - 4, 0, LM.torre.z - 26],
-    ['civilian', LM.rodoviaria.x, 6.5, LM.rodoviaria.z], ['civilian', LM.rodoviaria.x - 8, 0.3, LM.rodoviaria.z + 10], ['vendor', LM.rodoviaria.x + 8, 0.3, LM.rodoviaria.z - 10],
-    ['civilian', LM.catedral.x - 16, 0, LM.catedral.z], ['civilian', LM.museu.x - 18, 0, LM.museu.z],
+    ['vendor', LM.torre.x + 8, 0, LM.torre.z - 15], ['civilian', LM.torre.x - 8, 0, LM.torre.z - 12],
+    ['civilian', LM.torre.x + 12, 0, LM.torre.z + 10], ['civilian', LM.torre.x, 20.2, LM.torre.z],
+    // Rodoviária do Plano Piloto (piso superior e calçadões)
+    ['civilian', LM.rodoviaria.x, 6.5, LM.rodoviaria.z], ['civilian', LM.rodoviaria.x + 10, 6.5, LM.rodoviaria.z + 8],
+    ['civilian', LM.rodoviaria.x - 12, 6.5, LM.rodoviaria.z - 8], ['vendor', LM.rodoviaria.x + 16, 6.5, LM.rodoviaria.z - 4],
+    ['civilian', LM.rodoviaria.x - 18, 6.5, LM.rodoviaria.z + 6], ['civilian', LM.rodoviaria.x, 6.5, LM.rodoviaria.z - 16],
+    // Rodoviária do Plano Piloto (embarque inferior - caldo de cana e pastel)
+    ['civilian', LM.rodoviaria.x - 8, 0.3, LM.rodoviaria.z + 10], ['vendor', LM.rodoviaria.x + 8, 0.3, LM.rodoviaria.z - 10],
+    ['civilian', LM.rodoviaria.x - 15, 0.3, LM.rodoviaria.z - 6], ['civilian', LM.rodoviaria.x + 14, 0.3, LM.rodoviaria.z + 12],
+    ['vendor', LM.rodoviaria.x, 0.3, LM.rodoviaria.z + 18], ['civilian', LM.rodoviaria.x + 4, 0.3, LM.rodoviaria.z - 18],
+    // Catedral e Museu Nacional
+    ['civilian', LM.catedral.x - 16, 0, LM.catedral.z], ['civilian', LM.catedral.x + 14, 0, LM.catedral.z + 8],
+    ['civilian', LM.museu.x - 18, 0, LM.museu.z], ['civilian', LM.museu.x + 12, 0, LM.museu.z - 10],
+    ['civilian', LM.teatro.x - 10, 0, LM.teatro.z + 12], ['civilian', LM.teatro.x + 8, 0, LM.teatro.z - 8],
+    // Esplanada dos Ministérios
     ['politician', LM.esplanada.x - 30, 0, LM.esplanada.z], ['politician', LM.esplanada.x + 30, 0, LM.esplanada.z + 20],
-    ['politician', LM.congresso.x, 5, LM.congresso.z], ['politician', LM.praca3p.x - 10, 0, LM.praca3p.z],
-    ...L.busStops.filter((s) => inNav(s.x, s.z)).slice(0, 14).map((s) => ['civilian', s.waitX + s.dx * 2, 0, s.waitZ + s.dz * 2]),
+    ['civilian', LM.esplanada.x - 15, 0, LM.esplanada.z - 40], ['civilian', LM.esplanada.x + 15, 0, LM.esplanada.z + 50],
+    ['civilian', LM.esplanada.x, 0, LM.esplanada.z - 80], ['civilian', LM.esplanada.x, 0, LM.esplanada.z + 90],
+    // Praça dos Três Poderes, Planalto, STF e Congresso
+    ['politician', LM.congresso.x, 5.2, LM.congresso.z], ['politician', LM.congresso.x - 14, 5.2, LM.congresso.z - 6],
+    ['politician', LM.praca3p.x - 10, 0, LM.praca3p.z], ['politician', LM.praca3p.x + 12, 0, LM.praca3p.z + 8],
+    ['civilian', LM.praca3p.x, 0, LM.praca3p.z - 16], ['civilian', LM.panteao.x + 6, 0, LM.panteao.z - 4],
+    ['civilian', LM.planalto.x + 8, 0, LM.planalto.z + 10], ['civilian', LM.stf.x - 8, 0, LM.stf.z - 10],
+    // Setor Comercial e Shoppings
+    ['civilian', LM.rodoviaria.x - 45, 0, LM.rodoviaria.z - 50], ['civilian', LM.rodoviaria.x + 45, 0, LM.rodoviaria.z - 50],
+    ['vendor', LM.rodoviaria.x - 55, 0, LM.rodoviaria.z - 35], ['civilian', LM.rodoviaria.x + 55, 0, LM.rodoviaria.z - 35],
+    // Paradas de ônibus de toda a área jogável
+    ...L.busStops.filter((s) => inNav(s.x, s.z)).slice(0, 32).map((s, idx) => [idx % 5 === 0 ? 'vendor' : 'civilian', s.waitX + s.dx * 1.5, 0, s.waitZ + s.dz * 1.5]),
   ];
   // mapinha: desenha as vias de verdade
   L.drawMinimap = (g, b, k) => {

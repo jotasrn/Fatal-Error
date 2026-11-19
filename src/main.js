@@ -49,6 +49,11 @@ const setArena = (on) => setLevel(knownMap(net.active ? (lobby.map || mapKey) : 
 const input = new Input(canvas);
 const hud = new HUD(document.getElementById('hud'));
 minimap = new Minimap(hud.root); minimap.setLevel(level, world);
+hud.onToggleMap = () => {
+  const open = minimap.toggleFullMap();
+  if (open) input.exitLock();
+  else if (!input.usingGamepad) input.requestLock();
+};
 const effects = new Effects(R.scene, world);
 const ctx = { scene: R.scene, camera: R.camera, world, level, nav, input, hud, effects, audio, renderer: R };
 
@@ -463,6 +468,27 @@ function spawnBrasiliaCivilians() {
   // Orelha: o cachorro caramelo que acompanha os jogadores pela cidade (não pode ser ferido)
   if (!enemies.enemies.some((e) => e.alive && e.T.isPet)) { const sp = level.playerStart; const o = enemies.spawn('orelha', snap(new THREE.Vector3(sp.x + 3, sp.y, sp.z + 3))); o.state = 'hunt'; }
   triggerBrasiliaManifestation();
+}
+
+let pedTimer = 0;
+function maintainBrasiliaPedestrians(dt) {
+  pedTimer -= dt;
+  if (pedTimer > 0) return;
+  pedTimer = 3.5;
+  const aliveCivs = enemies.enemies.filter((e) => e.alive && (e.T.isCivilian || e.T.isVendor || e.T.isPolitician)).length;
+  if (aliveCivs >= 35) return;
+  const civSpots = level.civSpots;
+  if (!civSpots || !civSpots.length || !player || !player.body) return;
+  const px = player.body.pos.x, pz = player.body.pos.z;
+  const candidates = civSpots.filter((s) => {
+    const d = Math.hypot(s[1] - px, s[3] - pz);
+    return d > 35 && d < 120;
+  });
+  if (!candidates.length) return;
+  const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+  const snap = (v) => { const id = nav.nearestNode(v, 4, 3); if (id >= 0) { const nd = nav.nodes[id]; v.set(nd.x, nd.y + 0.05, nd.z); } return v; };
+  const c = enemies.spawn(chosen[0], snap(new THREE.Vector3(chosen[1], chosen[2], chosen[3])));
+  if (c) c.state = 'hunt';
 }
 
 ctx.onProtestersRiot = () => {
@@ -1547,8 +1573,14 @@ function stepInner(now) {
     if (hud.el.buymenu.hidden) { hud.toggleBuyMenu(true, player); input.exitLock(); }
     else { hud.toggleBuyMenu(false); if (!input.usingGamepad) input.requestLock(); }
   }
+  else if (playing && input.pressed('map')) {
+    const open = minimap.toggleFullMap();
+    if (open) input.exitLock();
+    else if (!input.usingGamepad) input.requestLock();
+  }
   else if ((st === 'play' || (st === 'dying' && online())) && input.pressed('pause')) {
-    if (!hud.el.buymenu.hidden) { hud.toggleBuyMenu(false); if (!input.usingGamepad) input.requestLock(); }
+    if (minimap.fullmapOpen) { minimap.toggleFullMap(false); if (!input.usingGamepad) input.requestLock(); }
+    else if (!hud.el.buymenu.hidden) { hud.toggleBuyMenu(false); if (!input.usingGamepad) input.requestLock(); }
     else if (game.menu) resume();
     else { pause(); input.exitLock(); }
   }
@@ -1572,7 +1604,10 @@ function stepInner(now) {
     player.update(sdt); safeEnemies(sdt); effects.update(sdt); bEvents.update(sdt); missions.update(sdt); updatePickups(sdt); netUpdate(dt);
     if (st === 'play' && (!online() || net.isHost)) {
       updateWaves(sdt);
-      if (level.key === 'brasilia') bEvents.hostTick(sdt);
+      if (level.key === 'brasilia') {
+        bEvents.hostTick(sdt);
+        maintainBrasiliaPedestrians(sdt);
+      }
     }
     if (online()) updateArenaPickups(dt);
     if (game.comboT > 0) { game.comboT -= sdt; if (game.comboT <= 0) { game.combo = 0; hud.setScore(game.score, 0); } }

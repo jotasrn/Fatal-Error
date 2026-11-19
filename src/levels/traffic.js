@@ -390,15 +390,36 @@ export function buildGraphTraffic(B, net, opts = {}) {
   let lastT = 0, spawnT = 0;
   function update(t) {
     const dt = lastT ? Math.min(0.05, Math.max(0, t - lastT)) : 0.016; lastT = t;
-    // nascem nos túneis da borda quando falta carro e ninguém está olhando de perto
+    // nascem dinamicamente perto do jogador e nos túneis da borda para manter trânsito contínuo e vivo
     spawnT -= dt;
     if (spawnT <= 0) {
-      spawnT = 0.35;
+      spawnT = 0.22;
       const free = cars.find((c) => c.hidden);
-      if (free && sources.length) {
-        const n = sources[Math.floor(Math.random() * sources.length)]; const outs = outE[n];
-        if (outs.length) { const e = outs[Math.floor(Math.random() * outs.length)]; const li = laneFor(free, e);
-          if (laneHeadroom(e, li) > free.d + 5 && !nearPlayer(e.lanes[li].pts[0], e.lanes[li].pts[2], 35)) place(free, e, li, 0.5); }
+      if (free) {
+        let placed = false;
+        const pl = players().find((p) => p && p.body);
+        if (pl && Math.random() < 0.8) {
+          const px = pl.body.pos.x, pz = pl.body.pos.z;
+          const nearbyEdges = edges.filter((e) => {
+            if (e.len < 25) return false;
+            const p0 = e.lanes[0].pts;
+            const d = Math.hypot(p0[0] - px, p0[2] - pz);
+            return d > 45 && d < 180;
+          });
+          if (nearbyEdges.length) {
+            const e = nearbyEdges[Math.floor(Math.random() * nearbyEdges.length)];
+            const li = laneFor(free, e);
+            if (laneHeadroom(e, li) > free.d + 5) {
+              place(free, e, li, 2);
+              placed = true;
+            }
+          }
+        }
+        if (!placed && sources.length) {
+          const n = sources[Math.floor(Math.random() * sources.length)]; const outs = outE[n];
+          if (outs.length) { const e = outs[Math.floor(Math.random() * outs.length)]; const li = laneFor(free, e);
+            if (laneHeadroom(e, li) > free.d + 5 && !nearPlayer(e.lanes[li].pts[0], e.lanes[li].pts[2], 35)) place(free, e, li, 0.5); }
+        }
       }
     }
     for (const c of cars) {
@@ -420,7 +441,39 @@ export function buildGraphTraffic(B, net, opts = {}) {
           if (!lk || t - lk.t > 3.5) { lock.set(node, { car: c, t }); c.lockNode = node; }
           else if (lk.car !== c) limit = Math.min(limit, toEnd - 6);
         }
-      } else if (!c.next && toEnd < 2) limit = Math.min(limit, toEnd); // sem saída: espera (não deveria acontecer)
+      } else if (!c.next && toEnd < 2) {
+        c.deadEndT = (c.deadEndT || 0) + dt;
+        if (c.deadEndT > 1.8) {
+          removeFrom(c);
+          c.hidden = true;
+          c.edge = null;
+          c.y = -80;
+          c.deadEndT = 0;
+          continue;
+        }
+        limit = Math.min(limit, toEnd);
+      }
+      // desobstrução automática de engarrafamentos e travamentos em cruzamentos
+      if (c.v < 0.25 && c.stopT <= 0) {
+        c.stuckT = (c.stuckT || 0) + dt;
+        if (c.stuckT > 5.0) {
+          if (c.lockNode >= 0) {
+            const lk = lock.get(c.lockNode);
+            if (lk && lk.car === c) lock.delete(c.lockNode);
+            c.lockNode = -1;
+          }
+          if (c.stuckT > 7.5) {
+            removeFrom(c);
+            c.hidden = true;
+            c.edge = null;
+            c.y = -80;
+            c.stuckT = 0;
+            continue;
+          }
+        }
+      } else {
+        c.stuckT = 0;
+      }
       // ônibus param nos pontos da sua faixa
       if (c.isBus) {
         if (c.stopT > 0) { c.stopT -= dt; limit = 0; if (c.stopT <= 0) c.stopCd = 8; }

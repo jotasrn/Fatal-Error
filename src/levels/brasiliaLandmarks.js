@@ -274,26 +274,26 @@ export function catedral(B, x, z) {
 export function congresso(B, x, z) {
   const A = at(B, x, z, 0, 173);
   const { L, box, slab, stairs, rail, cyl, sphere, ring, spawn, sniper, pickup, collider, deco, arena, facade, domeCollider } = A;
-    const z1 = 160, z2 = 186, DY = 5;
-    box(0, 0, (z1 + z2) / 2, 92, DY, z2 - z1, { ink: BK });
-    facade(0, (z1 + z2) / 2, 92, z2 - z1, DY, 2.5, BL, 3);
-    rail(-46, z1, -4, z1, DY); rail(4, z1, 46, z1, DY); rail(-46, z2, 46, z2, DY);
+    const z1 = 160, z2 = 186, DY = 5, PW = 56, HW = PW / 2;
+    box(0, 0, (z1 + z2) / 2, PW, DY, z2 - z1, { ink: BK });
+    facade(0, (z1 + z2) / 2, PW, z2 - z1, DY, 2.5, BL, 3);
+    rail(-HW, z1, -4, z1, DY); rail(4, z1, HW, z1, DY); rail(-HW, z2, HW, z2, DY);
     stairs(0, 0, z1 - 18 * 1.05, '+z', 18, 6, { rise: DY / 18, run: 1.05 });
     for (const sx of [-1, 1]) box(sx * 3.2, 0, z1 - 9.5, 0.3, 1, 19, { ink: BK, noCollide: true });
-    for (const sx of [-1, 1]) { box(sx * 12.5, 0, z1 - 9, 15, 0.3, 16, { ink: BL }); box(sx * 62, 0, z1 - 9, 34, 0.3, 14, { ink: BL }); }
-    const cam = new THREE.CylinderGeometry(11, 5, 5, 26); cam.translate(22, DY + 2.5, (z1 + z2) / 2); deco(cam, BK);
-    const rim = new THREE.TorusGeometry(10.8, 0.3, 4, 26); rim.rotateX(Math.PI / 2); rim.translate(22, DY + 5, (z1 + z2) / 2); deco(rim, BK);
-    for (let i = 0; i < 5; i++) { const r = 5.5 + i * 1.3; collider(22, DY + i, (z1 + z2) / 2, r * 1.6, 1, r * 1.6); }
-    const sen = new THREE.SphereGeometry(8, 22, 10, 0, TAU, 0, Math.PI / 2); sen.translate(-22, DY, (z1 + z2) / 2); deco(sen, BK);
-    domeCollider(-22, DY, (z1 + z2) / 2, 8, 6);
-    ring(22, DY + 9, (z1 + z2) / 2, 'y'); ring(-22, DY + 11, (z1 + z2) / 2, 'y');
+    for (const sx of [-1, 1]) { box(sx * 12.5, 0, z1 - 9, 15, 0.3, 16, { ink: BL }); }
+    const cam = new THREE.CylinderGeometry(11, 5, 5, 26); cam.translate(16, DY + 2.5, (z1 + z2) / 2); deco(cam, BK);
+    const rim = new THREE.TorusGeometry(10.8, 0.3, 4, 26); rim.rotateX(Math.PI / 2); rim.translate(16, DY + 5, (z1 + z2) / 2); deco(rim, BK);
+    for (let i = 0; i < 5; i++) { const r = 5.5 + i * 1.3; collider(16, DY + i, (z1 + z2) / 2, r * 1.6, 1, r * 1.6); }
+    const sen = new THREE.SphereGeometry(8, 22, 10, 0, TAU, 0, Math.PI / 2); sen.translate(-16, DY, (z1 + z2) / 2); deco(sen, BK);
+    domeCollider(-16, DY, (z1 + z2) / 2, 8, 6);
+    ring(16, DY + 9, (z1 + z2) / 2, 'y'); ring(-16, DY + 11, (z1 + z2) / 2, 'y');
     const tz = 195, TH = 50;
     box(0, 0, tz, 30, 0.3, 16, { ink: BL });
     for (const sx of [-1, 1]) { box(sx * 5.5, 0, tz, 7, TH, 6, { ink: BL }); facade(sx * 5.5, tz, 7, 6, TH, 1.8, BK, 1.75); rail(sx * 5.5 - 3.5, tz - 3, sx * 5.5 + 3.5, tz - 3, TH); rail(sx * 5.5 - 3.5, tz + 3, sx * 5.5 + 3.5, tz + 3, TH); ring(sx * 5.5, TH + 3, tz, 'y'); sniper(sx * 5.5, TH, tz); }
     box(0, 24, tz, 4.2, 5, 5, { ink: BK });
-    pickup(0, DY, (z1 + z2) / 2); pickup(-36, DY, z1 + 4); pickup(36, DY, z1 + 4);
-    spawn(0, DY, z2 - 4); spawn(-38, DY, (z1 + z2) / 2); spawn(38, DY, (z1 + z2) / 2);
-    arena(-22, DY + 5, (z1 + z2) / 2); arena(22, DY + 8, (z1 + z2) / 2); arena(0, DY, z2 - 4);
+    pickup(0, DY, (z1 + z2) / 2); pickup(-22, DY, z1 + 4); pickup(22, DY, z1 + 4);
+    spawn(0, DY, z2 - 4); spawn(-24, DY, (z1 + z2) / 2); spawn(24, DY, (z1 + z2) / 2);
+    arena(-16, DY + 5, (z1 + z2) / 2); arena(16, DY + 8, (z1 + z2) / 2); arena(0, DY, z2 - 4);
 }
 
 export function pracaTresPoderesDetalhes(B, x, z) {
@@ -348,7 +348,7 @@ export function teatroNacional(B, x, z, W, D) {
   for (let i = 0; i < 4; i++) { const k = 1 - 0.45 * (i + 0.5) / 4; collider(0, i * H / 4, 0, W * k, H / 4, D * k); }
   let seed = 3; const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
   for (let i = 0; i < 60; i++) { const f = 0.08 + rnd() * 0.78, y = f * H, k = 1 - 0.45 * f; const s = rnd() < 0.5 ? -1 : 1; B.nearBox(x + s * (W * k / 2 + 0.25), y, z + (rnd() - 0.5) * (D * k - 4), 1.3, 1.3, 1.3 + rnd() * 2.2, { ink: BK }); }
-  box(W / 2 + 1, 0, 0, 3, 3.2, 14, { ink: BK });
+  box(W / 2 - 1, 0, 0, 2, 3.2, 14, { ink: BK });
   ring(0, H + 3, 0, 'y'); sniper(0, H, 0); spawn(W / 2 + 5, 0, 10); pickup(W / 2 + 5, 0, -10);
 }
 
@@ -416,7 +416,6 @@ export function rodoviaria(B, x, z, W, D, DY) {
   box(2, DY + 4.2, 0, 18, 0.4, Math.min(30, D - 8), { ink: OR, noCollide: true });
   for (const xx of [-6, 10]) for (const zz of [-10, 0, 10]) box(xx, DY, zz, 0.6, 4.2, 0.6, { ink: BK });
   for (const [xx, zz] of [[-14, -3], [-14, 3], [18, -3], [18, 3]]) { box(xx, DY, zz, 3, 2.3, 2.2, { ink: PK }); box(xx, DY + 2.3, zz, 3.6, 0.3, 2.8, { ink: BL, noCollide: true }); }
-  rail(x1, z1 + 4, x1, z2 - 4, DY); rail(x2, z1 + 4, x2, z2 - 4, DY);
   for (const sx of [-1, 1]) { const xe = sx < 0 ? x1 : x2; stairs(xe + sx * 13 * 0.55, 0, 0, sx < 0 ? '+x' : '-x', 13, 4, { rise: DY / 13, run: 0.55 }); }
   ring(0, DY + 9, 0, 'y'); ring(x1 + 4, DY + 5, 0, 'y'); ring(x2 - 4, DY + 5, 0, 'y');
   sniper(x1 + 4, DY, -8); sniper(x2 - 4, DY, 8);
@@ -446,10 +445,13 @@ export function panteao(B, x, z) {
 
 // Lago Paranoá ao fundo (leste), Palácio da Alvorada e Ponte JK como paisagem (sem malha de bots)
 export function lagoParanoa(B, zEdge, xMin, xMax) {
-  const { box, cyl, addGeo } = B;
+  const { box, cyl, addGeo, collider } = B;
   const g = new THREE.PlaneGeometry(xMax - xMin + 900, 1300); g.rotateX(-Math.PI / 2); g.translate((xMin + xMax) / 2, -0.4, zEdge + 30 + 650); addGeo(g, BL);
-  // orla com gramado
-  box((xMin + xMax) / 2, -0.85, zEdge + 15, xMax - xMin + 200, 0.85, 30, { ink: GN, noCollide: true });
+  // orla com calçadão, gramado e mureta protetora sólida
+  box((xMin + xMax) / 2, -0.85, zEdge + 15, xMax - xMin + 200, 0.85, 30, { ink: GN });
+  box((xMin + xMax) / 2, 0, zEdge + 29.5, xMax - xMin + 200, 1.2, 0.8, { ink: BK });
+  // Colisor plano de água para evitar queda no abismo do mapa
+  collider((xMin + xMax) / 2, -1.2, zEdge + 30 + 650, xMax - xMin + 900, 0.8, 1300, { noNav: true, noGrapple: true });
   // Palácio da Alvorada (colunas em "vela" sobre o espelho) à esquerda, na outra margem
   const ax = 420, az = zEdge + 420; // margem norte
   box(ax, 0, az, 30, 6, 10, { ink: BK, noCollide: true });

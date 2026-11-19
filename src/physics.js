@@ -81,10 +81,12 @@ export class World {
     const nx = p.x, nz = p.z; let stepped = false;
     if (canStep && body.stepHeight > 0) {
       p.x = ox; p.z = oz; p.y = oy + body.stepHeight;
-      if (!this.overlapsBody(body)) {
+      this._resolveAxis(body, 1, body.stepHeight);
+      const lift = p.y - oy;
+      if (lift > 1e-3 && !this.overlapsBody(body)) {
         p.x += dx; const rx2 = this._resolveAxis(body, 0, dx);
         p.z += dz; const rz2 = this._resolveAxis(body, 2, dz);
-        p.y -= body.stepHeight; this._resolveAxis(body, 1, -body.stepHeight);
+        p.y -= lift; this._resolveAxis(body, 1, -lift);
         const d1 = (nx - ox) ** 2 + (nz - oz) ** 2, d2 = (p.x - ox) ** 2 + (p.z - oz) ** 2;
         if (d2 > d1 + 1e-6 && p.y >= oy - 1e-3 && !this.overlapsBody(body)) {
           stepped = true; body._bx = rx2; body._bz = rz2;
