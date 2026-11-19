@@ -14,7 +14,7 @@ def elev(lat,lon):
 def eg(x,z):
     n=x/S; e=z/S; dx=e*ca-n*sa; dy=e*sa+n*ca
     return elev(lat0+dy/ky, lon0+dx/kx)
-B=json.loads(open('src/levels/brasiliaData.js',encoding='utf-8').read().split('=',1)[1].rsplit(';',1)[0])['bounds']
+B=json.loads(open('src/levels/data/brasiliaData.js',encoding='utf-8').read().split('=',1)[1].rsplit(';',1)[0])['bounds']
 MARGIN=40; STEP=12.0; VSCALE=1/3.0
 minX=math.floor((B['minX']-MARGIN)/STEP)*STEP; maxX=math.ceil((B['maxX']+MARGIN)/STEP)*STEP
 minZ=math.floor((B['minZ']-MARGIN)/STEP)*STEP; maxZ=math.ceil((B['maxZ']+MARGIN)/STEP)*STEP

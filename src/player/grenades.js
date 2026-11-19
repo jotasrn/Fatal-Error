@@ -1,9 +1,9 @@
 // Grenades: a lobbed ink bomb with a short fuse and a big orange blast, plus the aim-arc preview.
 // Mixed into Player.
 import * as THREE from 'three';
-import { makeInkMaterial, INK } from '../render.js';
-import { rand } from '../util.js';
-import { audio } from '../audio.js';
+import { makeInkMaterial, INK } from '../core/render.js';
+import { rand } from '../core/util.js';
+import { audio } from '../core/audio.js';
 
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _d = new THREE.Vector3();
 const _ap = new THREE.Vector3(), _av = new THREE.Vector3(), _ad = new THREE.Vector3(), _aprev = new THREE.Vector3();

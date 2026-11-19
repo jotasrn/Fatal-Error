@@ -7,7 +7,7 @@
 // after the world matrices are fresh, their world matrix + ink/fill go into the instance buffers.
 // A piece that gets knocked off a body (ragdoll debris) goes back to normal rendering.
 import * as THREE from 'three';
-import { makeInkMaterial } from '../render.js';
+import { makeInkMaterial } from '../core/render.js';
 
 const HIDDEN_LAYER = 1;
 const _frustum = new THREE.Frustum(), _pm = new THREE.Matrix4(), _sphere = new THREE.Sphere(), _v = new THREE.Vector3();

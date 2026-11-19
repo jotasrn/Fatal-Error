@@ -1,6 +1,6 @@
 // Axis-aligned box world: static colliders, spatial hash, swept body movement with step-up, raycasts.
 import * as THREE from 'three';
-import { FlatBoxStore } from './wasm/core.js';
+import { FlatBoxStore } from '../wasm/core.js';
 
 const EPS = 1e-4;
 const AX = ['x', 'y', 'z'];
@@ -13,7 +13,12 @@ export class World {
     this.bounds = { min: new THREE.Vector3(-60, -20, -60), max: new THREE.Vector3(60, 80, 60) };
   }
   // wipe the world so a different map can be built into the same instance
-  clear() { this.boxes.length = 0; this.grid.clear(); this.flat.clear(); this._qid = 0; }
+  clear() { this.boxes.length = 0; this.grid.clear(); this.flat.clear(); this._qid = 0; this.terrain = null; }
+  // Relevo contínuo opcional (heightfield): { at(x, z) -> altura do solo ou NaN onde não há chão (trincheiras),
+  // minH, maxH }. O solo é tratado como uma crosta de 1,6 u: corpos acima dela pousam/andam sobre o relevo
+  // (sem degraus, sem paredes invisíveis); quem está bem abaixo (túneis) não é afetado.
+  setTerrain(t) { this.terrain = t || null; }
+  terrainAt(x, z) { return this.terrain ? this.terrain.at(x, z) : NaN; }
   addBox(min, max, data = {}) {
     const b = { min: { x: min.x, y: min.y, z: min.z }, max: { x: max.x, y: max.y, z: max.z }, data, id: this.boxes.length, _q: -1, _flatIdx: 0 };
     this.boxes.push(b); return b;
@@ -129,6 +134,20 @@ export class World {
       const r2 = this._resolveAxis(body, 1, -probe);
       if (r2 > 0) { body.onGround = true; v.y = 0; } else p.y += probe;
     }
+    // relevo: empurra para cima quem entrou na crosta do terreno e "gruda" no chão ao descer rampas
+    const T = this.terrain;
+    if (T) {
+      const th = T.at(p.x, p.z);
+      if (th === th) {
+        if (p.y < th && p.y > th - 1.6) {
+          p.y = th; if (v.y < 0) { if (!body.onGround) body.landVel = v.y; v.y = 0; } body.onGround = true;
+        } else if (p.y >= th && v.y <= 0) {
+          const gap = p.y - th;
+          if (gap < 0.03) body.onGround = true;
+          else if (!body.onGround && wasGround && !body.noSnap && gap <= body.stepHeight + 0.05) { p.y = th; v.y = 0; body.onGround = true; }
+        }
+      }
+    }
   }
 
   // Ray vs boxes (slab test). Returns {dist, point, normal, box} or null.
@@ -166,10 +185,39 @@ export class World {
       if (bestT <= tNext || tNext >= maxDist) break; // nearest hit is inside the walked cells, or the ray ended
       if (tMX < tMZ) { ix += stepX; tMX += tDX; } else { iz += stepZ; tMZ += tDZ; }
     }
+    const tT = this.terrain ? this._rayTerrain(o, d, best ? bestT : maxDist) : -1;
+    if (tT >= 0) {
+      const px = o.x + d.x * tT, pz = o.z + d.z * tT, T = this.terrain;
+      const e = 0.6, nx = T.at(px - e, pz) - T.at(px + e, pz), nz = T.at(px, pz - e) - T.at(px, pz + e);
+      const normal = new THREE.Vector3(nx === nx ? nx : 0, 2 * e, nz === nz ? nz : 0).normalize();
+      return { dist: tT, point: new THREE.Vector3(px, o.y + d.y * tT, pz), normal, box: TERRAIN_BOX };
+    }
     if (!best) return null;
     const point = new THREE.Vector3(o.x + d.x * bestT, o.y + d.y * bestT, o.z + d.z * bestT);
     const normal = new THREE.Vector3(); normal[AX[bAxis]] = bSign;
     return { dist: bestT, point, normal, box: best };
+  }
+  // Raio contra o relevo: "sphere tracing" vertical (o terreno é suave, inclinação << 1) — passos grandes
+  // longe do chão, finos perto dele; só conta a entrada por cima da crosta. Devolve t ou -1.
+  _rayTerrain(o, d, maxT) {
+    const T = this.terrain;
+    if (d.y >= 0 && o.y > T.maxH + 0.05) return -1;
+    let t = 0, prevT = 0, prev = NaN;
+    for (let it = 0; it < 600 && t <= maxT; it++) {
+      const y = o.y + d.y * t, th = T.at(o.x + d.x * t, o.z + d.z * t);
+      const diff = th === th ? y - th : Infinity;
+      if (diff < 0 && prev >= 0 && diff > -1.6) {
+        let lo = prevT, hi = t;                                   // refina a entrada por bisseção
+        for (let k = 0; k < 10; k++) { const m = (lo + hi) / 2, tm = T.at(o.x + d.x * m, o.z + d.z * m); if (tm === tm && o.y + d.y * m < tm) hi = m; else lo = m; }
+        return hi;
+      }
+      prev = diff === Infinity ? 1e9 : diff; prevT = t;
+      const step = diff === Infinity ? 1.0 : Math.min(25, Math.max(0.35, Math.abs(diff) * 0.6));
+      if (t >= maxT) break;
+      t = Math.min(maxT, t + step);
+      if (d.y > 0 && y > T.maxH + 0.05) break;
+    }
+    return -1;
   }
   // Highest walkable surface below a point
   groundBelow(x, y, z, maxDrop = 100) {
@@ -183,6 +231,8 @@ export class World {
 }
 
 export const SEE_THROUGH = (b) => b.data.noShoot === true;
+// pseudo-caixa devolvida quando um raio acerta o relevo (quem lê hit.box.data continua funcionando)
+const TERRAIN_BOX = { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 }, data: { terrain: true }, id: -1 };
 
 export function makeBody(pos, halfW, height, stepHeight = 0.55) {
   return { pos: pos.clone(), vel: new THREE.Vector3(), halfW, height, stepHeight, onGround: false, hitWall: false, hitCeiling: false, wallNormal: new THREE.Vector3(), landVel: 0, noSnap: false, alwaysStep: false, _bx: 0, _bz: 0 };

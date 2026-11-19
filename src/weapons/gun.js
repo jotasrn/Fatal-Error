@@ -1,9 +1,9 @@
 // Hitscan firearm base: ammo, reload animations, firing, raycast hit resolution and the gun stat table.
 import * as THREE from 'three';
-import { makeInkMaterial, INK } from '../render.js';
-import { SEE_THROUGH } from '../physics.js';
-import { rand, clamp, damp, TAU } from '../util.js';
-import { audio } from '../audio.js';
+import { makeInkMaterial, INK } from '../core/render.js';
+import { SEE_THROUGH } from '../core/physics.js';
+import { rand, clamp, damp, TAU } from '../core/util.js';
+import { audio } from '../core/audio.js';
 import { ViewModel } from './viewmodel.js';
 import { easeOut } from './primitives.js';
 

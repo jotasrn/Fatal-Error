@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { TAU } from '../util.js';
+import { TAU } from '../core/util.js';
 import { Gun } from './gun.js';
 import { bx, cyl, hand, makeFlash } from './primitives.js';
 

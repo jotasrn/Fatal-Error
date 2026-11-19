@@ -269,7 +269,7 @@ export class Effects {
             if (hit) { if (p.collide === 'decal') this.splat(hit.point, hit.normal, p.ink, p.size * p.decalSize * 0.75, _d, p.size > 0.035 ? 2 : 1); continue; }
           }
         }
-        if (p.pos.y < -10) continue;
+        if (p.pos.y < -48) continue;
       }
       ps[n++] = p;
     }
@@ -304,7 +304,7 @@ export class Effects {
           d.bloodT -= dt;
           if (d.bloodT <= 0) { d.bloodT = 0.05; _v.copy(d.vel).multiplyScalar(0.3).add(_v2.set(rand(-1, 1), rand(-1, 1), rand(-1, 1))); this._spawn('drop', m.position, _v, { size: rand(0.02, 0.045), life: 1.5, collide: 'decal', gravity: 22, decalSize: 6 }); }
         }
-        if (m.position.y < -8) d.life = 0;
+        if (m.position.y < -48) d.life = 0;
       }
       d.life -= dt;
       if (d.life < 0.6) m.scale.setScalar(Math.max(0.001, d.life / 0.6) * d.baseScale);

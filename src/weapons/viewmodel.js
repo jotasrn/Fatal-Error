@@ -1,6 +1,6 @@
 // Base first-person view model: equip/sway/recoil animation shared by every weapon.
 import * as THREE from 'three';
-import { clamp, damp, Spring3 } from '../util.js';
+import { clamp, damp, Spring3 } from '../core/util.js';
 import { easeOut } from './primitives.js';
 
 export class ViewModel {

@@ -4,9 +4,9 @@
 // do Congresso). O host decide quando cada evento acontece e cria os bots; o voo dos aviões, as
 // explosões e o fogo rodam iguais em todos os PCs a partir da mensagem 'bevent'.
 import * as THREE from 'three';
-import { makeInkMaterial, INK } from '../render.js';
-import { rand, choose, TAU } from '../util.js';
-import { audio } from '../audio.js';
+import { makeInkMaterial, INK } from '../core/render.js';
+import { rand, choose, TAU } from '../core/util.js';
+import { audio } from '../core/audio.js';
 
 const ORDER = ['manif', '8jan', '7set'];
 const _v = new THREE.Vector3(), _d = new THREE.Vector3(), _q = new THREE.Quaternion(), _m = new THREE.Matrix4(), _s = new THREE.Vector3();

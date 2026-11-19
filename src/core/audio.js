@@ -235,9 +235,8 @@ class Sfx {
   }
   get musicPlaying() { return !!this._mus; }
   setIntensity(v) { this._intensity = clamp(v, 0, 1); }
-  setTune(key) { if (this._tuneKey === key) return; this._tuneKey = key; if (this._mus) { this._mus.step = 0; this._mus.next = this.ctx.currentTime + 0.1; } }
+  setTune(_key) { if (this._mus) { this._mus.step = 0; this._mus.next = this.ctx.currentTime + 0.1; } }
   _musicTick() {
-    if (this._tuneKey === 'mexico') return this._mariachiTick();
     const ctx = this.ctx, m = this._mus; if (!m) return; const I = this._intensity || 0; const out = this.musicGain;
     const bpm = 156, step = 60 / bpm / 4; const midi = (n) => 440 * Math.pow(2, (n - 69) / 12);
     // a throttled tab can fall far behind; skip forward rather than replaying every missed note
@@ -278,22 +277,6 @@ class Sfx {
         const hat = D === 'driving' ? true : D === 'full' ? (s16 % 2 === 0 || I > 0.4) : D === 'light' ? s16 % 4 === 2 : s16 === 8;
         if (hat) { const open = s16 % 4 === 2; this._noiseAt(t, open ? 0.05 : 0.025, (open ? 0.1 : 0.06) * (s16 % 2 ? 0.5 : 1) * (D === 'sparse' ? 0.6 : 1), 'highpass', 8000, out); }
       }
-      m.next += step; m.step++;
-    }
-  }
-  // Doodle Mexico: a waltz in G, twelve sixteenths a bar; two trumpets in thirds over a guitarrón and strummed chords
-  _mariachiTick() {
-    const ctx = this.ctx, m = this._mus; if (!m) return; const I = this._intensity || 0; const out = this.musicGain;
-    const T = MEXICO, step = 60 / T.bpm / 4; const midi = (n) => 440 * Math.pow(2, (n - 69) / 12);
-    if (m.next < ctx.currentTime - 0.8) m.next = ctx.currentTime + 0.05;
-    while (m.next < ctx.currentTime + 0.7) {
-      const t = m.next, i = m.step % T.length, bar = Math.floor(i / 12), sb = i % 12; const chord = T.chord[bar], root = chord[0]; const n = T.lead[i];
-      if (n > 0) { const dur = T.len[i] * step * 0.9; this.tone({ freq: midi(n), dur, gain: 0.1, type: 'square', at: t, out }); this.tone({ freq: midi(thirdBelow(n)), dur: dur * 0.9, gain: 0.055, type: 'square', at: t, out }); if (T.high[bar]) this.tone({ freq: midi(n) * 2, dur: dur * 0.6, gain: 0.02, type: 'square', at: t, out }); }
-      if (sb === 0) this.tone({ freq: midi(root - 24), dur: step * 3.4, gain: 0.2, type: 'triangle', at: t, out });
-      if (sb === 4 || sb === 8) for (const iv of [0, chord[1], 7]) this.tone({ freq: midi(root + iv), dur: step * 1.5, gain: 0.045, type: 'sawtooth', at: t, out });
-      if (sb % 2 === 0) this._noiseAt(t, sb === 0 ? 0.05 : 0.03, sb === 0 ? 0.13 : 0.07, 'highpass', 6500, out);
-      if (I > 0.45 && (sb === 6 || sb === 10)) this._noiseAt(t, 0.07, 0.16, 'bandpass', 1900, out);
-      if (bar === T.bars - 1 && sb >= 8) this._noiseAt(t, 0.06, 0.1 + (sb - 8) * 0.04, 'bandpass', 1600 + (sb - 8) * 300, out);
       m.next += step; m.step++;
     }
   }
@@ -365,21 +348,4 @@ const SECTIONS = [
 const SONG = { lead: [], len: [], chord: [], section: [], firstBar: [], lastBar: [] };
 for (const s of SECTIONS) s.bars.forEach((b, k) => { SONG.lead.push(...b.notes); SONG.len.push(...b.lens); SONG.chord.push(s.chords[k]); SONG.section.push(s); SONG.firstBar.push(k === 0); SONG.lastBar.push(k === s.bars.length - 1); });
 SONG.bars = SONG.chord.length; SONG.length = SONG.bars * 16;
-// ---------- Doodle Mexico: sixteen bars of waltz in G, twelve sixteenths a bar ----------
-const Gm = [67, 4], D7 = [62, 4], Cm = [60, 4], Em7 = [64, 3], Am7 = [69, 3];
-const MEX_BARS = [
-  N(74, 2, 79, 2, 83, 2, 86, 4, 83, 2),      N(84, 2, 83, 2, 81, 2, 78, 4, 81, 2),      // G: the call · D7
-  N(79, 2, 83, 2, 86, 2, 91, 4, 86, 2),      N(83, 4, 79, 4, 74, 4),                     // G: to the top · and down
-  N(76, 2, 79, 2, 84, 2, 88, 4, 84, 2),      N(86, 2, 83, 2, 79, 2, 83, 4, 86, 2),      // C · G
-  N(81, 2, 84, 2, 78, 2, 81, 4, 84, 2),      N(83, 2, 81, 2, 79, 8),                     // D7 · G: hold
-  N(79, 4, 83, 4, 86, 4),                     N(88, 2, 86, 2, 83, 2, 79, 4, 0, 2),        // G · Em: the second verse sings higher
-  N(84, 2, 88, 2, 91, 4, 88, 2, 84, 2),      N(86, 4, 83, 4, 79, 4),                     // C · G
-  N(81, 2, 84, 2, 88, 2, 86, 4, 84, 2),      N(83, 2, 86, 2, 91, 4, 88, 2, 86, 2),      // Am · D7
-  N(84, 2, 83, 2, 81, 2, 79, 4, 78, 2),      N(79, 6, 0, 2, 74, 4),                      // C D7 · G: the grito lands
-];
-const MEXICO = { lead: MEX_BARS.flatMap((b) => b.notes), len: MEX_BARS.flatMap((b) => b.lens), bpm: 150, chord: [Gm, D7, Gm, Gm, Cm, Gm, D7, Gm, Gm, Em7, Cm, Gm, Am7, D7, Cm, Gm], high: [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1] };
-MEXICO.bars = MEXICO.chord.length; MEXICO.length = MEXICO.bars * 12;
-// the harmony trumpet sits a diatonic third under the lead (G major)
-const G_SCALE = [7, 9, 11, 0, 2, 4, 6];
-function thirdBelow(n) { const pc = ((n % 12) + 12) % 12; let k = G_SCALE.indexOf(pc); if (k < 0) return n - 4; k = (k + 5) % 7; let m = n - 1; while (((m % 12) + 12) % 12 !== G_SCALE[k]) m--; return m; }
 export const audio = new Sfx();

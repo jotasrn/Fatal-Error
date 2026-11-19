@@ -1,5 +1,5 @@
 // The in-match shop: cash, and buying weapons, armor, ammo and grenades. Mixed into Player.
-import { audio } from '../audio.js';
+import { audio } from '../core/audio.js';
 
 export const SHOP_WEAPONS = {
   punisher: { cost: 500, label: 'Punisher Five-SeveN', ammoLabel: 'Munição 5.7mm Perf.' },

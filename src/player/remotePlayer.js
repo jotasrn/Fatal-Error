@@ -3,10 +3,10 @@
 // target (body, center, eye, hit spheres, takeDamage) so the rest of the game does not care
 // whether it is shooting at a bot or a friend.
 import * as THREE from 'three';
-import { makeInkMaterial, setFill, INK } from './render.js';
-import { buildHumanoid, buildWeaponProp } from './enemies/index.js';
-import { bakeModel } from './enemies/models.js';
-import { clamp, damp, angleLerp, wrapAngle } from './util.js';
+import { makeInkMaterial, setFill, INK } from '../core/render.js';
+import { buildHumanoid, buildWeaponProp } from '../enemies/index.js';
+import { bakeModel } from '../enemies/models.js';
+import { clamp, damp, angleLerp, wrapAngle } from '../core/util.js';
 
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
 const WEAPON_KINDS = ['revolver', 'pistol', 'pistol', 'revolver', 'revolver', 'shotgun', 'smg', 'rifle', 'sniper', 'laser', 'bazooka', 'blade'];

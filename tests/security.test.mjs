@@ -13,7 +13,7 @@ import {
   sanitizeShots,
   authorizeClientPacketOnHost,
   authorizePacketOnClient,
-} from '../src/security.js';
+} from '../src/core/security.js';
 
 const require = createRequire(import.meta.url);
 const {
@@ -312,7 +312,7 @@ test('LAN: conexao real Host <-> Cliente via TCP direto e descoberta UDP', async
 
 
 test('sanitizePlayerState aceita o array real de encodeLocal e recusa lixo', async () => {
-  const { sanitizePlayerState } = await import('../src/security.js');
+  const { sanitizePlayerState } = await import('../src/core/security.js');
   const ps = [12.5, 0, -230.1, 1.57, -0.2, 2, 64 | 16, 120, 3.1, 0, -4.2];
   assert.deepEqual(sanitizePlayerState(ps), ps);
   const grappling = [...ps, 10, 20, -30]; grappling[6] |= 128;

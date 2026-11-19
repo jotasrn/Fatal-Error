@@ -1,10 +1,10 @@
 // Enemy bullets, mortar shells, tank shells, C4 charges and Titan boulders, drawn as one InstancedMesh.
 // Handles flight, ballistic gravity, wall hits, environmental destruction, player/enemy collision, and katana deflection.
 import * as THREE from 'three';
-import { makeInkMaterial, INK } from '../render.js';
-import { SEE_THROUGH } from '../physics.js';
-import { clamp } from '../util.js';
-import { audio } from '../audio.js';
+import { makeInkMaterial, INK } from '../core/render.js';
+import { SEE_THROUGH } from '../core/physics.js';
+import { clamp } from '../core/util.js';
+import { audio } from '../core/audio.js';
 
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _d = new THREE.Vector3(), _q = new THREE.Quaternion(), _m = new THREE.Matrix4(), _s = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);

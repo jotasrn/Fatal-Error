@@ -1,8 +1,8 @@
 // Melee view model: slashes, the raised guard that deflects bullets, and blood that builds on the blade.
 import * as THREE from 'three';
-import { makeInkMaterial, INK } from '../render.js';
-import { rand, clamp, damp, lerp } from '../util.js';
-import { audio } from '../audio.js';
+import { makeInkMaterial, INK } from '../core/render.js';
+import { rand, clamp, damp, lerp } from '../core/util.js';
+import { audio } from '../core/audio.js';
 import { ViewModel } from './viewmodel.js';
 import { bx, hand, easeInOut } from './primitives.js';
 

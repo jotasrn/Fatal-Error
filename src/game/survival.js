@@ -1,9 +1,9 @@
 // Solo & online survival mode: the wave director (roster, modifiers, boss rotation, armed convoys,
 // cavalry & battle tank assaults), item pickups, and the katana "focus" execution dash.
 import * as THREE from 'three';
-import { makeInkMaterial, INK } from '../render.js';
-import { rand, choose, clamp } from '../util.js';
-import { audio } from '../audio.js';
+import { makeInkMaterial, INK } from '../core/render.js';
+import { rand, choose, clamp } from '../core/util.js';
+import { audio } from '../core/audio.js';
 import { BOSSES } from '../enemies/index.js';
 
 export function createSurvival(ctx, deps) {
@@ -295,7 +295,7 @@ export function createSurvival(ctx, deps) {
       const far = open.filter((sp) => sp.distanceTo(pp) > 22);
       if (far.length) return choose(far).clone();
       if (open.length) return choose(open).clone();
-      for (let i = 0; i < 200; i++) { const a = Math.random() * Math.PI * 2, r = 24 + Math.random() * 26; const c = new THREE.Vector3(clamp(pp.x + Math.cos(a) * r, level.bounds.minX + 6, level.bounds.maxX - 6), 0, clamp(pp.z + Math.sin(a) * r, level.bounds.minZ + 6, level.bounds.maxZ - 6)); c.y = world.groundBelow(c.x, 30, c.z, 40); if (c.y > -3 && fits(c)) return c; }
+      for (let i = 0; i < 200; i++) { const a = Math.random() * Math.PI * 2, r = 24 + Math.random() * 26; const c = new THREE.Vector3(clamp(pp.x + Math.cos(a) * r, level.bounds.minX + 6, level.bounds.maxX - 6), 0, clamp(pp.z + Math.sin(a) * r, level.bounds.minZ + 6, level.bounds.maxZ - 6)); c.y = world.groundBelow(c.x, 60, c.z, 120); if (c.y > (level.killY ?? -12) + 4 && fits(c)) return c; }
       return level.playerStart.clone();
     }
     const maxR = isBigMap() ? 75 : 48;

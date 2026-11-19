@@ -1,10 +1,18 @@
-//! Native Rust LAN TCP/UDP framing & 8-character `G...` room code codec for Fatal Error.
-//! Compatible wire-for-wire with `electron/lan.cjs` and `electron/security.cjs`.
+//! Native Rust LAN TCP/UDP server, discovery, and framing for Fatal Error (Tauri 2.0).
+//! Wire-compatible with `electron/lan.cjs` (4-byte big-endian length prefix + JSON).
 
-use std::net::Ipv4Addr;
+use serde::Serialize;
+use std::collections::HashMap;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::sync::Arc;
+use tauri::{AppHandle, Emitter};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream, UdpSocket};
+use tokio::sync::{mpsc, Mutex};
 
 pub const LAN_PORT_BASE: u16 = 41230;
 pub const LAN_PORT_COUNT: u16 = 4;
+pub const DISCOVERY_PORT: u16 = 41229;
 pub const MAX_FRAME_BYTES: usize = 256 * 1024;
 const LAN_ALPHABET: &[u8; 32] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
@@ -52,3 +60,212 @@ pub fn decode_lan_code(code: &str) -> Option<(Ipv4Addr, u16)> {
     Some((ip, LAN_PORT_BASE + port_offset))
 }
 
+pub fn detect_lan_ipv4() -> Ipv4Addr {
+    if let Ok(sock) = std::net::UdpSocket::bind("0.0.0.0:0") {
+        if sock.connect("10.255.255.255:1").is_ok() {
+            if let Ok(SocketAddr::V4(addr)) = sock.local_addr() {
+                if is_valid_private_lan_ip(*addr.ip()) {
+                    return *addr.ip();
+                }
+            }
+        }
+    }
+    Ipv4Addr::new(127, 0, 0, 1)
+}
+
+#[derive(Clone, Serialize)]
+pub struct HostInfo {
+    pub code: String,
+    pub ip: String,
+    pub port: u16,
+    #[serde(rename = "selfId")]
+    pub self_id: String,
+}
+
+#[derive(Clone, Serialize)]
+struct PeerJoinEvent {
+    key: String,
+}
+
+#[derive(Clone, Serialize)]
+struct PeerLeaveEvent {
+    key: String,
+}
+
+#[derive(Clone, Serialize)]
+struct PeerDataEvent {
+    key: String,
+    msg: serde_json::Value,
+}
+
+#[derive(Default)]
+pub struct LanState {
+    pub peers: Arc<Mutex<HashMap<String, mpsc::Sender<Vec<u8>>>>>,
+    pub stop_tx: Arc<Mutex<Option<tokio::sync::watch::Sender<bool>>>>,
+}
+
+fn frame_msg(msg: &serde_json::Value) -> Option<Vec<u8>> {
+    let body = serde_json::to_vec(msg).ok()?;
+    if body.len() > MAX_FRAME_BYTES {
+        return None;
+    }
+    let mut out = Vec::with_capacity(4 + body.len());
+    out.extend_from_slice(&(body.len() as u32).to_be_bytes());
+    out.extend_from_slice(&body);
+    Some(out)
+}
+
+async fn handle_tcp_conn(
+    stream: TcpStream,
+    peer_key: String,
+    app: AppHandle,
+    peers: Arc<Mutex<HashMap<String, mpsc::Sender<Vec<u8>>>>>,
+) {
+    let (mut rd, mut wr) = stream.into_split();
+    let (tx, mut rx) = mpsc::channel::<Vec<u8>>(128);
+    peers.lock().await.insert(peer_key.clone(), tx);
+    let _ = app.emit("lan:peer-join", PeerJoinEvent { key: peer_key.clone() });
+
+    let write_task = tokio::spawn(async move {
+        while let Some(buf) = rx.recv().await {
+            if wr.write_all(&buf).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    let mut len_buf = [0u8; 4];
+    loop {
+        if rd.read_exact(&mut len_buf).await.is_err() {
+            break;
+        }
+        let len = u32::from_be_bytes(len_buf) as usize;
+        if len == 0 || len > MAX_FRAME_BYTES {
+            break;
+        }
+        let mut body = vec![0u8; len];
+        if rd.read_exact(&mut body).await.is_err() {
+            break;
+        }
+        if let Ok(msg) = serde_json::from_slice::<serde_json::Value>(&body) {
+            let _ = app.emit(
+                "lan:peer-data",
+                PeerDataEvent {
+                    key: peer_key.clone(),
+                    msg,
+                },
+            );
+        }
+    }
+
+    write_task.abort();
+    peers.lock().await.remove(&peer_key);
+    let _ = app.emit("lan:peer-leave", PeerLeaveEvent { key: peer_key });
+}
+
+pub async fn start_host(app: AppHandle, state: &LanState, host_name: String) -> Result<HostInfo, String> {
+    stop_all(state).await;
+
+    let mut bound = None;
+    for offset in 0..LAN_PORT_COUNT {
+        let port = LAN_PORT_BASE + offset;
+        if let Ok(listener) = TcpListener::bind(("0.0.0.0", port)).await {
+            bound = Some((listener, port, offset as u8));
+            break;
+        }
+    }
+    let (listener, port, offset) = bound.ok_or_else(|| "Nenhuma porta LAN disponível".to_string())?;
+    let ip = detect_lan_ipv4();
+    let code = encode_lan_code(ip, offset).unwrap_or_else(|| format!("G{:07}", port));
+    let self_id = format!("rust-host-{}", port);
+
+    let (stop_tx, mut stop_rx) = tokio::sync::watch::channel(false);
+    *state.stop_tx.lock().await = Some(stop_tx);
+
+    let peers = state.peers.clone();
+    let app_accept = app.clone();
+    tokio::spawn(async move {
+        let mut next_id: u64 = 1;
+        loop {
+            tokio::select! {
+                _ = stop_rx.changed() => break,
+                res = listener.accept() => {
+                    if let Ok((stream, addr)) = res {
+                        let key = format!("peer-{}-{}", addr.ip(), next_id);
+                        next_id += 1;
+                        tokio::spawn(handle_tcp_conn(stream, key, app_accept.clone(), peers.clone()));
+                    }
+                }
+            }
+        }
+    });
+
+    // UDP LAN discovery responder
+    let code_udp = code.clone();
+    let ip_str = ip.to_string();
+    let mut stop_udp = state.stop_tx.lock().await.as_ref().unwrap().subscribe();
+    tokio::spawn(async move {
+        if let Ok(udp) = UdpSocket::bind(("0.0.0.0", DISCOVERY_PORT)).await {
+            let mut buf = [0u8; 512];
+            loop {
+                tokio::select! {
+                    _ = stop_udp.changed() => break,
+                    res = udp.recv_from(&mut buf) => {
+                        if let Ok((n, from)) = res {
+                            if &buf[..n] == b"FATAL_ERROR_DISCOVER" {
+                                let reply = serde_json::json!({
+                                    "code": code_udp,
+                                    "hostName": host_name,
+                                    "ip": ip_str,
+                                    "port": port,
+                                });
+                                if let Ok(bytes) = serde_json::to_vec(&reply) {
+                                    let _ = udp.send_to(&bytes, from).await;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    Ok(HostInfo {
+        code,
+        ip: ip.to_string(),
+        port,
+        self_id,
+    })
+}
+
+pub async fn join_host(app: AppHandle, state: &LanState, target: String) -> Result<HostInfo, String> {
+    stop_all(state).await;
+    let (ip, port) = decode_lan_code(&target)
+        .ok_or_else(|| "Código LAN inválido".to_string())?;
+    let addr = SocketAddrV4::new(ip, port);
+    let stream = TcpStream::connect(addr).await.map_err(|e| format!("Falha ao conectar LAN: {e}"))?;
+    let host_key = format!("host-{ip}-{port}");
+    tokio::spawn(handle_tcp_conn(stream, host_key.clone(), app, state.peers.clone()));
+    Ok(HostInfo {
+        code: target,
+        ip: ip.to_string(),
+        port,
+        self_id: "rust-client".to_string(),
+    })
+}
+
+pub async fn send_to_peer(state: &LanState, key: &str, msg: serde_json::Value) -> Result<(), String> {
+    let bytes = frame_msg(&msg).ok_or_else(|| "Mensagem inválida ou muito grande".to_string())?;
+    let peers = state.peers.lock().await;
+    if let Some(tx) = peers.get(key) {
+        let _ = tx.try_send(bytes);
+    }
+    Ok(())
+}
+
+pub async fn stop_all(state: &LanState) {
+    if let Some(tx) = state.stop_tx.lock().await.take() {
+        let _ = tx.send(true);
+    }
+    state.peers.lock().await.clear();
+}

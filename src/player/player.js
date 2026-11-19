@@ -2,11 +2,11 @@
 // weapon switching and the per-frame update loop. The shop, grenades, rockets and grapple each live
 // in their own module and are mixed onto the prototype at the bottom of this file.
 import * as THREE from 'three';
-import { makeBody } from '../physics.js';
-import { makeInkMaterial, INK } from '../render.js';
+import { makeBody } from '../core/physics.js';
+import { makeInkMaterial, INK } from '../core/render.js';
 import { Revolver, Pistol9mm, PunisherPistol, DesertEagle, Requiem, Shotgun, SMG, Rifle, Sniper, LaserRifle, Bazooka, Katana } from '../weapons/index.js';
-import { clamp, damp, rand, Spring } from '../util.js';
-import { audio } from '../audio.js';
+import { clamp, damp, rand, Spring } from '../core/util.js';
+import { audio } from '../core/audio.js';
 import {
   G, WALK, SPRINT, CROUCH, ACCEL, FRICTION, AIR_ACCEL, AIR_CAP, JUMP,
   STAND_H, CROUCH_H, EYE_STAND, EYE_CROUCH,
@@ -271,7 +271,8 @@ export class Player {
     const spd = b.vel.length(); if (spd > 48) b.vel.multiplyScalar(48 / spd);
     ctx.world.moveBody(b, dt);
     const LB = ctx.level.bounds; // out of the map: uses each map's own bounds (Brasília is far bigger than 95)
-    if (b.pos.y < -12 || b.pos.x < LB.minX - 8 || b.pos.x > LB.maxX + 8 || b.pos.z < LB.minZ - 8 || b.pos.z > LB.maxZ + 8) {
+    // altura de queda fatal do próprio mapa (Brasília tem relevo real: Praça/orla ficam abaixo de -12)
+    if (b.pos.y < (ctx.level.killY ?? -12) || b.pos.x < LB.minX - 8 || b.pos.x > LB.maxX + 8 || b.pos.z < LB.minZ - 8 || b.pos.z > LB.maxZ + 8) {
       this.detachGrapple(false); b.pos.copy(ctx.level.playerStart); b.vel.set(0, 0, 0); this.takeDamage(20, null); if (this.onFall) this.onFall();
       ctx.hud.message('Fora de Combate', 'Reposicionado no ponto inicial', 1.8);
     }

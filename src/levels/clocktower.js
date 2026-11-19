@@ -2,7 +2,7 @@
 // stacked floors reached by switchback stairs, arched windows to shoot through, a giant clock face
 // and a bell up top, buttresses and cover below, exposed sniper balconies on the walls.
 import * as THREE from 'three';
-import { INK } from '../render.js';
+import { INK } from '../core/render.js';
 
 export function buildClockTower(B, arena = false) {
   const { L, box, slab, wallX, wallZ, stairs, rail, cyl, sphere, ring, spawn, sniper, pickup, planes, addGeo, collider } = B;

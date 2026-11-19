@@ -1,5 +1,5 @@
 // Enemy stat table and the shared state enum. One entry per enemy kind drives AI, health and model.
-import { INK } from '../render.js';
+import { INK } from '../core/render.js';
 
 export const BOSSES = ['lazaro', 'titan_eren', 'titan_armored', 'bomber_boss'];
 export const STATE_CODES = { spawn: 0, hunt: 1, stunned: 2, dead: 3 };

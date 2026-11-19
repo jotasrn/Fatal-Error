@@ -2,8 +2,9 @@
 
 mod lan;
 
+use lan::LanState;
 use serde::Serialize;
-use tauri::Window;
+use tauri::{AppHandle, State, Window};
 
 #[derive(Serialize)]
 struct AppInfo {
@@ -36,15 +37,52 @@ fn fe_decode_lan_code(code: String) -> Option<(String, u16)> {
     lan::decode_lan_code(&code).map(|(ip, port)| (ip.to_string(), port))
 }
 
+#[tauri::command]
+async fn fe_lan_host(
+    app: AppHandle,
+    state: State<'_, LanState>,
+    host_name: String,
+) -> Result<lan::HostInfo, String> {
+    lan::start_host(app, &state, host_name).await
+}
+
+#[tauri::command]
+async fn fe_lan_join(
+    app: AppHandle,
+    state: State<'_, LanState>,
+    target: String,
+) -> Result<lan::HostInfo, String> {
+    lan::join_host(app, &state, target).await
+}
+
+#[tauri::command]
+async fn fe_lan_send(
+    state: State<'_, LanState>,
+    key: String,
+    msg: serde_json::Value,
+) -> Result<(), String> {
+    lan::send_to_peer(&state, &key, msg).await
+}
+
+#[tauri::command]
+async fn fe_lan_leave(state: State<'_, LanState>) -> Result<(), String> {
+    lan::stop_all(&state).await;
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
+        .manage(LanState::default())
         .invoke_handler(tauri::generate_handler![
             fe_win_minimize,
             fe_win_toggle_fullscreen,
             fe_get_info,
             fe_decode_lan_code,
+            fe_lan_host,
+            fe_lan_join,
+            fe_lan_send,
+            fe_lan_leave,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Fatal Error Tauri application");
 }
-

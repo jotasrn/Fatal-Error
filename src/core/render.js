@@ -129,7 +129,9 @@ vec3 surfaceCelColor(int id, float shade, float ndl, float upAmt) {
   // Solid filled accents (vehicles, vests, flags, decals, blood, hit-flash)
   if (shade < 0.0) {
     float fCel = 0.72 + 0.24 * b1 + 0.14 * b2;
-    return clamp(p * fCel, 0.0, 1.0);
+    // tinta 2 chapada = asfalto/metal escuro: cinza neutro de asfalto em vez de azul-marinho
+    vec3 pf = (id == 2) ? vec3(0.33, 0.34, 0.36) : p;
+    return clamp(pf * fCel, 0.0, 1.0);
   }
 
   // Characters (bots & remote players use shadeScale=0, shadeBias=1 -> shade == 1.0)

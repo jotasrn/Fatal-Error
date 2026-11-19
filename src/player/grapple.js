@@ -1,8 +1,8 @@
 // The swing-grapple: target selection (crosshair wins, with slim assist to enemies and rings),
 // firing, the swung rope constraint, and the reel/release feel. Mixed into Player.
 import * as THREE from 'three';
-import { clamp, alignYAxis } from '../util.js';
-import { audio } from '../audio.js';
+import { clamp, alignYAxis } from '../core/util.js';
+import { audio } from '../core/audio.js';
 import { NO_GRAPPLE, STAM_FIRE, STAM_MIN, STAM_PAUSE } from './constants.js';
 
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _d = new THREE.Vector3();

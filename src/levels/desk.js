@@ -1,7 +1,7 @@
 // Map 3: The Study Desk. You are two inches tall on a school desk — book-stack towers, a pencil
 // cup in the middle, ruler bridges between the stacks, erasers for ground cover and sharpeners.
 import * as THREE from 'three';
-import { INK } from '../render.js';
+import { INK } from '../core/render.js';
 
 export function buildDesk(B, arena = false) {
   const { L, box, slab, wallX, wallZ, stairs, rail, cyl, sphere, ring, spawn, sniper, pickup, planes, addGeo, collider } = B;

@@ -1,8 +1,8 @@
 // Rockets: the Bazuca projectile with a smoke trail, high direct damage and an AoE splash.
 // Mixed into Player.
 import * as THREE from 'three';
-import { makeInkMaterial, INK } from '../render.js';
-import { audio } from '../audio.js';
+import { makeInkMaterial, INK } from '../core/render.js';
+import { audio } from '../core/audio.js';
 
 const _v = new THREE.Vector3(), _d = new THREE.Vector3();
 

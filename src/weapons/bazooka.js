@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { makeInkMaterial, INK } from '../render.js';
+import { makeInkMaterial, INK } from '../core/render.js';
 import { Gun } from './gun.js';
 import { bx, cyl, sph, hand, makeFlash } from './primitives.js';
 

@@ -1,6 +1,6 @@
 // Meta-progressão permanente entre partidas: moedas ("Créditos Candangos" 💎), desbloqueio de armas
 // iniciais, melhorias do gancho, skins de armas e cores/adestramento para o cão Orelha.
-import { INK } from '../render.js';
+import { INK } from '../core/render.js';
 
 const STORAGE_KEY = 'fatal_prog_v1';
 

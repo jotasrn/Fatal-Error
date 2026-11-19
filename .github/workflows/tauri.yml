@@ -1,0 +1,32 @@
+# Compila o executavel nativo Windows usando Rust + Tauri 2.0 (sem Electron).
+name: tauri-rust-build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-tauri-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Compilar kernel Rust WASM (rust-core)
+        run: cargo build --manifest-path rust-core/Cargo.toml --target wasm32-unknown-unknown --release
+
+      - name: Compilar executavel nativo Rust/Tauri 2.0 (Windows)
+        run: cargo build --manifest-path src-tauri/Cargo.toml --release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fatal-error-rust-windows
+          path: |
+            src-tauri/target/release/fatal-error-tauri.exe
+            rust-core/target/wasm32-unknown-unknown/release/*.wasm
+          if-no-files-found: warn

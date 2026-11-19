@@ -6,7 +6,7 @@
 // - GPU InstancedMesh batching (`addInstance`) for repeated trees, poles, bus stops, benches
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { makeInkMaterial, INK } from '../render.js';
+import { makeInkMaterial, INK } from '../core/render.js';
 
 export function createBuilder(scene, world) {
   const geos = {};
@@ -20,7 +20,7 @@ export function createBuilder(scene, world) {
     navBounds: null,
     busStops: [],
     landmarks: {},
-    arenaSpawns: [], grappleMovers: [], breakables: [], key: 'district',
+    arenaSpawns: [], grappleMovers: [], breakables: [], key: 'brasilia',
   };
 
   const addGeo = (g, ink) => (geos[ink] || (geos[ink] = [])).push(g);

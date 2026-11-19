@@ -58,8 +58,10 @@ export class NavGrid {
     for (let iz = 0; iz < this.nz; iz++) for (let ix = 0; ix < this.nx; ix++) {
       const x = this.minX + (ix + 0.5) * c, z = this.minZ + (iz + 0.5) * c;
       _min.set(x - 0.05, -30, z - 0.05); _max.set(x + 0.05, 90, z + 0.05); w.query(_min, _max, _q);
-      if (_q.length === 0) continue;
+      const th = w.terrainAt ? w.terrainAt(x, z) : NaN;              // relevo contínuo (Brasília)
+      if (_q.length === 0 && !(th === th)) continue;
       const tops = new Set();
+      if (th === th) tops.add(th);
       for (const b of _q) if (!b.data.noNav) tops.add(b.max.y);
       for (const y of [...tops].sort((a, b) => a - b)) {
         if (y < this.minY || y > 70) continue;

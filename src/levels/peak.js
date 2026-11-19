@@ -3,7 +3,7 @@
 // heights, ramps and plank bridges linking the roofs, open plaza cover below and exposed roof
 // sniper nests. Lots of verticality and long sightlines.
 import * as THREE from 'three';
-import { INK } from '../render.js';
+import { INK } from '../core/render.js';
 
 export function buildPeak(B, arena = false) {
   const { L, box, slab, wallX, wallZ, stairs, rail, cyl, sphere, ring, spawn, sniper, pickup, planes, addGeo, collider } = B;
