@@ -6,10 +6,13 @@ const STORAGE_KEY = 'fatal_prog_v1';
 
 export const PROG_ITEMS = {
   // Armas iniciais (já começa toda partida com ela no inventário)
-  start_shotgun: { cat: 'weapons', name: 'Escopeta Inicial', desc: 'Comece todas as partidas já com a Escopeta no Slot 2.', cost: 140 },
-  start_smg: { cat: 'weapons', name: 'SMG Inicial', desc: 'Comece todas as partidas já com a Submetralhadora no Slot 3.', cost: 190 },
-  start_rifle: { cat: 'weapons', name: 'Rifle Inicial', desc: 'Comece todas as partidas já com o Rifle de Assalto no Slot 4.', cost: 260 },
-  start_sniper: { cat: 'weapons', name: 'Sniper Inicial', desc: 'Comece todas as partidas já com o Rifle de Precisão no Slot 5.', cost: 340 },
+  start_punisher: { cat: 'weapons', name: 'Punisher 5.7mm Inicial', desc: 'Comece todas as partidas com a Pistola Perfurante Punisher.', cost: 130 },
+  start_deagle: { cat: 'weapons', name: 'Desert Eagle .50 Inicial', desc: 'Comece todas as partidas com a Desert Eagle .50 AE.', cost: 170 },
+  start_requiem: { cat: 'weapons', name: 'Requiem .500 Magnum Inicial', desc: 'Comece todas as partidas com o Canhão Magnum Requiem de Resident Evil.', cost: 380 },
+  start_shotgun: { cat: 'weapons', name: 'Escopeta Inicial', desc: 'Comece todas as partidas já com a Escopeta.', cost: 140 },
+  start_smg: { cat: 'weapons', name: 'SMG Inicial', desc: 'Comece todas as partidas já com a Submetralhadora.', cost: 190 },
+  start_rifle: { cat: 'weapons', name: 'Rifle Inicial', desc: 'Comece todas as partidas já com o Rifle de Assalto.', cost: 260 },
+  start_sniper: { cat: 'weapons', name: 'Sniper Inicial', desc: 'Comece todas as partidas já com o Rifle de Precisão.', cost: 340 },
 
   // Upgrades permanentes do Gancho (3 níveis cada)
   grapple_range: { cat: 'grapple', name: 'Cabo de Aço Estendido', desc: '+22% de alcance máximo do gancho por nível (ideal para atravessar o Eixo e pegar ônibus).', maxLv: 3, costs: [100, 180, 280] },
@@ -165,10 +168,14 @@ class ProgressionManager {
   }
   applyToPlayer(player) {
     if (!player || !player.weapons) return;
-    if (this.isUnlocked('start_shotgun') && player.weapons[1]) player.weapons[1].owned = true;
-    if (this.isUnlocked('start_smg') && player.weapons[2]) player.weapons[2].owned = true;
-    if (this.isUnlocked('start_rifle') && player.weapons[3]) player.weapons[3].owned = true;
-    if (this.isUnlocked('start_sniper') && player.weapons[4]) player.weapons[4].owned = true;
+    const unlockKind = (k) => { const w = player.weapons.find((x) => x.kind === k); if (w) w.owned = true; };
+    if (this.isUnlocked('start_punisher')) unlockKind('punisher');
+    if (this.isUnlocked('start_deagle')) unlockKind('deagle');
+    if (this.isUnlocked('start_requiem')) unlockKind('requiem');
+    if (this.isUnlocked('start_shotgun')) unlockKind('shotgun');
+    if (this.isUnlocked('start_smg')) unlockKind('smg');
+    if (this.isUnlocked('start_rifle')) unlockKind('rifle');
+    if (this.isUnlocked('start_sniper')) unlockKind('sniper');
     const wInk = this.weaponInk;
     for (const w of player.weapons) {
       if (!w || !w.root) continue;

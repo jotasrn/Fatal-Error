@@ -28,14 +28,14 @@ const esc = escHtml;
 const canvas = document.getElementById('c');
 const R = new InkRenderer(canvas);
 const world = new World();
-const knownMap = (k) => (LEVELS.some((m) => m.key === k) ? k : 'district');
+const knownMap = (k) => (LEVELS.some((m) => m.key === k) ? k : 'brasilia');
 const navCellFor = (b) => (Math.max(b.maxX - b.minX, b.maxZ - b.minZ) > 350 ? 2.0 : 1.0);
-let mapKey = knownMap(localStorage.getItem('fatal_map') || 'district');
+let mapKey = knownMap(localStorage.getItem('fatal_map') || 'brasilia');
 let level = buildLevel(R.scene, world, mapKey, { arena: false });
 let nav = new NavGrid(world, level.navBounds || level.bounds, navCellFor(level.navBounds || level.bounds)).build();
 let loadedKey = mapKey, arenaLoaded = false;
 let minimap = null; // created with the HUD below
-audio.setTune(mapKey === 'mexico' ? 'mexico' : 'district');
+audio.setTune('district');
 // the map in play: solo uses the picked map, a match uses the host's choice; a rebuild wipes broken props
 function setLevel(key, on, force = false) {
   if (!force && key === loadedKey && on === arenaLoaded) return; loadedKey = key; arenaLoaded = on;
@@ -43,7 +43,7 @@ function setLevel(key, on, force = false) {
   level.animated.length = 0; world.clear(); if (ctx.bEvents) ctx.bEvents.clear(); if (ctx.missions) ctx.missions.clear();
   level = buildLevel(R.scene, world, key, { arena: on }); nav = new NavGrid(world, level.navBounds || level.bounds, navCellFor(level.navBounds || level.bounds)).build();
   ctx.level = level; ctx.nav = nav; if (minimap) minimap.setLevel(level, world); if (window.__game) { window.__game.level = level; window.__game.nav = nav; }
-  audio.setTune(key === 'mexico' ? 'mexico' : 'district');
+  audio.setTune('district');
 }
 const setArena = (on) => setLevel(knownMap(net.active ? (lobby.map || mapKey) : mapKey), on);
 const input = new Input(canvas);
@@ -69,7 +69,7 @@ const settings = { sens: Number(localStorage.getItem('fatal_sens') || 100), inve
 
 const hudPrefs = {
   gfxQuality: localStorage.getItem('fatal_gfx_quality') || 'medium',
-  notebookMode: localStorage.getItem('fatal_notebook') === '1',
+  notebookMode: false,
   chColor: localStorage.getItem('fatal_ch_color') || '#d02030',
   chSize: Number(localStorage.getItem('fatal_ch_size') || '1'),
   chDot: localStorage.getItem('fatal_ch_dot') !== '0',
@@ -79,11 +79,11 @@ const hudPrefs = {
   damageNums: localStorage.getItem('fatal_hud_dmg') !== '0',
 };
 R.setQuality(hudPrefs.gfxQuality);
-R.setNotebookMode(hudPrefs.notebookMode);
+R.setNotebookMode(false);
 
 function applyHudSettings() {
   if (R.quality !== hudPrefs.gfxQuality) R.setQuality(hudPrefs.gfxQuality);
-  R.setNotebookMode(hudPrefs.notebookMode);
+  R.setNotebookMode(false);
   effects.maxParticles = hudPrefs.gfxQuality === 'high' ? 300 : hudPrefs.gfxQuality === 'low' ? 100 : 220;
 
   document.documentElement.style.setProperty('--ch-color', hudPrefs.chColor);
@@ -252,6 +252,75 @@ ctx.breakHit = (br, dmg, point, dir) => {
 };
 ctx.breakablesInArc = (pos, dir, range, cosHalf) => level.breakables.filter((br) => { if (!br.alive) return false; _v.subVectors(br.pos, pos); const d = _v.length(); return d < range + 0.5 && (d < 0.4 || _v.divideScalar(d).dot(dir) > cosHalf); });
 ctx.blastBreakables = (c, R) => { for (const br of level.breakables) if (br.alive && br.pos.distanceTo(c) < R * 0.9) breakProp(br, br.pos.clone().sub(c).normalize(), true); };
+
+// Destruição Real do Cenário (Titã Eren, Titã Blindado, Homem-Bomba, Tanques de Guerra e Comboios):
+// Destrói estruturas quebráveis, explode carros/ônibus próximos e arranca árvores/postes/muretas físicas do mapa!
+const _debrisMatDark = makeInkMaterial({ ink: INK.BLACK, fill: true });
+const _debrisMatGreen = makeInkMaterial({ ink: INK.GREEN, fill: true });
+const _debrisMatOrange = makeInkMaterial({ ink: INK.ORANGE, fill: true });
+ctx.destroyEnvironmentAt = (c, rad, dir = null) => {
+  ctx.blastBreakables(c, rad * 1.15);
+  const now = performance.now();
+  // 1. Destrói/explode veículos na área de impacto
+  if (level.cars) {
+    for (const car of level.cars) {
+      if (car.hidden) continue;
+      const dx = car.x - c.x, dz = car.z - c.z;
+      if (dx * dx + dz * dz < (rad + 1.8) * (rad + 1.8) && Math.abs((car.y || 0) - c.y) < 5.5) {
+        car.hidden = true;
+        car._wreckRespawnAt = now + 30000;
+        if (car.group) car.group.visible = false;
+        const cPos = new THREE.Vector3(car.x, (car.y || 0) + 0.8, car.z);
+        effects.explosion(cPos, 4.2, INK.ORANGE);
+        audio.explosion(cPos);
+        for (let k = 0; k < 5; k++) {
+          const piece = new THREE.Mesh(new THREE.BoxGeometry(rand(0.4, 1.1), rand(0.25, 0.6), rand(0.4, 1.2)), k % 2 ? _debrisMatOrange : _debrisMatDark);
+          piece.position.copy(cPos);
+          R.scene.add(piece);
+          const v = new THREE.Vector3(dx + rand(-5, 5), rand(4, 10), dz + rand(-5, 5)).normalize().multiplyScalar(rand(7, 14));
+          v.y = rand(5, 11);
+          effects.debris(piece, piece.position, v, new THREE.Vector3(rand(-8, 8), rand(-8, 8), rand(-8, 8)), { radius: 0.3, blood: false, life: rand(5, 8) });
+        }
+      }
+    }
+  }
+  // 2. Arranca e destrói obstáculos físicos do mundo (árvores, postes, muretas, quiosques, pilares menores)
+  const qMin = new THREE.Vector3(c.x - rad, c.y - 1.5, c.z - rad);
+  const qMax = new THREE.Vector3(c.x + rad, c.y + 12, c.z + rad);
+  const candidates = world.query(qMin, qMax, []);
+  let removedAny = false;
+  for (let i = 0; i < candidates.length; i++) {
+    const b = candidates[i];
+    if (!b || b.data.indestructible) continue;
+    const bw = b.max.x - b.min.x, bh = b.max.y - b.min.y, bd = b.max.z - b.min.z;
+    // Ignora lajes de chão/estradas (bh <= 0.48 ou muito largas) e prédios monumentais (> 12m de base)
+    if (bh <= 0.48 || bw > 11.5 || bd > 11.5 || bh > 20 || b.min.y < -1.2) continue;
+    const bx = (b.min.x + b.max.x) * 0.5, by = (b.min.y + b.max.y) * 0.5, bz = (b.min.z + b.max.z) * 0.5;
+    if (Math.hypot(bx - c.x, bz - c.z) > rad + Math.max(bw, bd) * 0.4) continue;
+    const idx = world.boxes.indexOf(b);
+    if (idx >= 0) {
+      world.boxes.splice(idx, 1);
+      removedAny = true;
+      const bPos = new THREE.Vector3(bx, by, bz);
+      const isTreeLike = bw < 2.4 && bd < 2.4 && bh > 2.2;
+      for (let k = 0; k < 3; k++) {
+        const chunk = new THREE.Mesh(
+          new THREE.BoxGeometry(clamp(bw * 0.45, 0.3, 1.4), clamp(bh * 0.3, 0.3, 1.4), clamp(bd * 0.45, 0.3, 1.4)),
+          isTreeLike && k === 0 ? _debrisMatGreen : _debrisMatDark
+        );
+        chunk.position.set(bx + rand(-0.4, 0.4), by + rand(-0.4, 0.4), bz + rand(-0.4, 0.4));
+        R.scene.add(chunk);
+        const pushDir = dir && dir.lengthSq() > 0.01 ? dir.clone().normalize() : new THREE.Vector3(bx - c.x, 0.5, bz - c.z).normalize();
+        const vel = pushDir.multiplyScalar(rand(6, 13));
+        vel.x += rand(-4, 4); vel.z += rand(-4, 4); vel.y = rand(4, 9.5);
+        effects.debris(chunk, chunk.position, vel, new THREE.Vector3(rand(-7, 7), rand(-7, 7), rand(-7, 7)), { radius: 0.25, blood: false, life: rand(4.5, 7.5) });
+      }
+      effects.smoke(bPos, new THREE.Vector3(0, 1, 0), 3);
+      audio.smash(bPos, true);
+    }
+  }
+  if (removedAny) world.finalize();
+};
 function breakProp(br, dir, local, quiet = false) {
   if (!br.alive) return; br.alive = false; world.removeBox(br.box);
   const g = br.group, pos = br.pos; const d = dir && dir.lengthSq() > 0.01 ? dir.clone().normalize() : new THREE.Vector3(rand(-1, 1), 1, rand(-1, 1)).normalize();
@@ -276,7 +345,7 @@ function breakProp(br, dir, local, quiet = false) {
 // every ray a gun fires this tick is sent to the others, who draw it as a tracer from the shooter's gun
 const shotQueue = [];
 ctx.onShot = (end) => { if (net.active && inMatch()) shotQueue.push(+end.x.toFixed(1), +end.y.toFixed(1), +end.z.toFixed(1)); };
-const TRACER_THICK = { rifle: 0.02, smg: 0.016, shotgun: 0.014, sniper: 0.03, laser: 0.038 };
+const TRACER_THICK = { rifle: 0.02, smg: 0.016, pistol9mm: 0.018, punisher: 0.024, deagle: 0.03, requiem: 0.042, shotgun: 0.014, sniper: 0.03, laser: 0.038 };
 const _sm = new THREE.Vector3(), _se = new THREE.Vector3();
 
 
@@ -401,7 +470,13 @@ function carOverlap(car, p, r, maxY) {
 function updateTrafficHits() {
   const now = performance.now();
   for (const car of level.cars) {
-    if (car.hidden) continue;
+    if (car.hidden) {
+      if (car._wreckRespawnAt && now > car._wreckRespawnAt) {
+        car.hidden = false; car._wreckRespawnAt = 0;
+        if (car.group) car.group.visible = true;
+      }
+      continue;
+    }
     const moving = car.speed > 1.5;
     const riding = player.grapple && player.grapple.state !== 'idle' && player.grapple.mover && player.grapple.mover.car === car;
     if (player.alive && !riding && carOverlap(car, player.body.pos, 0.55, 2.4)) {
@@ -532,7 +607,7 @@ player.onRocket = (d) => { if (net.active) net.broadcast('rocket', d); };
 
 
 // ---------------- free for all: spawning, death, scoring ----------------
-const HOW = { rifle: 'Rifle', smg: 'Submetralhadora', laser: 'Fuzil de Plasma', shotgun: 'Escopeta', sniper: 'Sniper', bazooka: 'Bazuca', katana: 'Katana', grenade: 'Granada', deflect: 'próprio tiro', blast: 'explosão' };
+const HOW = { revolver: 'Revólver .357', pistol9mm: 'Pistola 9mm', punisher: 'Punisher 5.7mm', deagle: 'Desert Eagle .50', requiem: 'Requiem .500 Magnum', rifle: 'Rifle', smg: 'Submetralhadora', laser: 'Fuzil de Plasma', shotgun: 'Escopeta', sniper: 'Sniper', bazooka: 'Bazuca', katana: 'Katana', grenade: 'Granada', deflect: 'próprio tiro', blast: 'explosão' };
 const howWord = (src) => HOW[src] || null;
 const spawnSpots = () => (level.arenaSpawns && level.arenaSpawns.length ? level.arenaSpawns : level.spawns);
 function arenaSpawn() {
@@ -917,12 +992,6 @@ function settingsHTML() {
           <option value="low" ${hudPrefs.gfxQuality === 'low' ? 'selected' : ''}>Desempenho · FPS Máximo</option>
         </select>
       </label>
-      <label class="settings-row">Estilo Visual
-        <select id="setVisualStyle">
-          <option value="hd" ${!hudPrefs.notebookMode ? 'selected' : ''}>Colorido Cel-Shaded HD</option>
-          <option value="notebook" ${hudPrefs.notebookMode ? 'selected' : ''}>Caderno Clássico</option>
-        </select>
-      </label>
     </div>
 
     <div class="settings-section-title">Controles e som</div>
@@ -1072,8 +1141,6 @@ function wireSettings() {
 
   const gfxQ = box.querySelector('#setGfxQ');
   if (gfxQ) gfxQ.addEventListener('change', (e) => { hudPrefs.gfxQuality = e.target.value; applyHudSettings(); });
-  const visSt = box.querySelector('#setVisualStyle');
-  if (visSt) visSt.addEventListener('change', (e) => { hudPrefs.notebookMode = e.target.value === 'notebook'; applyHudSettings(); });
 
   // Cor da mira via paleta
   box.querySelectorAll('.ch-swatch').forEach(sw => {
@@ -1238,7 +1305,7 @@ function wireTabs() {
 }
 const scoreRowsHTML = () => `<div class="scoreboard">${sortedScores().map(([id, s], i) => `<div class="${id === net.id ? 'me' : ''}"><span class="rk">${i + 1}</span><span class="nm">${esc(s.name)}${id === net.id ? ' (você)' : ''}</span><span class="kd"><b>${s.kills}</b> abates · ${s.deaths} mortes</span></div>`).join('')}</div>`;
 function mainHTML() {
-  return `<div class="m-head"><div class="logo"><span class="l1">FATAL</span><span class="l2">ERROR</span></div><div class="tagline">Tiro arcade e sobrevivência num mundo rabiscado</div></div>
+  return `<div class="m-head"><div class="logo"><span class="l1">FATAL</span><span class="l2">ERROR</span></div><div class="tagline">Combate tático, caos urbano e sobrevivência extrema</div></div>
     ${updateBannerHTML()}
     <div class="m-play">
       <button type="button" class="btn btn-yellow btn-xl" id="soloBtn"><span class="bt">▶ Jogar Solo</span><span class="bs">Ondas + Missões pela cidade</span></button>
@@ -1381,7 +1448,7 @@ function showDead() {
   hud.setGameplayVisible(false); const nb = game.score > best; if (nb) { best = game.score; localStorage.setItem('fatal_best', String(best)); }
   const earnedCr = 15 + Math.max(0, game.wave - 1) * 10 + Math.min(80, Math.floor((game.kills || 0) * 1.5));
   progression.addCredits(earnedCr);
-  hud.showScreen(`<div class="p-head"><h1 class="t-red">Você foi apagado!</h1></div>
+  hud.showScreen(`<div class="p-head"><h1 class="t-red">Você foi eliminado!</h1></div>
     <div class="statgrid"><div><b>${game.wave}</b><span>ondas</span></div><div><b>${game.kills}</b><span>eliminações</span></div><div><b>${game.score}</b><span>pontos</span></div><div><b>+${earnedCr} CR</b><span>créditos ganhos</span></div></div>
     <div class="m-info">${nb ? '<span class="chip chip-gold">Novo recorde!</span>' : `<span class="chip">Recorde: <b>${best}</b></span>`}<span class="chip chip-gold">Saldo Permanente: <b>${progression.credits} CR</b></span></div>
     <div class="m-play"><button type="button" class="btn btn-yellow btn-lg" data-act="go">↻ Jogar de novo</button><button type="button" class="btn btn-white btn-lg" id="menuBtn">Menu principal</button></div>
@@ -1464,6 +1531,15 @@ hud.onScreenClick = (src) => {
   if (st === 'pause' || st === 'dead') resume();
 };
 canvas.addEventListener('click', () => { if (game.state === 'play' && !game.menu && !input.pointerLocked && !input.usingGamepad) input.requestLock(); });
+
+// Bridge de compatibilidade Tauri 2.0 (Rust) caso não esteja rodando sob preload do Electron
+if (typeof window !== 'undefined' && !window.FE_WIN && window.__TAURI__?.core?.invoke) {
+  const inv = window.__TAURI__.core.invoke;
+  window.FE_WIN = {
+    minimize: () => inv('fe_win_minimize').catch(() => {}),
+    toggleFullScreen: () => inv('fe_win_toggle_fullscreen').catch(() => {}),
+  };
+}
 
 // Controles de janela flutuantes (Minimizar / Tela Cheia)
 const btnWinMin = document.getElementById('fe-btn-min');

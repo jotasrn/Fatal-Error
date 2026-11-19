@@ -10,13 +10,17 @@ import { easeOut } from './primitives.js';
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3();
 
 export const GUNS = {
-  rifle: { name: 'Rifle', hint: 'Automático · Alinhe a mira neles', kind: 'rifle', magSize: 35, reserve: 175, maxReserve: 350, interval: 1 / 11, damage: 24, headMul: 2.6, pellets: 1, spread: 0.016, adsSpread: 0.0034, spreadKick: 0.009, spreadMax: 0.075, adsFov: 58, sight: [0, 0.12, -0.05, 0.3], camKick: [0.009, 0.0034], modelKick: [0.25, 0.3, 2.4, -3.2, 0.9, 1.2], fovKick: 1.2, reloadDur: 1.45, reloadType: 'mag', auto: true, falloff: null, tracer: 0.02, flashScale: 1, sound: 'shot', shell: [0.02, INK.ORANGE], moveSpread: 0.0012, pvp: [19, 1.8, null] },
+  revolver: { name: 'Revólver .357', hint: 'Canhão de mão · Tiro na cabeça elimina na hora', kind: 'revolver', magSize: 6, reserve: 42, maxReserve: 84, interval: 0.28, damage: 65, headMul: 3, pellets: 1, spread: 0.006, adsSpread: 0.002, spreadKick: 0.02, spreadMax: 0.06, adsFov: 52, sight: [0, 0.08, -0.34, 0.42], camKick: [0.038, 0.007], modelKick: [0.3, 0.9, 3.2, -10, 1.5, 2.5], fovKick: 2.5, reloadDur: 1.8, reloadType: 'cylinder', auto: false, falloff: null, tracer: 0.026, flashScale: 1.35, sound: 'revolver', shell: null, moveSpread: 0.0015, pvp: [52, 2.9, [9, 34, 0.42]] },
+  pistol9mm: { name: 'Pistola Tática 9mm', hint: 'Semiautomática rápida · Mira red-dot e recarga veloz', kind: 'pistol9mm', magSize: 18, reserve: 108, maxReserve: 216, interval: 0.13, damage: 34, headMul: 2.7, pellets: 1, spread: 0.008, adsSpread: 0.0018, spreadKick: 0.008, spreadMax: 0.048, adsFov: 58, sight: [0, 0.065, -0.05, 0.36], camKick: [0.015, 0.003], modelKick: [0.16, 0.35, 1.8, -4.5, 0.8, 1.1], fovKick: 1.1, reloadDur: 1.05, reloadType: 'mag', auto: false, falloff: [16, 48, 0.48], tracer: 0.018, flashScale: 0.9, sound: 'pistol9mmFire', shell: [0.016, INK.ORANGE], moveSpread: 0.0008, pvp: [28, 2.2, [14, 42, 0.45]] },
+  punisher: { name: 'Punisher Five-SeveN', hint: 'Munição perfurante · Atravessa escudos e até 3 inimigos em linha', kind: 'punisher', magSize: 20, reserve: 120, maxReserve: 240, interval: 0.145, damage: 42, headMul: 2.8, pellets: 1, pierce: 3, armorBreak: true, spread: 0.006, adsSpread: 0.0012, spreadKick: 0.009, spreadMax: 0.045, adsFov: 56, sight: [0, 0.068, -0.18, 0.38], camKick: [0.018, 0.004], modelKick: [0.18, 0.42, 2.1, -5.2, 0.9, 1.3], fovKick: 1.4, reloadDur: 1.15, reloadType: 'mag', auto: false, falloff: null, tracer: 0.024, flashScale: 1.05, sound: 'punisherFire', shell: [0.018, INK.BLUE], moveSpread: 0.0009, pvp: [34, 2.4, null] },
+  deagle: { name: 'Desert Eagle .50', hint: 'Pistola pesada .50 AE · Impacto brutal e alto poder de parada', kind: 'deagle', magSize: 8, reserve: 56, maxReserve: 112, interval: 0.24, damage: 98, headMul: 3.2, pellets: 1, pierce: 2, spread: 0.007, adsSpread: 0.0018, spreadKick: 0.022, spreadMax: 0.065, adsFov: 52, sight: [0, 0.095, -0.18, 0.4], camKick: [0.046, 0.009], modelKick: [0.34, 1.05, 3.8, -11.5, 1.8, 2.8], fovKick: 3.1, reloadDur: 1.35, reloadType: 'mag', auto: false, falloff: null, tracer: 0.03, flashScale: 1.5, sound: 'deagleFire', shell: [0.026, INK.ORANGE], moveSpread: 0.0014, pvp: [72, 2.8, null] },
+  requiem: { name: 'Requiem .500 Magnum', hint: 'Canhão Magnum lendário · Destrói blindagens de Titãs, escudos e atravessa alvos', kind: 'requiem', magSize: 5, reserve: 35, maxReserve: 70, interval: 0.42, damage: 240, headMul: 3.6, pellets: 1, pierce: 4, armorBreak: true, spread: 0.004, adsSpread: 0.0006, spreadKick: 0.028, spreadMax: 0.07, adsFov: 48, sight: [0, 0.095, -0.45, 0.44], camKick: [0.072, 0.014], modelKick: [0.42, 1.35, 5.2, -14.5, 2.2, 3.4], fovKick: 4.8, reloadDur: 1.95, reloadType: 'cylinder', auto: false, falloff: null, tracer: 0.042, tracerInk: INK.RED, flashScale: 1.85, sound: 'requiemFire', shell: null, moveSpread: 0.0016, pvp: [135, 3.0, null] },
   shotgun: { name: 'Escopeta', hint: 'Ação por bombeamento · Devastadora a curta distância', kind: 'shotgun', magSize: 6, reserve: 36, maxReserve: 72, interval: 0.78, damage: 19, headMul: 1.8, pellets: 10, spread: 0.062, adsSpread: 0.034, spreadKick: 0, spreadMax: 0.1, adsFov: 68, sight: [0, 0.095, -1.0, 0.52], camKick: [0.05, 0.012], modelKick: [0.4, 0.6, 5, -9, 2, 3], fovKick: 4, reloadDur: 0.45, reloadType: 'shells', auto: false, falloff: [11, 32, 0.22], tracer: 0.014, flashScale: 1.9, sound: 'shotgunFire', shell: [0.035, INK.RED], moveSpread: 0.0006, cycleDur: 0.45, pvp: [16, 1.6, [9, 26, 0.15]] },
-  sniper: { name: 'Sniper', hint: 'Ação por ferrolho · Um tiro, uma eliminação', kind: 'sniper', scope: true, magSize: 5, reserve: 25, maxReserve: 50, interval: 0.2, damage: 150, headMul: 3, pellets: 1, spread: 0.075, adsSpread: 0.0004, spreadKick: 0.05, spreadMax: 0.14, adsFov: 20, sight: [0, 0.135, 0, 0.42], camKick: [0.055, 0.008], modelKick: [0.25, 0.8, 4.5, -11, 1.2, 2], fovKick: 4.5, reloadDur: 2.1, reloadType: 'mag', auto: false, falloff: null, tracer: 0.03, flashScale: 1.7, sound: 'sniperFire', shell: [0.03, INK.ORANGE], moveSpread: 0.004, cycleDur: 0.85, pvp: [150, 1.5, null] },
-  revolver: { name: 'Revólver', hint: 'Canhão de mão · Tiro na cabeça elimina na hora', kind: 'revolver', magSize: 6, reserve: 36, maxReserve: 72, interval: 0.3, damage: 62, headMul: 3, pellets: 1, spread: 0.006, adsSpread: 0.002, spreadKick: 0.02, spreadMax: 0.06, adsFov: 52, sight: [0, 0.08, -0.34, 0.42], camKick: [0.038, 0.007], modelKick: [0.3, 0.9, 3.2, -10, 1.5, 2.5], fovKick: 2.5, reloadDur: 1.9, reloadType: 'cylinder', auto: false, falloff: null, tracer: 0.026, flashScale: 1.35, sound: 'revolver', shell: null, moveSpread: 0.0015, pvp: [52, 2.9, [9, 34, 0.42]] },
   smg: { name: 'Submetralhadora', hint: 'Cadência insana · Varre inimigos em disparada', kind: 'smg', magSize: 45, reserve: 225, maxReserve: 450, interval: 1 / 18, damage: 17, headMul: 2.3, pellets: 1, spread: 0.024, adsSpread: 0.007, spreadKick: 0.008, spreadMax: 0.09, adsFov: 62, sight: [0, 0.095, -0.1, 0.28], camKick: [0.007, 0.0028], modelKick: [0.18, 0.22, 1.8, -2.4, 0.7, 0.9], fovKick: 0.9, reloadDur: 1.25, reloadType: 'mag', auto: true, falloff: [8, 26, 0.35], tracer: 0.016, flashScale: 0.85, sound: 'smgFire', shell: [0.018, INK.ORANGE], moveSpread: 0.0008, pvp: [14, 1.7, [7, 24, 0.25]] },
-  laser: { name: 'Fuzil de Plasma', hint: 'Disparo de energia · Feixe contínuo de alta precisão', kind: 'laser', magSize: 50, reserve: 200, maxReserve: 400, interval: 1 / 13, damage: 28, headMul: 2.5, pellets: 1, spread: 0.008, adsSpread: 0.001, spreadKick: 0.004, spreadMax: 0.04, adsFov: 55, sight: [0, 0.11, -0.05, 0.32], camKick: [0.006, 0.002], modelKick: [0.15, 0.2, 1.5, -2.0, 0.6, 0.8], fovKick: 1.0, reloadDur: 1.6, reloadType: 'mag', auto: true, falloff: null, tracer: 0.035, flashScale: 1.3, sound: 'laserFire', shell: null, moveSpread: 0.0005, pvp: [23, 2.0, null] },
-  bazooka: { name: 'Bazuca', hint: 'Lança-foguetes · Dano massivo e explosão em área', kind: 'bazooka', magSize: 1, reserve: 20, maxReserve: 40, interval: 0.85, damage: 200, headMul: 1.0, pellets: 1, spread: 0.006, adsSpread: 0.001, spreadKick: 0.03, spreadMax: 0.07, adsFov: 56, sight: [0, 0.12, -0.15, 0.35], camKick: [0.08, 0.015], modelKick: [0.45, 1.2, 6.5, -13, 2.0, 3.2], fovKick: 5.5, reloadDur: 1.5, reloadType: 'rocket', auto: false, falloff: null, tracer: 0.0, flashScale: 2.2, sound: 'bazookaFire', shell: null, moveSpread: 0.002, pvp: [170, 1.0, null] },
+  rifle: { name: 'Rifle', hint: 'Automático · Alinhe a mira neles', kind: 'rifle', magSize: 35, reserve: 175, maxReserve: 350, interval: 1 / 11, damage: 24, headMul: 2.6, pellets: 1, spread: 0.016, adsSpread: 0.0034, spreadKick: 0.009, spreadMax: 0.075, adsFov: 58, sight: [0, 0.12, -0.05, 0.3], camKick: [0.009, 0.0034], modelKick: [0.25, 0.3, 2.4, -3.2, 0.9, 1.2], fovKick: 1.2, reloadDur: 1.45, reloadType: 'mag', auto: true, falloff: null, tracer: 0.02, flashScale: 1, sound: 'shot', shell: [0.02, INK.ORANGE], moveSpread: 0.0012, pvp: [19, 1.8, null] },
+  sniper: { name: 'Sniper', hint: 'Ação por ferrolho · Um tiro, uma eliminação', kind: 'sniper', scope: true, magSize: 5, reserve: 25, maxReserve: 50, interval: 0.2, damage: 150, headMul: 3, pellets: 1, pierce: 2, armorBreak: true, spread: 0.075, adsSpread: 0.0004, spreadKick: 0.05, spreadMax: 0.14, adsFov: 20, sight: [0, 0.135, 0, 0.42], camKick: [0.055, 0.008], modelKick: [0.25, 0.8, 4.5, -11, 1.2, 2], fovKick: 4.5, reloadDur: 2.1, reloadType: 'mag', auto: false, falloff: null, tracer: 0.03, flashScale: 1.7, sound: 'sniperFire', shell: [0.03, INK.ORANGE], moveSpread: 0.004, cycleDur: 0.85, pvp: [150, 1.5, null] },
+  laser: { name: 'Fuzil de Plasma', hint: 'Disparo de energia · Feixe contínuo de alta precisão', kind: 'laser', magSize: 50, reserve: 200, maxReserve: 400, interval: 1 / 13, damage: 28, headMul: 2.5, pellets: 1, armorBreak: true, spread: 0.008, adsSpread: 0.001, spreadKick: 0.004, spreadMax: 0.04, adsFov: 55, sight: [0, 0.11, -0.05, 0.32], camKick: [0.006, 0.002], modelKick: [0.15, 0.2, 1.5, -2.0, 0.6, 0.8], fovKick: 1.0, reloadDur: 1.6, reloadType: 'mag', auto: true, falloff: null, tracer: 0.035, flashScale: 1.3, sound: 'laserFire', shell: null, moveSpread: 0.0005, pvp: [23, 2.0, null] },
+  bazooka: { name: 'Bazuca', hint: 'Lança-foguetes · Dano massivo e explosão em área', kind: 'bazooka', magSize: 1, reserve: 20, maxReserve: 40, interval: 0.85, damage: 200, headMul: 1.0, pellets: 1, armorBreak: true, spread: 0.006, adsSpread: 0.001, spreadKick: 0.03, spreadMax: 0.07, adsFov: 56, sight: [0, 0.12, -0.15, 0.35], camKick: [0.08, 0.015], modelKick: [0.45, 1.2, 6.5, -13, 2.0, 3.2], fovKick: 5.5, reloadDur: 1.5, reloadType: 'rocket', auto: false, falloff: null, tracer: 0.0, flashScale: 2.2, sound: 'bazookaFire', shell: null, moveSpread: 0.002, pvp: [170, 1.0, null] },
 };
 
 export class Gun extends ViewModel {
@@ -54,7 +58,8 @@ export class Gun extends ViewModel {
         const t = this.reloadT / this.reloadDur;
         const tilt = Math.sin(clamp(t / 0.22, 0, 1) * Math.PI / 2) * (t < 0.82 ? 1 : clamp(1 - (t - 0.82) / 0.18, 0, 1));
         r.x += -0.3 * tilt; r.z += 0.5 * tilt; r.y += 0.25 * tilt; p.y -= 0.07 * tilt; p.x += 0.03 * tilt;
-        const mt = clamp((t - 0.18) / 0.5, 0, 1); this.magMesh.position.y = this.magY - Math.sin(mt * Math.PI) * 0.3; this.magMesh.rotation.z = Math.sin(mt * Math.PI) * 0.6;
+        const mt = clamp((t - 0.18) / 0.5, 0, 1);
+        if (this.magMesh) { this.magMesh.position.y = this.magY - Math.sin(mt * Math.PI) * 0.3; this.magMesh.rotation.z = Math.sin(mt * Math.PI) * 0.6; }
         if (t > 0.86 && !this.racked) { this.racked = true; this.recoilRot.kick(-2.5, 0, 0); this.recoil.kick(0, 0, 0.6); }
         if (this.reloadT >= this.reloadDur) { const take = Math.min(this.magSize - this.mag, this.reserve); this.mag += take; this.reserve -= take; this.reloading = false; }
         return;
@@ -62,7 +67,7 @@ export class Gun extends ViewModel {
       if (this.reloadType === 'cylinder') {
         const t = this.reloadT / this.reloadDur; const open = t < 0.25 ? easeOut(t / 0.25) : t > 0.8 ? 1 - easeOut((t - 0.8) / 0.2) : 1;
         r.z += 0.9 * open; r.x += 0.3 * open; p.x -= 0.05 * open; p.y += 0.02 * open; this.cylGroup.rotation.z = -1.5 * open;
-        if (t > 0.3 && !this.racked) { this.racked = true; for (let i = 0; i < 6; i++) this._ejectShell(0.7); audio.shell(); }
+        if (t > 0.3 && !this.racked) { this.racked = true; for (let i = 0; i < this.magSize; i++) this._ejectShell(0.7); audio.shell(); }
         if (this.reloadT >= this.reloadDur) { const take = Math.min(this.magSize - this.mag, this.reserve); this.mag += take; this.reserve -= take; this.reloading = false; this.cylGroup.rotation.z = 0; }
         return;
       }
@@ -116,7 +121,8 @@ export class Gun extends ViewModel {
       ctx.effects.smoke(_v3, _v2.clone().negate(), 5);
       const k = this.modelKick; this.recoil.kick(rand(-k[0], k[0]), rand(k[1] * 0.4, k[1]), k[2]); this.recoilRot.kick(k[3], rand(-k[4], k[4]), rand(-k[5], k[5]));
       P.recoil(this.camKick[0] * (st.aim ? 0.7 : 1) + rand(0, this.camKick[0] * 0.3), rand(-this.camKick[1], this.camKick[1])); P.kickFov(this.fovKick);
-      audio[this.sound](); ctx.input.rumble(0.65, 0.8, 140); ctx.effects.shakeAmt += 0.25;
+      if (audio[this.sound]) audio[this.sound](); else audio.shot();
+      ctx.input.rumble(0.65, 0.8, 140); ctx.effects.shakeAmt += 0.25;
       P.fireRocket();
       if (this.mag === 0) setTimeout(() => { if (this.mag === 0 && !this.reloading) this.startReload(); }, 250);
       return;
@@ -128,31 +134,54 @@ export class Gun extends ViewModel {
     this.flash.visible = true; this.flashT = 0.045; this.flash.rotation.z = rand(0, TAU); this.flash.scale.setScalar(this.flashScale * rand(0.8, 1.4));
     this.muzzle.getWorldPosition(_v); _v2.copy(P.forward);
     ctx.effects.strokeBurst(_v, INK.ORANGE, 4 + this.pellets, 6 * this.flashScale, { life: 0.08, size: 0.03, gravity: 0, drag: 8 });
-    ctx.effects.smoke(_v, _v2, this.kind === 'shotgun' ? 5 : 2);
+    ctx.effects.smoke(_v, _v2, this.kind === 'shotgun' || this.kind === 'requiem' ? 5 : 2);
     if (this.shell && this.reloadType !== 'shells') this._ejectShell();
     if (this.cycleDur) { this.pumpT = this.cycleDur + 0.12; this.pumped = false; if (this.reloadType === 'shells') this.needPump = true; }
     const k = this.modelKick; this.recoil.kick(rand(-k[0], k[0]), rand(k[1] * 0.4, k[1]), k[2]); this.recoilRot.kick(k[3], rand(-k[4], k[4]), rand(-k[5], k[5]));
     P.recoil(this.camKick[0] * (st.aim ? 0.7 : 1) + rand(0, this.camKick[0] * 0.3), rand(-this.camKick[1], this.camKick[1])); P.kickFov(this.fovKick);
-    audio[this.sound](); ctx.input.rumble(0.15 + this.fovKick * 0.08, 0.5, 40 + this.fovKick * 15); ctx.effects.shakeAmt += 0.02 + this.fovKick * 0.02;
-    if (this.mag === 0 && this.reloadType === 'mag') setTimeout(() => { if (this.mag === 0 && !this.reloading) this.startReload(); }, 250);
+    if (audio[this.sound]) audio[this.sound](); else audio.shot();
+    ctx.input.rumble(0.15 + this.fovKick * 0.08, 0.5, 40 + this.fovKick * 15); ctx.effects.shakeAmt += 0.02 + this.fovKick * 0.02;
+    if (this.mag === 0 && (this.reloadType === 'mag' || this.reloadType === 'cylinder')) setTimeout(() => { if (this.mag === 0 && !this.reloading) this.startReload(); }, 250);
   }
   fireRay(origin, dir) {
-    const ctx = this.ctx; const hitE = ctx.enemies.raycast(origin, dir, 300), hitW = ctx.world.raycast(origin, dir, 300, SEE_THROUGH); let end, hit = false;
+    const ctx = this.ctx;
+    const hitW = ctx.world.raycast(origin, dir, 300, SEE_THROUGH);
+    const maxWallDist = hitW ? hitW.dist : 300;
+    const maxPierce = this.pierce || 1;
+    let end = hitW ? hitW.point : origin.clone().addScaledVector(dir, 300);
+    let hit = false;
+
     // other players in a versus match are targets too; the closest thing along the ray wins
-    const hitP = ctx.raycastPlayers ? ctx.raycastPlayers(origin, dir, 300) : null;
-    if (hitP && (!hitE || hitP.dist < hitE.dist) && (!hitW || hitP.dist < hitW.dist)) {
+    const hitP = ctx.raycastPlayers ? ctx.raycastPlayers(origin, dir, maxWallDist) : null;
+    const hitEFirst = ctx.enemies.raycast(origin, dir, maxWallDist);
+    if (hitP && (!hitEFirst || hitP.dist < hitEFirst.dist)) {
       end = hitP.point; const crit = hitP.part === 'head'; const pv = this.pvp || [this.damage, this.headMul, this.falloff]; let d = pv[0] * (crit ? pv[1] : 1);
       if (pv[2]) d *= clamp(1 - (hitP.dist - pv[2][0]) / (pv[2][1] - pv[2][0]), pv[2][2], 1);
       ctx.hitPlayer(hitP.player, d, { point: hitP.point, dir, part: hitP.part, source: this.kind, crit, dist: hitP.dist }); hit = true;
-    } else if (hitW && hitW.box && hitW.box.data.breakable && (!hitE || hitW.dist < hitE.dist) && ctx.breakHit) {
+    } else if (hitW && hitW.box && hitW.box.data.breakable && (!hitEFirst || hitW.dist < hitEFirst.dist) && ctx.breakHit) {
       end = hitW.point; ctx.breakHit(hitW.box.data.breakable, this.damage, hitW.point, dir); hit = true;
-    } else if (hitE && (!hitW || hitE.dist < hitW.dist)) {
-      end = hitE.point; const crit = hitE.part === 'head'; let d = this.damage * (crit ? this.headMul : 1);
-      if (this.falloff) d *= clamp(1 - (hitE.dist - this.falloff[0]) / (this.falloff[1] - this.falloff[0]), this.falloff[2], 1);
-      ctx.enemies.damage(hitE.enemy, d, { point: hitE.point, dir, part: hitE.part, source: this.kind, crit }); hit = true;
-    } else if (hitW) { end = hitW.point; ctx.effects.bulletImpact(hitW.point, hitW.normal, INK.BLUE); if (Math.random() < 0.25) audio.ricochet(hitW.point); }
-    else end = origin.clone().addScaledVector(dir, 300);
-    this.muzzle.getWorldPosition(_v); ctx.effects.tracer(_v, end, INK.BLUE, this.tracer, 0.05);
+    } else if (hitEFirst) {
+      // Support multi-target penetration (Requiem, Punisher, Deagle, Sniper)
+      const ignored = new Set();
+      let curE = hitEFirst;
+      for (let pIdx = 0; pIdx < maxPierce && curE; pIdx++) {
+        end = curE.point;
+        const crit = curE.part === 'head';
+        let d = this.damage * (crit ? this.headMul : 1) * Math.pow(0.82, pIdx);
+        if (this.falloff) d *= clamp(1 - (curE.dist - this.falloff[0]) / (this.falloff[1] - this.falloff[0]), this.falloff[2], 1);
+        ctx.enemies.damage(curE.enemy, d, { point: curE.point, dir, part: curE.part, source: this.kind, crit, armorBreak: !!this.armorBreak });
+        hit = true;
+        ignored.add(curE.enemy);
+        if (pIdx + 1 < maxPierce) {
+          curE = ctx.enemies.raycast(origin, dir, maxWallDist, ignored);
+        }
+      }
+      if (maxPierce > 1 && hitW) end = hitW.point;
+    } else if (hitW) {
+      end = hitW.point; ctx.effects.bulletImpact(hitW.point, hitW.normal, this.tracerInk ?? INK.BLUE);
+      if (Math.random() < 0.25) audio.ricochet(hitW.point);
+    }
+    this.muzzle.getWorldPosition(_v); ctx.effects.tracer(_v, end, this.tracerInk ?? INK.BLUE, this.tracer, this.kind === 'requiem' ? 0.09 : 0.05);
     if (ctx.onShot) ctx.onShot(end);
     return hit;
   }

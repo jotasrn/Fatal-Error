@@ -1,6 +1,6 @@
 {
   "name": "fatal-error",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Fatal Error — arena shooter 3D (Electron + Hyperswarm P2P).",
   "main": "electron/main.cjs",
   "author": "jotasrn",
@@ -17,7 +17,10 @@
     "check": "node scripts/check.mjs",
     "test": "node --test tests/*.test.mjs",
     "dist": "electron-builder --win nsis zip --publish never",
-    "release": "electron-builder --win nsis zip --publish always"
+    "release": "electron-builder --win nsis zip --publish always",
+    "wasm:build": "cargo build --manifest-path rust-core/Cargo.toml --target wasm32-unknown-unknown --release",
+    "tauri:dev": "cargo run --manifest-path src-tauri/Cargo.toml",
+    "tauri:build": "cargo build --manifest-path src-tauri/Cargo.toml --release"
   },
   "dependencies": {
     "b4a": "^1.6.6",

@@ -1,5 +1,5 @@
-// Enemy bullets, drawn as one InstancedMesh of stretched ink strokes. Handles flight, wall hits,
-// player/enemy collision, katana deflection and blast damage. The manager owns one Projectiles.
+// Enemy bullets, mortar shells, tank shells, C4 charges and Titan boulders, drawn as one InstancedMesh.
+// Handles flight, ballistic gravity, wall hits, environmental destruction, player/enemy collision, and katana deflection.
 import * as THREE from 'three';
 import { makeInkMaterial, INK } from '../render.js';
 import { SEE_THROUGH } from '../physics.js';
@@ -11,14 +11,15 @@ const _up = new THREE.Vector3(0, 1, 0);
 
 export class Projectiles {
   constructor(mgr) {
-    this.mgr = mgr; this.list = []; this.max = 240; this.onFire = null;
+    this.mgr = mgr; this.list = []; this.max = 280; this.onFire = null;
     this.mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), makeInkMaterial({ ink: INK.RED, fill: true }), this.max);
     this.mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(this.max * 3), 3);
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); this.mesh.frustumCulled = false; this.mesh.count = 0; mgr.ctx.scene.add(this.mesh);
   }
-  fire(pos, dir, speed, dmg, owner, ink = INK.RED, thick = 0.045, blast = 0, id = null) {
+  fire(pos, dir, speed, dmg, owner, ink = INK.RED, thick = 0.045, blast = 0, id = null, grav = null) {
     if (this.list.length >= this.max) this.list.shift();
-    const p = { id: id ?? this.mgr.nextId++, pos: pos.clone(), prev: pos.clone(), vel: dir.clone().multiplyScalar(speed), dmg, owner, life: 4, deflected: false, ink, thick, origin: pos.clone(), blast };
+    const g = grav !== null ? grav : (blast ? 9.5 : 0);
+    const p = { id: id ?? this.mgr.nextId++, pos: pos.clone(), prev: pos.clone(), vel: dir.clone().multiplyScalar(speed), dmg, owner, life: blast ? 5.5 : 4, deflected: false, ink, thick, origin: pos.clone(), blast, grav: g };
     this.list.push(p);
     if (this.onFire && id === null) this.onFire(p);
     return p;
@@ -30,53 +31,78 @@ export class Projectiles {
     return n;
   }
   _deflect(p, player, perfect) {
-    const mgr = this.mgr; p.deflected = true; p.ink = INK.BLUE; p.dmg *= perfect ? 3.5 : 2.2; p.life = 3;
+    const mgr = this.mgr; p.deflected = true; p.ink = INK.BLUE; p.dmg *= perfect ? 3.5 : 2.2; p.life = 3.5;
     let target = null;
     if (perfect && p.owner && p.owner.alive) target = p.owner; else target = mgr.nearestVisible(player.eye, player.forward, Math.cos(0.7), 70) || (p.owner && p.owner.alive ? p.owner : null);
     const speed = p.vel.length() * 1.6; if (target) _d.subVectors(target.center, p.pos).normalize(); else _d.copy(player.forward);
     p.vel.copy(_d).multiplyScalar(speed); mgr.ctx.effects.sparks(p.pos, _d, INK.ORANGE, 10, 9); mgr.ctx.effects.strokeBurst(p.pos, INK.BLUE, 8, 4, { life: 0.2 });
   }
   _burst(p, point) {
-    const ctx = this.mgr.ctx; ctx.effects.explosion(point, 2.5, INK.BLACK); audio.explosion(point);
+    const ctx = this.mgr.ctx;
+    const rad = Math.max(3.5, p.blast * 3.5);
+    ctx.effects.explosion(point, rad * 0.75, p.ink === INK.ORANGE ? INK.ORANGE : INK.BLACK);
+    audio.explosion(point);
+    if (ctx.destroyEnvironmentAt && p.blast >= 1.1) {
+      ctx.destroyEnvironmentAt(point, rad * 0.85, p.vel);
+    } else if (ctx.blastBreakables) {
+      ctx.blastBreakables(point, rad);
+    }
     const ignorePlayers = p.owner && ((p.owner.T.isPolice && !ctx.playerWanted) || (p.owner.T.isProtester && !ctx.protestersRiot));
     const P = ctx.player; const d = P.center.distanceTo(point);
-    if (!ignorePlayers && d < 3.5 && P.alive) { P.takeDamage(p.dmg * (1 - d / 3.5), point); P.knockback(_v.subVectors(P.center, point).normalize(), 6); }
-    if (!this.mgr.mirror) this.mgr.blastEnemies(point, 3.5, p.dmg * 1.5, p.owner);
+    if (!ignorePlayers && d < rad && P.alive) {
+      P.takeDamage(p.dmg * (1 - d / rad * 0.75), point);
+      P.knockback(_v.subVectors(P.center, point).normalize(), 5 + p.blast * 2.5);
+    }
+    if (!this.mgr.mirror) this.mgr.blastEnemies(point, rad, p.dmg * 1.5, p.owner);
   }
   update(dt) {
     const mgr = this.mgr, ctx = mgr.ctx, world = ctx.world; const list = this.list; let n = 0;
     for (let i = 0; i < list.length; i++) {
       const p = list[i]; p.life -= dt; if (p.life <= 0) continue;
-      p.prev.copy(p.pos); if (p.blast) p.vel.y -= 9 * dt; p.pos.addScaledVector(p.vel, dt);
+      p.prev.copy(p.pos); if (p.grav) p.vel.y -= p.grav * dt; p.pos.addScaledVector(p.vel, dt);
       _d.subVectors(p.pos, p.prev); const len = _d.length(); if (len < 1e-6) { list[n++] = p; continue; } _d.divideScalar(len);
       const hw = world.raycast(p.prev, _d, len, SEE_THROUGH);
       if (hw) { if (p.blast) this._burst(p, hw.point); else { ctx.effects.bulletImpact(hw.point, hw.normal, p.ink); if (Math.random() < 0.5) audio.bulletImpact(hw.point); } continue; }
       if (!p.deflected) {
-        // every peer runs the same projectile; only the local player takes damage from it here,
-        // other players just make it disappear on this screen (their own client handles them).
-        // Police / protesters NEVER hit innocent players while fighting each other!
         let consumed = false;
         const ignorePlayers = p.owner && ((p.owner.T.isPolice && !ctx.playerWanted) || (p.owner.T.isProtester && !ctx.protestersRiot));
         if (!ignorePlayers) {
           for (const P of mgr.targets()) {
             if (!P.alive) continue;
-            const catchR = Math.max(p.blast ? 0.9 : 0.5, P.isLocal ? P.blockRadius : 0);
+            const catchR = Math.max(p.blast ? 0.95 : 0.5, P.isLocal ? P.blockRadius : 0);
             if (!this._segHitsPlayer(p.prev, p.pos, P, catchR)) continue;
             if (P.isLocal) {
               const def = P.tryDeflect(p);
               if (def) { if (def.ret) { this._deflect(p, P, def.perfect); list[n++] = p; } else { p.deflected = true; ctx.effects.strokeBurst(p.pos, INK.RED, 5, 6, { life: 0.18, size: 0.03 }); } consumed = true; break; }
-              if (this._segHitsPlayer(p.prev, p.pos, P, p.blast ? 0.9 : 0.5)) { if (p.blast) this._burst(p, p.pos); else P.takeDamage(p.dmg, p.origin); consumed = true; break; }
-            } else if (this._segHitsPlayer(p.prev, p.pos, P, p.blast ? 0.9 : 0.5)) { consumed = true; break; }
+              if (this._segHitsPlayer(p.prev, p.pos, P, p.blast ? 0.95 : 0.5)) {
+                if (p.blast) this._burst(p, p.pos);
+                else {
+                  P.takeDamage(p.dmg, p.origin);
+                  if (p.owner && p.owner.elite === 'vampiric' && p.owner.alive) {
+                    p.owner.hp = Math.min(p.owner.maxHp, p.owner.hp + p.dmg * 1.2);
+                  }
+                }
+                consumed = true; break;
+              }
+            } else if (this._segHitsPlayer(p.prev, p.pos, P, p.blast ? 0.95 : 0.5)) { consumed = true; break; }
           }
         }
-        // Dano entre facções (Polícia vs Manifestantes) - Host autoritativo
-        if (!consumed && !mgr.mirror && p.owner && (p.owner.T.isPolice || p.owner.T.isProtester)) {
-          const vsProtester = p.owner.T.isPolice;
+        // Dano entre facções (Polícia vs Lázaro / Manifestantes / Invasores, ou Lázaro contra Polícia) - Host autoritativo
+        if (!consumed && !mgr.mirror && p.owner && (p.owner.T.isPolice || p.owner.T.isProtester || p.owner.T.isLazaro)) {
+          const isPol = p.owner.T.isPolice;
+          const isLaz = p.owner.T.isLazaro;
           for (const opp of mgr.enemies) {
             if (!opp.alive || opp === p.owner) continue;
-            if (vsProtester ? !opp.T.isProtester : !opp.T.isPolice) continue;
-            if (opp.center.distanceToSquared(p.pos) < 0.95 * 0.95) {
-              mgr.damage(opp, p.dmg, { point: p.pos.clone(), dir: _d.clone(), source: 'bot' });
+            const canHitOpp = isPol
+              ? (opp.T.isLazaro || opp.T.isRioter || opp.T.isProtester)
+              : isLaz
+                ? opp.T.isPolice
+                : opp.T.isPolice;
+            if (!canHitOpp) continue;
+            const hitR = 0.95 * (opp.T.scale || 1);
+            if (opp.center.distanceToSquared(p.pos) < hitR * hitR) {
+              if (p.blast) this._burst(p, p.pos);
+              else mgr.damage(opp, p.dmg * (isPol && opp.T.isLazaro ? 1.35 : 1), { point: p.pos.clone(), dir: _d.clone(), source: 'bot' });
               consumed = true;
               break;
             }
@@ -91,8 +117,8 @@ export class Projectiles {
     }
     list.length = n;
     for (let i = 0; i < n; i++) {
-      const p = list[i]; const sp = p.vel.length(); _v.copy(p.vel).divideScalar(sp); _q.setFromUnitVectors(_up, _v);
-      _s.set(p.thick, p.blast ? p.thick : clamp(sp * 0.02, 0.35, 0.9), p.thick); _m.compose(p.pos, _q, _s); this.mesh.setMatrixAt(i, _m);
+      const p = list[i]; const sp = p.vel.length(); _v.copy(p.vel).divideScalar(Math.max(0.01, sp)); _q.setFromUnitVectors(_up, _v);
+      _s.set(p.thick, p.blast ? p.thick * 1.4 : clamp(sp * 0.02, 0.35, 0.95), p.thick); _m.compose(p.pos, _q, _s); this.mesh.setMatrixAt(i, _m);
       const c = this.mesh.instanceColor.array; c[i * 3] = p.ink; c[i * 3 + 1] = 1; c[i * 3 + 2] = 0;
     }
     this.mesh.count = n; this.mesh.instanceMatrix.needsUpdate = true; this.mesh.instanceColor.needsUpdate = true;

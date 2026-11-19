@@ -1,0 +1,26 @@
+[package]
+name = "fatal-error-tauri"
+version = "1.4.0"
+description = "Fatal Error — Tauri 2.0 Rust Desktop Backend & P2P LAN/Swarm Bridge"
+authors = ["jotasrn"]
+license = "MIT"
+repository = "https://github.com/jotasrn/Fatal-Error"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros"] }
+sha2 = "0.10"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
+

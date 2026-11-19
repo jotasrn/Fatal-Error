@@ -63,6 +63,10 @@ class Sfx {
   // another player's gun, heard from where they stand: a bit hotter than a bot's so it cuts through
   remoteShot(kind, pos) {
     if (kind === 'bazooka') { this.bazookaFire(pos); }
+    else if (kind === 'requiem') { this.requiemFire(); }
+    else if (kind === 'deagle') { this.deagleFire(); }
+    else if (kind === 'punisher') { this.punisherFire(); }
+    else if (kind === 'pistol9mm') { this.pistol9mmFire(); }
     else if (kind === 'smg') { this.smgFire(); }
     else if (kind === 'laser') { this.laserFire(); }
     else if (kind === 'shotgun') { this.noise({ dur: 0.32, gain: 1.0, type: 'lowpass', freq: 1600, freqEnd: 150, pos }); this.tone({ freq: 95, freqEnd: 30, dur: 0.26, gain: 0.7, type: 'triangle', pos }); }
@@ -175,6 +179,28 @@ class Sfx {
   revolver() {
     this.noise({ dur: 0.22, gain: 0.85, type: 'bandpass', freq: 900, freqEnd: 180, q: 0.6 }); this.noise({ dur: 0.05, gain: 0.6, type: 'highpass', freq: 3000 });
     this.tone({ freq: 200, freqEnd: 35, dur: 0.22, gain: 0.7, type: 'sawtooth' }); this.tone({ freq: 2600, freqEnd: 900, dur: 0.12, gain: 0.12, type: 'sine' });
+  }
+  pistol9mmFire() {
+    this.noise({ dur: 0.13, gain: 0.72, type: 'bandpass', freq: 1750, freqEnd: 340, q: 0.8 });
+    this.noise({ dur: 0.04, gain: 0.45, type: 'highpass', freq: 3400 });
+    this.tone({ freq: 290, freqEnd: 75, dur: 0.11, gain: 0.48, type: 'triangle' });
+  }
+  punisherFire() {
+    this.noise({ dur: 0.16, gain: 0.8, type: 'bandpass', freq: 2100, freqEnd: 380, q: 0.9 });
+    this.noise({ dur: 0.05, gain: 0.55, type: 'highpass', freq: 4200 });
+    this.tone({ freq: 420, freqEnd: 95, dur: 0.13, gain: 0.52, type: 'sawtooth' });
+    this.tone({ freq: 3100, freqEnd: 1200, dur: 0.09, gain: 0.14, type: 'sine' });
+  }
+  deagleFire() {
+    this.noise({ dur: 0.28, gain: 0.92, type: 'bandpass', freq: 820, freqEnd: 130, q: 0.55 });
+    this.noise({ dur: 0.06, gain: 0.65, type: 'highpass', freq: 2900 });
+    this.tone({ freq: 175, freqEnd: 32, dur: 0.26, gain: 0.78, type: 'sawtooth' });
+  }
+  requiemFire() {
+    this.noise({ dur: 0.48, gain: 1.0, type: 'lowpass', freq: 1400, freqEnd: 75 });
+    this.noise({ dur: 0.09, gain: 0.8, type: 'highpass', freq: 3200 });
+    this.tone({ freq: 155, freqEnd: 26, dur: 0.42, gain: 0.92, type: 'sawtooth' });
+    this.tone({ freq: 2400, freqEnd: 520, dur: 0.28, gain: 0.22, type: 'triangle', delay: 0.02 });
   }
   sniperFire() {
     this.noise({ dur: 0.45, gain: 0.95, type: 'bandpass', freq: 1400, freqEnd: 90, q: 0.5 });

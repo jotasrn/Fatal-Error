@@ -77,34 +77,50 @@ export class HUD {
           <div class="bm-sub">Compre armas e blindagens com o dinheiro acumulado de seus abates</div>
           <div class="bm-columns">
             <div class="bm-col">
-              <div class="bm-col-title">Armas de Fogo</div>
+              <div class="bm-col-title">Pistolas & Magnum (Resident Evil)</div>
+              <div class="bm-card" data-buy="punisher">
+                <div class="bm-c-top"><span class="bm-c-name">Punisher Five-SeveN (Slot 3)</span><span class="bm-c-price">$500</span></div>
+                <div class="bm-c-desc">20 tiros perfurantes · Atravessa escudos e até 3 inimigos em linha</div>
+                <button type="button" class="bm-action">Comprar</button>
+              </div>
+              <div class="bm-card" data-buy="deagle">
+                <div class="bm-c-top"><span class="bm-c-name">Desert Eagle .50 (Slot 4)</span><span class="bm-c-price">$700</span></div>
+                <div class="bm-c-desc">Pistola pesada .50 AE · Impacto brutal e alto poder de parada</div>
+                <button type="button" class="bm-action">Comprar</button>
+              </div>
+              <div class="bm-card" data-buy="requiem">
+                <div class="bm-c-top"><span class="bm-c-name">Requiem .500 Magnum (Slot 5)</span><span class="bm-c-price">$1600</span></div>
+                <div class="bm-c-desc">Canhão Magnum de Resident Evil · Destrói blindagens de Titãs, escudos e atravessa 4 alvos</div>
+                <button type="button" class="bm-action">Comprar</button>
+              </div>
+              <div class="bm-col-title" style="margin-top:8px;">Armas de Fogo Pesadas</div>
               <div class="bm-card" data-buy="shotgun">
-                <div class="bm-c-top"><span class="bm-c-name">Escopeta (Slot 2)</span><span class="bm-c-price">$600</span></div>
+                <div class="bm-c-top"><span class="bm-c-name">Escopeta (Slot 6)</span><span class="bm-c-price">$600</span></div>
                 <div class="bm-c-desc">10 projéteis de chumbo · Devastadora a curta distância</div>
                 <button type="button" class="bm-action">Comprar</button>
               </div>
               <div class="bm-card" data-buy="smg">
-                <div class="bm-c-top"><span class="bm-c-name">Submetralhadora SMG (Slot 3)</span><span class="bm-c-price">$750</span></div>
+                <div class="bm-c-top"><span class="bm-c-name">Submetralhadora SMG (Slot 7)</span><span class="bm-c-price">$750</span></div>
                 <div class="bm-c-desc">Cadência insana de 18 tiros/s · 45 balas · Rápida em corrida</div>
                 <button type="button" class="bm-action">Comprar</button>
               </div>
               <div class="bm-card" data-buy="rifle">
-                <div class="bm-c-top"><span class="bm-c-name">Rifle de Assalto (Slot 4)</span><span class="bm-c-price">$900</span></div>
+                <div class="bm-c-top"><span class="bm-c-name">Rifle de Assalto (Slot 8)</span><span class="bm-c-price">$900</span></div>
                 <div class="bm-c-desc">Disparo totalmente automático · 35 balas · Mira ágil</div>
                 <button type="button" class="bm-action">Comprar</button>
               </div>
               <div class="bm-card" data-buy="sniper">
-                <div class="bm-c-top"><span class="bm-c-name">Sniper (Slot 5)</span><span class="bm-c-price">$1200</span></div>
+                <div class="bm-c-top"><span class="bm-c-name">Sniper (Slot 9)</span><span class="bm-c-price">$1200</span></div>
                 <div class="bm-c-desc">Mira telescópica · Um tiro, uma eliminação garantida</div>
                 <button type="button" class="bm-action">Comprar</button>
               </div>
               <div class="bm-card" data-buy="laser">
-                <div class="bm-c-top"><span class="bm-c-name">Fuzil de Plasma Laser (Slot 6)</span><span class="bm-c-price">$1500</span></div>
+                <div class="bm-c-top"><span class="bm-c-name">Fuzil de Plasma Laser (Slot 0)</span><span class="bm-c-price">$1500</span></div>
                 <div class="bm-c-desc">Feixe contínuo de energia de 50 cargas · Precisão laser cirúrgica</div>
                 <button type="button" class="bm-action">Comprar</button>
               </div>
               <div class="bm-card" data-buy="bazooka">
-                <div class="bm-c-top"><span class="bm-c-name">Bazuca (Slot 7)</span><span class="bm-c-price">$1800</span></div>
+                <div class="bm-c-top"><span class="bm-c-name">Bazuca (Slot -)</span><span class="bm-c-price">$1800</span></div>
                 <div class="bm-c-desc">Foguetes de alto impacto · Explosão em área e Rocket Jump</div>
                 <button type="button" class="bm-action">Comprar</button>
               </div>
@@ -255,10 +271,10 @@ export class HUD {
         const k = card.dataset.buy;
         const btn = card.querySelector('.bm-action');
         if (!btn) return;
-        if (k === 'shotgun' && player.weapons[1] && player.weapons[1].owned) btn.textContent = 'Munição ($600)';
-        else if (k === 'rifle' && player.weapons[2] && player.weapons[2].owned) btn.textContent = 'Munição ($900)';
-        else if (k === 'sniper' && player.weapons[3] && player.weapons[3].owned) btn.textContent = 'Munição ($1200)';
-        else if (k === 'bazooka' && player.weapons[4] && player.weapons[4].owned) btn.textContent = 'Foguetes ($1800)';
+        const w = player.weapons.find((x) => x.kind === k);
+        const priceEl = card.querySelector('.bm-c-price');
+        const pTxt = priceEl ? priceEl.textContent : '';
+        if (w && w.owned) btn.textContent = `Munição (${pTxt})`;
         else if (k === 'armor_heavy' && player.armor >= 100) btn.textContent = 'Colete Máximo';
         else btn.textContent = 'Comprar';
       });

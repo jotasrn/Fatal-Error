@@ -1,5 +1,6 @@
 // Axis-aligned box world: static colliders, spatial hash, swept body movement with step-up, raycasts.
 import * as THREE from 'three';
+import { FlatBoxStore } from './wasm/core.js';
 
 const EPS = 1e-4;
 const AX = ['x', 'y', 'z'];
@@ -8,15 +9,16 @@ const _min = new THREE.Vector3(), _max = new THREE.Vector3(), _out = [];
 export class World {
   constructor(cell = 8) {
     this.boxes = []; this.cell = cell; this.grid = new Map(); this._qid = 0;
+    this.flat = new FlatBoxStore(4096);
     this.bounds = { min: new THREE.Vector3(-60, -20, -60), max: new THREE.Vector3(60, 80, 60) };
   }
   // wipe the world so a different map can be built into the same instance
-  clear() { this.boxes.length = 0; this.grid.clear(); this._qid = 0; }
+  clear() { this.boxes.length = 0; this.grid.clear(); this.flat.clear(); this._qid = 0; }
   addBox(min, max, data = {}) {
-    const b = { min: { x: min.x, y: min.y, z: min.z }, max: { x: max.x, y: max.y, z: max.z }, data, id: this.boxes.length, _q: -1 };
+    const b = { min: { x: min.x, y: min.y, z: min.z }, max: { x: max.x, y: max.y, z: max.z }, data, id: this.boxes.length, _q: -1, _flatIdx: 0 };
     this.boxes.push(b); return b;
   }
-  finalize() { this.grid.clear(); for (const b of this.boxes) this._insert(b); }
+  finalize() { this.grid.clear(); this.flat.rebuildFrom(this.boxes); for (const b of this.boxes) this._insert(b); }
   removeBox(b) { const i = this.boxes.indexOf(b); if (i < 0) return; this.boxes.splice(i, 1); this.finalize(); }
   _key(ix, iz) { return (ix + 4096) * 8192 + (iz + 4096); }
   _insert(b) {

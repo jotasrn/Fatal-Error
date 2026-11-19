@@ -1,31 +1,47 @@
-// The enemy manager: spawning, AI (grunts, rushers, snipers, bombers, flyers, shield bearers and
-// three bosses), damage/death with detachable gib limbs, raycast hit tests, and the network mirror
-// that lets a client render enemies the host owns.
+// The enemy manager: spawning, tactical squad AI (grunts, rushers, stalkers, mortarman, engineers,
+// cavalry, battle tanks, convoys, elite variants, and 4 authentic multi-phase bosses: Lázaro, Titã Eren,
+// Titã Blindado, and O Homem-Bomba), damage/death with detachable gib limbs, raycast hit tests,
+// real environmental destruction hooks, and the network mirror.
 import * as THREE from 'three';
-import { makeInkMaterial, setFill, INK } from '../render.js';
+import { makeInkMaterial, setFill, setInk, INK } from '../render.js';
 import { makeBody, SEE_THROUGH } from '../physics.js';
-import { rand, randInt, clamp, damp, wrapAngle, angleLerp, alignYAxis, TAU } from '../util.js';
+import { rand, randInt, choose, clamp, damp, wrapAngle, angleLerp, alignYAxis, TAU } from '../util.js';
 import { audio } from '../audio.js';
 import { TYPES, STATE_CODES, STATE_NAMES } from './types.js';
 import { progression } from '../game/progression.js';
-const TYPE_KEYS = Object.keys(TYPES);
-// danos que não são culpa de um jogador (outro bot, queda, trânsito, desastre de evento): não revoltam a multidão nem chamam a polícia
-const COLLATERAL = new Set(['bot', 'fall', 'car', 'event']);
-import { buildHumanoid, buildBomber, buildFlyer, buildQuadruped, buildCached, cloneModel } from './models.js';
+import { buildHumanoid, buildBomber, buildFlyer, buildQuadruped, buildTitan, buildCavalry, buildTank, buildCached, cloneModel } from './models.js';
 import { Projectiles } from './projectiles.js';
-const modelBuilder = (T) => (m, s) => T.model === 'bomber' ? buildBomber(m, s, T) : T.model === 'blob' ? buildBomber(m, s, T, true) : T.model === 'flyer' ? buildFlyer(m, s, T) : (T.model === 'quadruped' || T.model === 'spider') ? buildQuadruped(m, s, T) : buildHumanoid(m, s, T);
 
-const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _d = new THREE.Vector3(), _q = new THREE.Quaternion(), _m = new THREE.Matrix4(), _s = new THREE.Vector3();
+const TYPE_KEYS = Object.keys(TYPES);
+const COLLATERAL = new Set(['bot', 'fall', 'car', 'event']);
+
+const modelBuilder = (T) => (m, s) => {
+  if (T.model === 'bomber') return buildBomber(m, s, T);
+  if (T.model === 'blob') return buildBomber(m, s, T, true);
+  if (T.model === 'flyer') return buildFlyer(m, s, T);
+  if (T.model === 'quadruped' || T.model === 'spider') return buildQuadruped(m, s, T);
+  if (T.model === 'titan' || T.model === 'titan_armored') return buildTitan(m, s, T);
+  if (T.model === 'cavalry') return buildCavalry(m, s, T);
+  if (T.model === 'tank' || T.model === 'convoy') return buildTank(m, s, T);
+  return buildHumanoid(m, s, T);
+};
+
+const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _d = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0), _eye = new THREE.Vector3(), _goal = new THREE.Vector3();
 const nxOf = (dx, d) => dx / (d || 1), nzOf = (dz, d) => dz / (d || 1);
+
+const ELITE_KINDS = [
+  { key: 'berserker', prefix: '🔴 Frenético', hpMul: 1.45, spdMul: 1.4, dmgMul: 1.3, ink: INK.RED },
+  { key: 'shielded', prefix: '🔵 Blindado', hpMul: 1.5, spdMul: 1.1, dmgMul: 1.2, ink: INK.BLUE },
+  { key: 'vampiric', prefix: '🟣 Sanguinário', hpMul: 1.5, spdMul: 1.25, dmgMul: 1.35, ink: INK.PINK },
+  { key: 'commander', prefix: '🟡 Comandante', hpMul: 1.85, spdMul: 1.18, dmgMul: 1.3, ink: INK.ORANGE },
+];
 
 export class EnemyManager {
   constructor(ctx) {
     this.ctx = ctx; this.enemies = []; this.alive = 0; this.projectiles = new Projectiles(this); this.onKill = null; this.onBoss = null; this._sepT = 0; this._slot = 0; this.mods = { speed: 1, damage: 1 };
-    // mirror mode: this peer is a client; the host owns AI, physics and health, we only render
     this.mirror = false; this.nextId = 1; this.onClientHit = null; this.onSpawn = null; this.byId = new Map();
   }
-  // Everyone an enemy may go after. Solo play is just the local player.
   targets() { return this.ctx.targets ? this.ctx.targets() : [this.ctx.player]; }
   get waveAlive() {
     let c = 0;
@@ -49,10 +65,23 @@ export class EnemyManager {
   _pickTarget(e, dt) {
     e.retargetT = (e.retargetT ?? 0) - dt;
     if (e.target && e.target.alive && e.retargetT > 0) return e.target;
-    e.retargetT = 0.4;
+    e.retargetT = 0.35;
 
-    // 8 de Janeiro: o invasor ataca quem estiver perto (jogador, polícia, civis) e, sem ninguém por perto,
-    // vai quebrar vidraças e gradis da Praça dos Três Poderes
+    // Quando o Boss Lázaro está vivo, TODA A POLÍCIA foca nele e ajuda os jogadores a caçá-lo!
+    if (e.T.isPolice) {
+      let lazaroBoss = null, bestLD = Infinity;
+      for (const other of this.enemies) {
+        if (other.alive && other.T.isLazaro) {
+          const d = other.body.pos.distanceToSquared(e.body.pos);
+          if (d < bestLD) { bestLD = d; lazaroBoss = other; }
+        }
+      }
+      if (lazaroBoss) {
+        e.target = lazaroBoss;
+        return lazaroBoss;
+      }
+    }
+
     if (e.T.isRioter) {
       let best = null, bd = 32 * 32; const p0 = e.body.pos;
       for (const t of this.targets()) { if (!t.alive) continue; const d = t.body.pos.distanceToSquared(p0); if (d < bd) { bd = d; best = t; } }
@@ -65,14 +94,12 @@ export class EnemyManager {
       e.target = best; return best;
     }
 
-    // Se é manifestante e a multidão se revoltou contra os jogadores, persegue os players!
     if (e.T.isProtester && this.ctx.protestersRiot) {
       let best = null, bd = Infinity;
       for (const t of this.targets()) { if (!t.alive) continue; const d = t.body.pos.distanceToSquared(e.body.pos); if (d < bd) { bd = d; best = t; } }
       e.target = best; return best;
     }
 
-    // Se é manifestante normal (sem revolta), foca SOMENTE na polícia (nunca ataca jogadores inocentes!)
     if (e.T.isProtester) {
       let bestPol = null, bd = Infinity;
       for (const other of this.enemies) {
@@ -84,12 +111,12 @@ export class EnemyManager {
       return bestPol;
     }
 
-    // Se é polícia e o jogador não está procurado nem atacou a polícia, foca SOMENTE nos manifestantes (nunca ataca jogadores inocentes!)
     if (e.T.isPolice && !this.ctx.playerWanted) {
       let bestProt = null, bd = Infinity;
       for (const other of this.enemies) {
-        if (!other.alive || !(other.T.isProtester || other.T.isRioter)) continue;
-        const d = other.body.pos.distanceToSquared(e.body.pos) * (other.T.isRioter ? 0.5 : 1); // invasores primeiro
+        if (!other.alive || !(other.T.isProtester || other.T.isRioter || other.T.isLazaro)) continue;
+        const w = other.T.isLazaro ? 0.1 : other.T.isRioter ? 0.5 : 1;
+        const d = other.body.pos.distanceToSquared(e.body.pos) * w;
         if (d < bd) { bd = d; bestProt = other; }
       }
       e.target = bestProt;
@@ -106,20 +133,63 @@ export class EnemyManager {
     this.enemies.length = 0; this.alive = 0; this.byId.clear(); this.projectiles.clear();
     if (this.ctx.batcher) this.ctx.batcher.clear();
   }
-  // build every type's model templates up front (during loading) so no spawn ever pays for it
-  prewarm() { for (const type in TYPES) for (let i = 0; i < 3; i++) buildCached(type, TYPES[type], modelBuilder(TYPES[type])); }
-  spawn(type, pos, id = null) {
-    const T = TYPES[type] || TYPES.grunt; const ink = T.ink ?? INK.RED;
+  prewarm() { for (const type in TYPES) for (let i = 0; i < 2; i++) buildCached(type, TYPES[type], modelBuilder(TYPES[type])); }
+  spawn(type, pos, id = null, opts = null) {
+    const baseT = TYPES[type] || TYPES.grunt;
+    const wave = (this.ctx.game && this.ctx.game.wave) || 1;
+    const isCombatBot = !baseT.isCivilian && !baseT.isProtester && !baseT.isPolice && !baseT.isPet && !baseT.isRioter && !baseT.boss;
+
+    // Progressive wave buff scaling + Elite variant chance
+    let T = baseT;
+    let eliteObj = null;
+    if (!this.mirror && isCombatBot) {
+      const waveHpMul = 1 + Math.max(0, wave - 1) * 0.11;
+      const waveSpdMul = 1 + Math.min(0.45, Math.max(0, wave - 1) * 0.032);
+      const waveDmgMul = 1 + Math.min(0.85, Math.max(0, wave - 1) * 0.06);
+      const eliteChance = opts && opts.forceElite ? 1 : (wave >= 2 && !baseT.isTank ? clamp(0.10 + (wave - 2) * 0.042, 0.10, 0.48) : 0);
+      if (Math.random() < eliteChance) {
+        eliteObj = choose(ELITE_KINDS);
+      }
+      const eHp = eliteObj ? eliteObj.hpMul : 1;
+      const eSpd = eliteObj ? eliteObj.spdMul : 1;
+      const eDmg = eliteObj ? eliteObj.dmgMul : 1;
+      T = {
+        ...baseT,
+        hp: Math.round(baseT.hp * waveHpMul * eHp),
+        speed: +(baseT.speed * waveSpdMul * eSpd).toFixed(2),
+        dmg: +(baseT.dmg * waveDmgMul * eDmg).toFixed(1),
+        scale: +(baseT.scale * (eliteObj ? 1.12 : 1)).toFixed(2),
+        score: Math.round(baseT.score * (eliteObj ? 1.75 : 1)),
+        name: eliteObj ? `${eliteObj.prefix} · ${baseT.name}` : baseT.name,
+        ink: eliteObj ? eliteObj.ink : baseT.ink,
+      };
+    }
+
+    const ink = T.ink ?? INK.RED;
     const mat = makeInkMaterial({ ink, shadeScale: 0, shadeBias: 1 });
     const solid = makeInkMaterial({ ink: T.ink === INK.BLACK ? INK.RED : INK.BLACK, fill: true, side: THREE.DoubleSide });
-    const tpl = buildCached(type, T, modelBuilder(T));
-    const model = cloneModel(tpl, mat, solid); // baked (~50 meshes -> ~17 draw calls) and geometry shared between bots
-    const hw = T.flying ? 0.45 : Math.min(0.33 * T.scale, 0.9);
-    const e = { type, T, mat, root: model.root, parts: model.parts, J: model.J, tip: model.tip, face: model.face, hit: model.hit, hp: T.hp, maxHp: T.hp, alive: true, state: 'spawn', t: 0,
-      body: makeBody(pos, hw, (T.flying ? 0.8 : 1.85) * T.scale, T.boss ? 1.2 : 0.6), center: new THREE.Vector3(), yaw: rand(0, TAU), yawT: 0, phase: rand(0, TAU), walk: 0, aimAmt: 0, flinch: 0, flashT: 0, flashOn: false,
-      path: null, pathI: 0, pathT: 0, pathGoal: null, losT: 0, los: false, cool: rand(0.6, 1.4), burstLeft: 0, burstT: 0, aimT: 0, attackT: 0, attackHit: false, stunDur: 0, stuckT: 0, strafeDir: Math.random() < 0.5 ? 1 : -1, strafeT: rand(1, 2), deadT: 0,
+    const tpl = buildCached(type, baseT, modelBuilder(baseT));
+    const model = cloneModel(tpl, mat, solid);
+    const hw = T.flying ? 0.45 : T.isTank ? 1.35 : Math.min(0.35 * T.scale, 1.25);
+    const role = (T.weapon === 'blade' || T.isStalker || type === 'commando') ? 'flanker' : (T.weapon === 'shotgun' || T.shield || T.isTank) ? 'suppressor' : (this._slot % 3 === 0 ? 'flanker' : 'tactical');
+
+    const e = {
+      type, T, mat, root: model.root, parts: model.parts, J: model.J, tip: model.tip, face: model.face, hit: model.hit,
+      hp: T.hp, maxHp: T.hp, alive: true, state: 'spawn', t: 0,
+      elite: eliteObj ? eliteObj.key : null,
+      eliteShield: eliteObj && eliteObj.key === 'shielded' ? Math.round(T.hp * 0.55) : 0,
+      maxEliteShield: eliteObj && eliteObj.key === 'shielded' ? Math.round(T.hp * 0.55) : 0,
+      shieldRegenT: 0,
+      role,
+      auraSpeed: 1, auraDmg: 1,
+      grappleCd: rand(1.5, 3.5), nadeCd: rand(2.5, 5.5), droneCd: rand(3.5, 6.0),
+      stealthT: 0, bossPhase: 1,
+      body: makeBody(pos, hw, (T.flying ? 0.8 : T.isTank ? 1.45 : 1.85) * T.scale, T.boss || T.isTank || T.model === 'cavalry' ? 1.25 : 0.65),
+      center: new THREE.Vector3(), yaw: rand(0, TAU), yawT: 0, phase: rand(0, TAU), walk: 0, aimAmt: 0, flinch: 0, flashT: 0, flashOn: false,
+      path: null, pathI: 0, pathT: 0, pathGoal: null, losT: 0, los: false, cool: rand(0.5, 1.2), burstLeft: 0, burstT: 0, aimT: 0, attackT: 0, attackHit: false, stunDur: 0, stuckT: 0, strafeDir: Math.random() < 0.5 ? 1 : -1, strafeT: rand(1, 2), deadT: 0,
       appAng: (this._slot++) * 2.39996, appR: 0, appT: rand(0, 2), keepMul: rand(0.75, 1.35), backoffT: 0,
-      hitSpheres: model.hit.map(() => new THREE.Vector3()), fuseT: -1, shieldHp: T.shield ? 2 : 0, flyState: 'orbit', flyT: rand(0, 3), orbitDir: Math.random() < 0.5 ? 1 : -1, bossAtk: null, rootDetached: false };
+      hitSpheres: model.hit.map(() => new THREE.Vector3()), fuseT: -1, shieldHp: T.shield ? 3 : 0, flyState: 'orbit', flyT: rand(0, 3), orbitDir: Math.random() < 0.5 ? 1 : -1, bossAtk: null, rootDetached: false,
+    };
     e.id = id ?? this.nextId++; this.byId.set(e.id, e);
     e.takeDamage = (dmg, from) => {
       this.damage(e, dmg, { source: 'bot', dir: _v.subVectors(e.center, from).normalize(), point: e.center.clone() });
@@ -127,11 +197,41 @@ export class EnemyManager {
     e.body.alwaysStep = true; if (T.flying) e.body.noSnap = true; e.root.position.copy(pos); e.root.scale.setScalar(0.001);
     if (T.isPet) progression.applyToOrelha(e);
     this.ctx.scene.add(e.root); this.enemies.push(e); this.alive++;
-    if (this.ctx.batcher) this.ctx.batcher.register(e); // drawn through shared instanced meshes
+    if (this.ctx.batcher) this.ctx.batcher.register(e);
     if (this.onSpawn && !this.mirror) this.onSpawn(e);
     this.ctx.effects.strokeBurst(pos.clone().add(_v.set(0, 1, 0)), T.ink ?? INK.RED, T.boss ? 60 : 26, T.boss ? 10 : 6, { life: 0.5, size: 0.03 }); audio.spawn(pos);
-    if (T.boss) { audio.bossRoar(pos); if (this.onBoss) this.onBoss(e); }
+    if (T.boss) {
+      audio.bossRoar(pos);
+      if (this.onBoss) this.onBoss(e);
+      // Quando o Boss Lázaro surge, a Força Policial é enviada imediatamente para ajudar os jogadores a caçá-lo!
+      if (T.isLazaro && !this.mirror) {
+        this._spawnPoliceTaskForceForLazaro(e);
+      }
+    }
     return e;
+  }
+  _spawnPoliceTaskForceForLazaro(lazaro) {
+    const ctx = this.ctx, nav = ctx.nav;
+    const polAlive = this.enemies.filter((x) => x.alive && x.T.isPolice).length;
+    if (polAlive >= 7) return;
+    const base = lazaro.body.pos;
+    const kinds = ['police_tactical', 'police_chief', 'police', 'police_tactical'];
+    for (let i = 0; i < kinds.length; i++) {
+      const a = (i / kinds.length) * TAU + rand(-0.3, 0.3);
+      const r = 18 + rand(0, 10);
+      const p = new THREE.Vector3(base.x + Math.cos(a) * r, base.y + 0.3, base.z + Math.sin(a) * r);
+      if (nav) {
+        const nid = nav.nearestNode(p, 5, 4);
+        if (nid >= 0) { const nd = nav.nodes[nid]; p.set(nd.x, nd.y + 0.05, nd.z); }
+      }
+      const pol = this.spawn(kinds[i], p);
+      pol.state = 'hunt';
+      pol.target = lazaro;
+    }
+    audio.siren(base);
+    if (ctx.hud) {
+      ctx.hud.message('🚨 FORÇA-TAREFA CONTRA LÁZARO!', 'A Polícia Militar, GSI e BOPE cercaram a área e estão ajudando você a caçar Lázaro!', 4.5);
+    }
   }
   nearestVisible(from, forward, cosHalf, maxDist) {
     let best = null, bestD = maxDist;
@@ -140,8 +240,9 @@ export class EnemyManager {
   }
   raycast(o, d, maxDist, ignore = null) {
     let best = null;
+    const isIgnored = (e) => !ignore ? false : (ignore instanceof Set ? ignore.has(e) : e === ignore);
     for (const e of this.enemies) {
-      if (!e.alive || e === ignore || e.T.isPet) continue;
+      if (!e.alive || isIgnored(e) || e.T.isPet) continue;
       for (let i = 0; i < e.hit.length; i++) {
         const c = e.hitSpheres[i], r = e.hit[i][1] * e.T.scale;
         _v.subVectors(c, o); const tca = _v.dot(d); if (tca < 0 || tca > maxDist) continue;
@@ -154,14 +255,14 @@ export class EnemyManager {
   }
   inArc(pos, dir, range, cosHalf) {
     const out = [];
-    for (const e of this.enemies) { if (!e.alive || e.T.isPet) continue; _v.subVectors(e.center, pos); const d = _v.length() - (e.T.boss ? 1.2 : 0); if (d > range + 0.3) continue; if (d > 0.3 && _v.normalize().dot(dir) < cosHalf) continue; out.push({ enemy: e, dist: d }); }
+    for (const e of this.enemies) { if (!e.alive || e.T.isPet) continue; _v.subVectors(e.center, pos); const d = _v.length() - (e.T.boss || e.T.isTank ? 1.4 : 0); if (d > range + 0.3) continue; if (d > 0.3 && _v.normalize().dot(dir) < cosHalf) continue; out.push({ enemy: e, dist: d }); }
     return out.sort((a, b) => a.dist - b.dist);
   }
   blastEnemies(point, radius, dmg, except) {
-    for (const e of this.enemies) { if (!e.alive || e === except || e.T.isPet) continue; const d = e.center.distanceTo(point); if (d > radius) continue; _d.subVectors(e.center, point).normalize(); this.damage(e, dmg * (1 - d / radius * 0.6), { point: e.center.clone(), dir: _d.clone(), part: 'torso', source: 'blast', crit: false }); }
+    for (const e of this.enemies) { if (!e.alive || e === except || e.T.isPet) continue; const d = e.center.distanceTo(point); if (d > radius) continue; _d.subVectors(e.center, point).normalize(); this.damage(e, dmg * (1 - d / radius * 0.6), { point: e.center.clone(), dir: _d.clone(), part: 'torso', source: 'blast', crit: false, armorBreak: true }); }
   }
   yank(e, target) {
-    if (!e.alive) return; if (e.T.boss) { e.flinch = 1; return; }
+    if (!e.alive) return; if (e.T.boss || e.T.isTank) { e.flinch = 1; return; }
     e.state = 'stunned'; e.t = 0; e.stunDur = 1.3; e.path = null; e.flyState = 'stunned';
     _d.subVectors(target, e.body.pos); const dist = _d.length(); _d.divideScalar(Math.max(dist, 0.01));
     e.body.vel.copy(_d).multiplyScalar(clamp(dist * 1.6, 10, 26)); e.body.vel.y = clamp(dist * 0.5, 4, 9); e.body.onGround = false;
@@ -170,20 +271,50 @@ export class EnemyManager {
   damage(e, amount, info) {
     if (!e.alive || e.T.invulnerable) return;
     if (this.mirror) {
-      // show the hit right away, let the host decide what it did
       if (info.part !== 'shield') { e.flinch = 1; e.flashT = 0.07; if (!e.flashOn) { setFill(e.mat, true); e.flashOn = true; } this.ctx.effects.blood(info.point || e.center, info.dir || _up, clamp(0.5 + amount / 70, 0.5, 2.2), { ink: e.T.ink === INK.BLACK ? INK.BLACK : INK.RED }); this.ctx.hud.hitmarker(false, info.crit); }
       if (this.onClientHit) this.onClientHit(e, amount, info);
       return;
     }
     if (info.part === 'shield') {
       this.ctx.effects.sparks(info.point, info.dir ? info.dir.clone().negate() : _up, INK.ORANGE, 8, 8); audio.shieldHit(info.point);
-      if (info.source === 'katana' || info.source === 'blast') { e.shieldHp--; if (e.shieldHp <= 0) this._breakShield(e); }
-      this.ctx.hud.hitmarker(false, false); return;
+      if (info.source === 'katana' || info.source === 'blast' || info.armorBreak) {
+        e.shieldHp -= info.armorBreak ? 2 : 1;
+        if (e.shieldHp <= 0) this._breakShield(e);
+      }
+      this.ctx.hud.hitmarker(false, false);
+      if (!info.armorBreak) return;
+      amount *= 0.65;
     }
+    // Blindagem energética de inimigos Elite Blindados
+    if (e.eliteShield > 0) {
+      e.shieldRegenT = 4.0;
+      const sMult = info.armorBreak || info.crit || info.source === 'laser' || info.source === 'blast' ? 2.2 : 1.0;
+      const absorb = Math.min(e.eliteShield, amount * sMult);
+      e.eliteShield -= absorb;
+      this.ctx.effects.sparks(info.point || e.center, info.dir ? info.dir.clone().negate() : _up, INK.BLUE, 8, 7);
+      audio.shieldHit(info.point || e.center);
+      if (e.eliteShield > 0) {
+        this.ctx.hud.hitmarker(false, false);
+        return;
+      }
+      this.ctx.effects.strokeBurst(e.center, INK.BLUE, 18, 7, { life: 0.35, size: 0.04 });
+    }
+    // Placas blindadas do Titã Blindado e Tanque de Guerra (reduzem dano de armas comuns no torso, exceto Requiem/Punisher/Sniper/Bazuca/Laser/Headshot)
+    if (e.T.armoredBody && !info.crit && !info.armorBreak && info.source !== 'blast' && info.source !== 'focus' && !e.armorBroken) {
+      amount *= 0.42;
+      this.ctx.effects.sparks(info.point || e.center, info.dir ? info.dir.clone().negate() : _up, INK.ORANGE, 6, 6);
+      audio.shieldHit(info.point || e.center);
+    }
+
     amount *= this.mods.damage;
     e.hp -= amount; e.flinch = 1; e.flashT = 0.07; if (!e.flashOn) { setFill(e.mat, true); e.flashOn = true; }
 
-    // Reação de facção apenas quando atacado por um JOGADOR (nunca por dano colateral de outro bot ou queda):
+    // Lázaro usa bomba de fumaça e esquiva furtiva quando recebe rajada pesada
+    if (e.T.isLazaro && e.alive && e.hp > 0 && (e.stealthCd || 0) <= 0 && amount >= 45) {
+      e.stealthCd = 4.2;
+      this._triggerLazaroSmokeEscape(e);
+    }
+
     if (info && !COLLATERAL.has(info.source)) {
       const culprit = (info.by && this.ctx.remote && this.ctx.remote.get(info.by)) || this.ctx.player;
       if ((e.T.isProtester || e.T.isCivilian) && !this.ctx.protestersRiot) {
@@ -231,7 +362,17 @@ export class EnemyManager {
     const eff = this.ctx.effects, scene = this.ctx.scene; const inkC = e.T.ink === INK.BLACK ? INK.BLACK : INK.RED;
     if (e.face) { e.face.eyes.visible = false; e.face.xeyes.visible = true; }
     const dir = (info.dir || _d.set(0, 0.5, 0)).clone().normalize();
-    if (e.T.weapon === 'bomb') { this._explodeBomber(e, 0.8); if (this.onKill) this.onKill(e, info, true); return; }
+    if (e.T.weapon === 'bomb' || e.T.bossKind === 'bomber_boss') {
+      this._explodeBomber(e, e.T.bossKind === 'bomber_boss' ? 2.2 : 0.9);
+      if (e.T.boss && this.onBoss) this.onBoss(e);
+      if (this.onKill) this.onKill(e, info, true);
+      return;
+    }
+    if (e.T.isTank) {
+      eff.explosion(e.center, 5.5, INK.ORANGE);
+      audio.explosion(e.center);
+      if (this.ctx.destroyEnvironmentAt) this.ctx.destroyEnvironmentAt(e.body.pos, 5.0);
+    }
     audio.enemyDie(e.center);
     if (e.T.isCivilian && this.ctx.onCivilianKilled && info && !COLLATERAL.has(info.source)) {
       this.ctx.onCivilianKilled(e, info);
@@ -241,18 +382,18 @@ export class EnemyManager {
       eff.debris(e.root, e.root.position, dir.clone().multiplyScalar(4).add(_v.set(rand(-2, 2), 1, rand(-2, 2))), new THREE.Vector3(rand(-9, 9), rand(-9, 9), rand(-9, 9)), { radius: 0.5, blood: true, life: 8 });
       eff.blood(e.center, dir, 1); if (this.onKill) this.onKill(e, info, true); return;
     }
-    const over = -e.hp > e.maxHp * 0.35 || info.source === 'katana' || info.crit || info.source === 'deflect' || info.source === 'blast';
+    const over = -e.hp > e.maxHp * 0.35 || info.source === 'katana' || info.crit || info.source === 'deflect' || info.source === 'blast' || info.source === 'requiem';
     const detach = (obj, extraVel, radius) => { if (!obj || !obj.parent) return; obj.updateWorldMatrix(true, false); scene.attach(obj); _v.copy(dir).multiplyScalar(rand(3, 7)).add(extraVel); _v.y += rand(2, 5); eff.debris(obj, obj.position, _v, new THREE.Vector3(rand(-8, 8), rand(-8, 8), rand(-8, 8)), { radius, blood: true, life: rand(7, 10) }); };
     if (over) {
       audio.gib(e.center); const J = e.J;
       const tPart = e.parts.torso || e.parts.head || e.root;
       const hPart = e.parts.hips || e.parts.torso || e.root;
-      if (info.crit || ((info.source === 'katana' || info.source === 'focus') && Math.random() < 0.35)) { detach(J.headG, _v2.set(rand(-2, 2), 3, rand(-2, 2)), 0.25); eff.fountain(tPart.getWorldPosition(new THREE.Vector3()).add(_v2.set(0, 0.35, 0)), _up, 0.9, inkC); }
+      if (info.crit || ((info.source === 'katana' || info.source === 'focus' || info.source === 'requiem') && Math.random() < 0.45)) { detach(J.headG, _v2.set(rand(-2, 2), 3, rand(-2, 2)), 0.25); eff.fountain(tPart.getWorldPosition(new THREE.Vector3()).add(_v2.set(0, 0.35, 0)), _up, 0.9, inkC); }
       if (info.source === 'katana' || info.source === 'focus') {
         const r = Math.random();
         if (r < 0.4) detach(J.armR, _v2.set(rand(-3, 3), 2, rand(-3, 3)), 0.12); else if (r < 0.7) detach(J.armL, _v2.set(rand(-3, 3), 2, rand(-3, 3)), 0.12);
         else { detach(J.torso, _v2.set(rand(-2, 2), 2, rand(-2, 2)), 0.3); eff.fountain(hPart.getWorldPosition(new THREE.Vector3()), _up, 0.7, inkC); }
-      } else if (info.source === 'deflect' || info.source === 'blast' || -e.hp > e.maxHp * 0.6) {
+      } else if (info.source === 'deflect' || info.source === 'blast' || info.source === 'requiem' || -e.hp > e.maxHp * 0.6) {
         const limbs = [J.armL, J.armR, J.legL, J.legR, J.torso].filter(Boolean); const k = e.T.boss ? 5 : randInt(1, 2);
         for (let i = 0; i < k && limbs.length; i++) { const o = limbs.splice(randInt(0, limbs.length - 1), 1)[0]; detach(o, _v2.set(rand(-3, 3), 2, rand(-3, 3)), 0.15); }
       }
@@ -265,22 +406,55 @@ export class EnemyManager {
     if (this.onKill) this.onKill(e, info, over);
   }
   _explodeBomber(e, scale = 1) {
-    const T = e.T; const c = e.center.clone(); this.ctx.effects.explosion(c, T.blast * scale, INK.BLACK); audio.explosion(c);
-    for (const P of this.targets()) { const d = P.center.distanceTo(c); if (P.alive && d < T.blast * scale) { P.takeDamage(T.dmg * this.mods.damage * Math.sqrt(1 - d / (T.blast * scale)), c); P.knockback(_v.subVectors(P.center, c).normalize(), 7); } }
-    this.blastEnemies(c, T.blast * scale, 70, e);
+    const T = e.T; const c = e.center.clone();
+    const rad = (T.blast || 4.8) * scale;
+    this.ctx.effects.explosion(c, rad, INK.ORANGE); audio.explosion(c);
+    if (this.ctx.destroyEnvironmentAt) this.ctx.destroyEnvironmentAt(c, rad * 0.9);
+    for (const P of this.targets()) { const d = P.center.distanceTo(c); if (P.alive && d < rad) { P.takeDamage(T.dmg * this.mods.damage * Math.sqrt(1 - d / rad), c); P.knockback(_v.subVectors(P.center, c).normalize(), 8 * scale); } }
+    this.blastEnemies(c, rad, 85 * scale, e);
     if (e.alive) { e.alive = false; e.state = 'dead'; this.alive--; if (this.onKill) this.onKill(e, { source: 'blast', dir: _up.clone() }, true); }
     this.ctx.scene.remove(e.root); e.rootDetached = true; e.deadT = 99;
   }
-  eye(e, out) { return out.setFromMatrixPosition(e.parts.head.matrixWorld); }
+  eye(e, out) { return out.setFromMatrixPosition((e.parts.head || e.parts.torso || e.root).matrixWorld); }
   update(dt) {
     this._lodTick = ((this._lodTick || 0) + 1) % 3;
     if (this.mirror) { this._updateMirror(dt); return; }
-    this._pathsLeft = 4;
+    this._pathsLeft = 5;
     const ctx = this.ctx, world = ctx.world, lp = ctx.player.body.pos;
+
+    // Aura de Comandantes Elite: buffa velocidade e dano dos aliados num raio de 18m
+    const commanders = [];
     for (const e of this.enemies) {
-      this._cur = e; // lets the game loop drop a bot whose update throws instead of freezing every frame
+      if (e.alive && e.elite === 'commander') commanders.push(e);
+    }
+
+    for (const e of this.enemies) {
+      this._cur = e;
       e.t += dt;
       if (!e.alive) { this._updateDead(e, dt); continue; }
+
+      // Regeneração de escudo dos Elites Blindados
+      if (e.maxEliteShield > 0 && e.eliteShield < e.maxEliteShield) {
+        e.shieldRegenT -= dt;
+        if (e.shieldRegenT <= 0) e.eliteShield = Math.min(e.maxEliteShield, e.eliteShield + e.maxEliteShield * 0.25 * dt);
+      }
+
+      // Aplica buff de Comandante próximo
+      e.auraSpeed = 1; e.auraDmg = 1;
+      if (commanders.length && !e.T.isCivilian && !e.T.isPet && !e.T.isPolice) {
+        for (let i = 0; i < commanders.length; i++) {
+          const cmd = commanders[i];
+          if (cmd !== e && cmd.body.pos.distanceToSquared(e.body.pos) < 18 * 18) {
+            e.auraSpeed = 1.28; e.auraDmg = 1.3; break;
+          }
+        }
+      }
+      // Berserker fica mais rápido quanto menos vida tem
+      if (e.elite === 'berserker') {
+        const missing = 1 - clamp(e.hp / e.maxHp, 0, 1);
+        e.auraSpeed *= (1 + missing * 0.45);
+      }
+
       const target = this._pickTarget(e, dt);
       const peaceful = !target && (e.T.isPolice || e.T.isProtester);
       const P = target || ctx.player; const pp = P.body.pos, pc = P.center;
@@ -292,19 +466,15 @@ export class EnemyManager {
         if (e.t >= 0.6) { e.state = 'hunt'; e.root.scale.setScalar(e.T.scale); }
         continue;
       }
-      // event code (protests, police, civilians) sets state = 'hunt' right after spawn(): without this
-      // the figure stayed at the 0.001 spawn scale and walked around invisible
-      if (e.root.scale.x !== e.T.scale) e.root.scale.setScalar(e.T.scale);
+      if (e.root.scale.x !== e.T.scale && e.stealthT <= 0) e.root.scale.setScalar(e.T.scale);
       if (e.state === 'stunned' && e.laser) this._hideLaser(e);
       if (e.T.flying) { this._thinkFlyer(e, dt, pc, P); world.moveBody(e.body, dt); }
       else {
         if (e.state === 'stunned') { if (e.t > e.stunDur) e.state = 'hunt'; }
         else if (peaceful) { this._patrolPeaceful(e, dt); }
         else if (P.alive) {
-          // AI level of detail: a bot far from its target and out of its sight decides ~6-8x a second
-          // instead of every frame (movement and physics still run every frame, so it stays smooth)
           const fx = pp.x - e.body.pos.x, fz = pp.z - e.body.pos.z; e.thinkAcc = (e.thinkAcc || 0) + dt;
-          if (fx * fx + fz * fz > 60 * 60 && !e.los && !e.T.boss) { if (e.thinkAcc >= 0.16) { this._think(e, e.thinkAcc, pp, pc, P); e.thinkAcc = 0; } }
+          if (fx * fx + fz * fz > 65 * 65 && !e.los && !e.T.boss && !e.T.isTank) { if (e.thinkAcc >= 0.16) { this._think(e, e.thinkAcc, pp, pc, P); e.thinkAcc = 0; } }
           else { this._think(e, e.thinkAcc, pp, pc, P); e.thinkAcc = 0; }
         } else this._wander(e, dt);
         e.body.vel.y -= 24 * dt; world.moveBody(e.body, dt);
@@ -315,11 +485,10 @@ export class EnemyManager {
       }
       e.yaw = angleLerp(e.yaw, e.yawT, 1 - Math.exp(-10 * dt));
       e.root.position.copy(e.body.pos); e.root.rotation.y = e.yaw;
-      // never let a body occupy the same space as the player
       if (!e.T.flying) {
         const pr = 0.36 + e.body.halfW + 0.12;
         const ox = e.body.pos.x - pp.x, oz = e.body.pos.z - pp.z; const o2 = ox * ox + oz * oz;
-        if (o2 < pr * pr && Math.abs(e.body.pos.y - pp.y) < 1.7) {
+        if (o2 < pr * pr && Math.abs(e.body.pos.y - pp.y) < 1.8) {
           const od = Math.sqrt(o2) || 0.0001; const push = pr - od;
           e.body.pos.x += ox / od * push; e.body.pos.z += oz / od * push;
           if (world.overlapsBody(e.body)) { e.body.pos.x -= ox / od * push; e.body.pos.z -= oz / od * push; }
@@ -338,8 +507,6 @@ export class EnemyManager {
     this._cur = null; this._separate(dt); this.projectiles.update(dt);
     for (let i = this.enemies.length - 1; i >= 0; i--) { const e = this.enemies[i]; if (!e.alive && e.deadT > 3.5) { this._removeLaser(e); if (!e.rootDetached) { this.ctx.scene.remove(e.root); this._disposeMesh(e.root); } this.byId.delete(e.id); this.enemies.splice(i, 1); } }
   }
-  // --- network mirror ---
-  // Compact per-enemy state the host sends every few frames; clients ease toward it.
   snapshot() {
     this._snapTick = ((this._snapTick || 0) + 1) % 3;
     const tgs = this.targets();
@@ -347,7 +514,7 @@ export class EnemyManager {
     for (const e of this.enemies) {
       if (!e.alive) continue;
       const b = e.body;
-      let nearAny = e.T.boss;
+      let nearAny = e.T.boss || e.T.isTank;
       if (!nearAny) {
         for (let i = 0; i < tgs.length; i++) {
           const tp = tgs[i].body && tgs[i].body.pos;
@@ -358,7 +525,6 @@ export class EnemyManager {
         }
       }
       if (!nearAny && ((e.id + this._snapTick) % 3) !== 0) continue;
-      // compact: positions at 5 cm, yaw at ~0.6 deg, the type as a small index (about half the bytes)
       out.push([
         e.id,
         Math.round(b.pos.x * 20) / 20,
@@ -382,7 +548,6 @@ export class EnemyManager {
       const id = r[0];
       seen.add(id);
       let e = this.byId.get(id);
-      // AUTO-HEAL: Se o cliente perdeu o espawn deste bot, cria-o agora mesmo com o tipo correto!
       const type = typeof r[11] === 'number' ? TYPE_KEYS[r[11]] : r[11];
       if ((!e || !e.alive) && type) {
         const pos = new THREE.Vector3(r[1], r[2], r[3]);
@@ -400,7 +565,6 @@ export class EnemyManager {
       e.bossAtk = r[10] ? (e.bossAtk || { kind: 'stomp', t: 0.3 }) : null;
       if (e.T.boss && this.onBoss) this.onBoss(e);
     }
-    // Remove bots no cliente que não constam mais nos snapshots do anfitrião (evita bots fantasmas)
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const e = this.enemies[i];
       if (e.alive && !seen.has(e.id)) {
@@ -427,7 +591,6 @@ export class EnemyManager {
         e.flinch = damp(e.flinch, 0, 9, dt);
         if (e.state === 'spawn') { const f = clamp(e.t / 0.6, 0, 1); e.root.scale.setScalar(Math.max(0.001, f * e.T.scale * (1 + Math.sin(e.t * 60) * 0.12 * (1 - f)))); if (e.t >= 0.6) { e.state = 'hunt'; e.root.scale.setScalar(e.T.scale); } }
         if (e.snapA && e.snapB) {
-          // render 100 ms behind the newest snapshot so movement stays smooth between packets
           const span = Math.max(0.02, e.snapB.t - e.snapA.t); const k = clamp((now - 0.1 - e.snapA.t) / span, 0, 1.2);
           _v.lerpVectors(e.snapA.p, e.snapB.p, k);
           e.body.vel.subVectors(_v, e.body.pos).divideScalar(Math.max(dt, 1e-3)).clampLength(0, 30);
@@ -450,9 +613,8 @@ export class EnemyManager {
     this.projectiles.update(dt);
     for (let i = this.enemies.length - 1; i >= 0; i--) { const e = this.enemies[i]; if (!e.alive && e.deadT > 2.5) { this._removeLaser(e); if (!e.rootDetached) { this.ctx.scene.remove(e.root); this._disposeMesh(e.root); } this.byId.delete(e.id); this.enemies.splice(i, 1); } }
   }
-  // the host tells us someone died; run the gore without touching scores
   killMirror(id, info) { const e = this.byId.get(id); if (!e || !e.alive) return; const cb = this.onKill; this.onKill = null; this.kill(e, { ...info, dir: info.dir ? new THREE.Vector3().fromArray(info.dir) : _up.clone(), point: info.point ? new THREE.Vector3().fromArray(info.point) : e.center.clone() }); this.onKill = cb; }
-  _syncHit(e) { e.root.updateMatrixWorld(true); for (let i = 0; i < e.hit.length; i++) e.hitSpheres[i].setFromMatrixPosition(e.parts[e.hit[i][0]].matrixWorld); e.center.setFromMatrixPosition(e.parts.torso.matrixWorld); }
+  _syncHit(e) { e.root.updateMatrixWorld(true); for (let i = 0; i < e.hit.length; i++) e.hitSpheres[i].setFromMatrixPosition(e.parts[e.hit[i][0]].matrixWorld); e.center.setFromMatrixPosition((e.parts.torso || e.parts.head || e.root).matrixWorld); }
   _updateDead(e, dt) {
     e.deadT += dt; const tp = e.topple; if (!tp || e.rootDetached) return;
     if (tp.t < 1) {
@@ -469,51 +631,55 @@ export class EnemyManager {
     for (let i = 0; i < es.length; i++) { const a = es[i]; if (!a.alive || a.T.flying) continue;
       for (let j = i + 1; j < es.length; j++) { const b = es[j]; if (!b.alive || b.T.flying) continue;
         const dx = b.body.pos.x - a.body.pos.x, dz = b.body.pos.z - a.body.pos.z;
-        if (dx > 2.2 || dx < -2.2 || dz > 2.2 || dz < -2.2) continue;
-        const d2 = dx * dx + dz * dz; const rr = a.body.halfW + b.body.halfW + 0.75; if (d2 > rr * rr || d2 < 1e-6 || Math.abs(b.body.pos.y - a.body.pos.y) > 1.5) continue;
-        const d = Math.sqrt(d2); const push = (rr - d) * 9; a.body.vel.x -= dx / d * push; a.body.vel.z -= dz / d * push; b.body.vel.x += dx / d * push; b.body.vel.z += dz / d * push; } }
+        const maxSep = a.body.halfW + b.body.halfW + 0.85;
+        if (dx > maxSep || dx < -maxSep || dz > maxSep || dz < -maxSep) continue;
+        const d2 = dx * dx + dz * dz; if (d2 > maxSep * maxSep || d2 < 1e-6 || Math.abs(b.body.pos.y - a.body.pos.y) > 2.2) continue;
+        const d = Math.sqrt(d2); const push = (maxSep - d) * 9; a.body.vel.x -= dx / d * push; a.body.vel.z -= dz / d * push; b.body.vel.x += dx / d * push; b.body.vel.z += dz / d * push; } }
   }
   _steer(e, dt, gx, gz, speed, accel) {
     const b = e.body; let dx = gx - b.pos.x, dz = gz - b.pos.z; const l = Math.hypot(dx, dz);
     if (l < 1e-4) { b.vel.x = damp(b.vel.x, 0, 8, dt); b.vel.z = damp(b.vel.z, 0, 8, dt); return; }
-    dx /= l; dz /= l; const a = (b.onGround ? accel : accel * 0.3) * dt; speed *= this.mods.speed;
+    dx /= l; dz /= l; const a = (b.onGround ? accel : accel * 0.35) * dt;
+    speed *= this.mods.speed * (e.auraSpeed || 1);
     b.vel.x += clamp(dx * speed - b.vel.x, -a, a); b.vel.z += clamp(dz * speed - b.vel.z, -a, a); e.yawT = Math.atan2(dx, dz);
   }
   _groundAhead(e, dx, dz) { _v.set(e.body.pos.x + dx * 0.9, e.body.pos.y + 0.5, e.body.pos.z + dz * 0.9); return this.ctx.world.raycast(_v, _d.set(0, -1, 0), 3.5) !== null; }
-  // Each enemy heads for its own slot around the player rather than the player's exact feet,
-  // so a group fans out and arrives from different sides instead of forming one conga line.
-  _approachPoint(e, dt, target, out) {
+  _approachPoint(e, dt, target, out, P = null) {
     e.appT -= dt;
     if (e.appT <= 0) {
-      e.appT = rand(2.5, 5); e.appAng += rand(-0.7, 0.7);   // drift, keep the slot
+      e.appT = rand(2.0, 4.2);
       const melee = e.T.weapon === 'blade' || e.T.weapon === 'bomb';
-      e.appR = melee ? rand(2, 4.5) : rand(4.5, 9);
+      // Tática de Flanqueamento Real: Flanqueadores buscam as costas ou laterais do cone de visão do jogador!
+      if (e.role === 'flanker' && P && P.forward) {
+        const backAng = Math.atan2(-P.forward.x, -P.forward.z);
+        e.appAng = backAng + (e.id % 2 ? 1 : -1) * rand(0.45, 1.35);
+      } else {
+        e.appAng += rand(-0.7, 0.7);
+      }
+      e.appR = melee ? rand(2.2, 5.0) : rand(5.0, 11.0);
     }
     const d = Math.hypot(target.x - e.body.pos.x, target.z - e.body.pos.z);
-    // hold a minimum standoff so they close in on their own side instead of stacking on one point
-    let r = clamp(d * 0.55, Math.min(2, d * 0.9), e.appR);
-    // while climbing to a different level the route is often a narrow ramp, and a wide offset
-    // walks them straight off the side of it, so aim much closer to the actual target
+    let r = clamp(d * 0.58, Math.min(2.2, d * 0.9), e.appR);
     if (Math.abs(target.y - e.body.pos.y) > 1.5) r = Math.min(r, 1.1);
     return out.set(target.x + Math.cos(e.appAng) * r, target.y, target.z + Math.sin(e.appAng) * r);
   }
-  _follow(e, dt, target, speed) {
+  _follow(e, dt, target, speed, P = null) {
     const nav = this.ctx.nav, b = e.body; e.pathT -= dt;
-    target = this._approachPoint(e, dt, target, _goal);
+    target = this._approachPoint(e, dt, target, _goal, P);
     const stale = !e.path || e.pathI >= e.path.length || (e.pathT <= 0 && (!e.pathGoal || e.pathGoal.distanceTo(target) > 3.5 || !e.path.complete));
     if (stale && (e.pathT <= 0 || !e.path) && this._pathsLeft > 0) {
       this._pathsLeft--;
-      e.pathT = 0.8 + rand(0, 0.6); const p = nav.findPath(b.pos, target);
+      e.pathT = 0.7 + rand(0, 0.5); const p = nav.findPath(b.pos, target);
       if (p && p.length) { e.path = p; e.pathI = 0; e.pathGoal = target.clone(); while (e.pathI < p.length - 1 && Math.hypot(p[e.pathI].x - b.pos.x, p[e.pathI].z - b.pos.z) < 0.7 && Math.abs(p[e.pathI].y - b.pos.y) < 1) e.pathI++; }
     }
     let goal = null;
     if (e.path && e.pathI < e.path.length) { const nd = e.path[e.pathI]; const hd = Math.hypot(nd.x - b.pos.x, nd.z - b.pos.z); if (hd < 0.5 && Math.abs(nd.y - b.pos.y) < 1.2) { e.pathI++; if (e.pathI < e.path.length) goal = e.path[e.pathI]; } else goal = nd; }
     if (!goal) goal = target;
-    this._steer(e, dt, goal.x, goal.z, speed, 40);
+    this._steer(e, dt, goal.x, goal.z, speed, 42);
     const hd = Math.hypot(goal.x - b.pos.x, goal.z - b.pos.z);
     if (b.onGround) {
-      if (goal.y > b.pos.y + 0.6 && hd < 1.7) { b.vel.y = 9; b.onGround = false; }
-      else if (b.hitWall) { e.stuckT += dt; if (e.stuckT > 0.35 && e.stuckT < 0.4) e.pathT = 0; if (e.stuckT > 0.9) { b.vel.y = 9; b.onGround = false; e.stuckT = 0; e.pathT = 0; } }
+      if (goal.y > b.pos.y + 0.6 && hd < 1.9) { b.vel.y = 9.5; b.onGround = false; }
+      else if (b.hitWall) { e.stuckT += dt; if (e.stuckT > 0.3 && e.stuckT < 0.36) e.pathT = 0; if (e.stuckT > 0.75) { b.vel.y = 9.5; b.onGround = false; e.stuckT = 0; e.pathT = 0; } }
       else e.stuckT = 0;
     }
   }
@@ -532,13 +698,11 @@ export class EnemyManager {
     b.vel.z = damp(b.vel.z, Math.cos(e.walkDir) * spd, 6, dt);
     e.yawT = e.walkDir;
   }
-  // Orelha: segue o jogador mais perto, mas entra em combate mordendo e atordoando bots hostis próximos!
   _thinkPet(e, dt, pp, dist, dx, dz) {
     const b = e.body; e.aimAmt = 0;
     progression.applyToOrelha(e);
     if (dist > 70) { b.pos.set(pp.x + 2, pp.y + 0.4, pp.z + 2); b.vel.set(0, 0, 0); e.path = null; return; }
     e.biteCool = Math.max(0, (e.biteCool || 0) - dt);
-    // Procura um inimigo hostil próximo ao jogador (<= 22m) ou ao próprio Orelha (<= 16m)
     let prey = null, bestD2 = 22 * 22;
     for (const o of this.enemies) {
       if (!o.alive || o === e || o.T.isPet || o.T.isCivilian || o.T.flying || o.state === 'spawn') continue;
@@ -553,14 +717,14 @@ export class EnemyManager {
     if (prey && dist < 32) {
       const pdx = prey.body.pos.x - b.pos.x, pdz = prey.body.pos.z - b.pos.z;
       const pDist = Math.hypot(pdx, pdz);
-      if (pDist < 2.35) {
+      if (pDist < 2.35 + (prey.T.scale > 2 ? 1.4 : 0)) {
         e.yawT = Math.atan2(pdx, pdz);
         if (e.biteCool <= 0) {
           e.biteCool = 1.05;
-          const biteDmg = Math.round(38 * (e.biteMul || progression.orelhaBiteMul || 1));
+          const biteDmg = Math.round(42 * (e.biteMul || progression.orelhaBiteMul || 1));
           if (b.onGround) { b.vel.x += (pdx / (pDist || 1)) * 5.5; b.vel.z += (pdz / (pDist || 1)) * 5.5; b.vel.y = 4.6; b.onGround = false; }
           this.damage(prey, biteDmg, { source: 'bot', point: prey.center.clone(), dir: _v.subVectors(prey.center, e.center).normalize(), part: 'torso', crit: false });
-          if (prey.alive && !prey.T.boss) { prey.state = 'stunned'; prey.t = 0; prey.stunDur = 0.65; }
+          if (prey.alive && !prey.T.boss && !prey.T.isTank) { prey.state = 'stunned'; prey.t = 0; prey.stunDur = 0.65; }
           this.ctx.effects.strokeBurst(prey.center, INK.ORANGE, 12, 5, { life: 0.25, size: 0.035 });
           audio.lunge(e.center);
         }
@@ -578,33 +742,76 @@ export class EnemyManager {
     b.vel.x = damp(b.vel.x, Math.sin(e.walkDir) * spd, 6, dt); b.vel.z = damp(b.vel.z, Math.cos(e.walkDir) * spd, 6, dt);
     e.yawT = e.sniff ? Math.atan2(dx, dz) : e.walkDir;
   }
+
+  // Verticality / Parkour & Grapple Leap: bots climb onto rooftops/overpasses when the player camps above them!
+  _tryVerticalLeap(e, dt, pp, dist, dy) {
+    e.grappleCd = Math.max(0, (e.grappleCd || 0) - dt);
+    if (!e.T.canGrapple || e.grappleCd > 0 || !e.body.onGround) return false;
+    // Trigger either when player is elevated (dy > 2.4m) or when Stalker/Lázaro closes gap from medium distance
+    const shouldGrappleUp = dy > 2.4 && dy < 24 && dist < 32;
+    const shouldGrappleGap = (e.T.isStalker || e.T.isLazaro) && dist > 11 && dist < 26 && e.los;
+    if (!shouldGrappleUp && !shouldGrappleGap) return false;
+
+    e.grappleCd = e.T.isLazaro ? rand(2.6, 4.2) : rand(4.0, 6.8);
+    const b = e.body, ctx = this.ctx;
+    const anchor = new THREE.Vector3(pp.x, pp.y + 1.8, pp.z);
+    ctx.effects.tracer(e.center, anchor, INK.BLACK, 0.032, 0.32);
+    ctx.effects.strokeBurst(e.center, INK.ORANGE, 12, 6, { life: 0.25, size: 0.035 });
+    audio.grappleFire();
+    const flightT = clamp(dist / 22, 0.45, 1.15);
+    b.vel.x = (pp.x - b.pos.x) / flightT;
+    b.vel.z = (pp.z - b.pos.z) / flightT;
+    b.vel.y = Math.max(10.5, (dy + 2.2) / flightT + 0.5 * 24 * flightT);
+    b.onGround = false;
+    return true;
+  }
+
+  // Granadas de Desalojamento (Flush Grenades): forces camping players out from cover or off rooftops!
+  _tryThrowFlushGrenade(e, dt, pp, pc, dist, dy, smart) {
+    e.nadeCd = Math.max(0, (e.nadeCd || 0) - dt);
+    if (!e.T.canGrenade || e.nadeCd > 0 || dist < 7 || dist > 38 || smart < 0.2) return false;
+    // Throw when player is higher up, behind cover (!e.los), or moving slowly
+    const pSpd = (e.target && e.target.body && e.target.body.vel) ? Math.hypot(e.target.body.vel.x, e.target.body.vel.z) : 0;
+    if (e.los && dy < 1.8 && pSpd > 4.5 && Math.random() < 0.65) return false;
+    e.nadeCd = rand(5.5, 9.0) * (1.25 - Math.min(0.45, smart * 0.35));
+    const muzzle = _v.setFromMatrixPosition((e.tip || e.parts.torso || e.root).matrixWorld);
+    const grav = 14.0;
+    const flightT = clamp(dist / 18, 0.65, 1.65);
+    const vx = (pp.x - muzzle.x) / flightT + rand(-0.8, 0.8);
+    const vz = (pp.z - muzzle.z) / flightT + rand(-0.8, 0.8);
+    const vy = (pp.y + 0.6 - muzzle.y + 0.5 * grav * flightT * flightT) / flightT;
+    _d.set(vx, vy, vz);
+    const spd = _d.length();
+    _d.divideScalar( Math.max(1, spd) );
+    this.projectiles.fire(muzzle, _d, spd, (e.T.dmg || 14) * 1.45 * this.mods.damage * (e.auraDmg || 1), e, INK.ORANGE, 0.14, 1.25, null, grav);
+    audio.lunge(e.center);
+    return true;
+  }
+
   _think(e, dt, pp, pc, P) {
     const T = e.T, b = e.body, ctx = this.ctx;
     const dx = pp.x - b.pos.x, dz = pp.z - b.pos.z; const dist = Math.hypot(dx, dz); const dy = pp.y - b.pos.y;
-    e.losT -= dt; if (e.losT <= 0) { e.losT = 0.12 + rand(0, 0.1); e.los = P.isProp ? dist < 8 : ctx.world.hasLineOfSight(this.eye(e, _eye), pc, SEE_THROUGH); } // a vidraça tapa a própria linha de visão
+    e.losT -= dt; if (e.losT <= 0) { e.losT = 0.11 + rand(0, 0.08); e.los = P.isProp ? dist < 8 : ctx.world.hasLineOfSight(this.eye(e, _eye), pc, SEE_THROUGH); }
     e.cool -= dt; const yawTo = Math.atan2(dx, dz);
     if (T.isPet) { this._thinkPet(e, dt, pp, dist, dx, dz); return; }
     if (T.isCivilian && !e.enraged) {
       e.aimAmt = 0;
-      // foge de quem estiver depredando por perto (8 de Janeiro) ou da confusão (7 de Setembro)
       let threat = null, td = 16 * 16;
-      for (const o of this.enemies) { if (!o.alive || !o.T.isRioter) continue; const d = o.body.pos.distanceToSquared(b.pos); if (d < td) { td = d; threat = o; } }
+      for (const o of this.enemies) { if (!o.alive || !(o.T.isRioter || o.T.isTitan || o.T.isLazaro)) continue; const d = o.body.pos.distanceToSquared(b.pos); if (d < td) { td = d; threat = o; } }
       if (!threat && this.ctx.panicAt) { const pz = this.ctx.panicAt; const d = (pz.x - b.pos.x) ** 2 + (pz.z - b.pos.z) ** 2; if (d < 60 * 60) threat = { body: { pos: pz } }; }
       if (threat) {
         const tx = threat.body.pos.x - b.pos.x, tz = threat.body.pos.z - b.pos.z;
         this._steer(e, dt, b.pos.x - tx * 3, b.pos.z - tz * 3, T.speed * 1.6, 45); e.yawT = Math.atan2(-tx, -tz); return;
       }
-      // Se machucado ou tiro perto, entra em pânico e corre
       if (e.scared || (dist < 16 && P.shooting) || e.hp < T.hp) {
         e.scared = true;
         this._steer(e, dt, b.pos.x - dx, b.pos.z - dz, T.speed * 1.5, 45);
         e.yawT = Math.atan2(-dx, -dz);
         return;
       }
-      // Rotina de Passageiro de Ônibus (pessoas comuns indo até a parada, esperando na fila e pegando ônibus!)
       const stops = ctx.level && ctx.level.busStops;
       if (stops && stops.length > 1 && e.isCommuter !== false) {
-        if (e.isCommuter === undefined) e.isCommuter = (e.id % 4) !== 0; // 75% dos civis pegam ônibus
+        if (e.isCommuter === undefined) e.isCommuter = (e.id % 4) !== 0;
         if (e.isCommuter) {
           if (!e.busStop) {
             let bestS = null, bestSD = 130 * 130;
@@ -624,7 +831,6 @@ export class EnemyManager {
             this._steer(e, dt, wx, wz, T.speed * 0.65, 25);
             return;
           }
-          // Chegou na parada: fica aguardando olhando para a rua e procura um ônibus parado na baia
           b.vel.x = damp(b.vel.x, 0, 8, dt); b.vel.z = damp(b.vel.z, 0, 8, dt);
           e.yawT = st.faceYaw !== undefined ? st.faceYaw : st.axis === 'z' ? (st.dir > 0 ? -Math.PI / 2 : Math.PI / 2) : (st.dir > 0 ? 0 : Math.PI);
           const cars = ctx.level && ctx.level.cars;
@@ -639,7 +845,6 @@ export class EnemyManager {
             if (boardingBus) {
               this._steer(e, dt, boardingBus.x, boardingBus.z, T.speed * 0.85, 32);
               if (bd2 < 3.2 * 3.2) {
-                // Embarcou no ônibus! Desembarca em outra parada de Brasília para manter a cidade viva
                 const nextStop = stops[(stops.indexOf(st) + 3 + (e.id % 5)) % stops.length];
                 b.pos.set(nextStop.waitX + rand(-2, 2), (nextStop.y || 0) + 0.25, nextStop.waitZ + rand(-2, 2));
                 b.vel.set(0, 0, 0);
@@ -651,7 +856,6 @@ export class EnemyManager {
           return;
         }
       }
-      // Passeio tranquilo pelas calçadas de Brasília
       e.walkTimer = (e.walkTimer || 0) - dt;
       if (e.walkTimer <= 0 || b.hitWall) {
         e.walkTimer = rand(3, 6);
@@ -662,35 +866,80 @@ export class EnemyManager {
       e.yawT = e.walkDir;
       return;
     }
+
     if (T.weapon === 'bomb') {
       if (e.fuseT >= 0) { e.fuseT -= dt; b.vel.x = damp(b.vel.x, 0, 4, dt); b.vel.z = damp(b.vel.z, 0, 4, dt); e.yawT = yawTo; e.flashT = 0.02; if (!e.flashOn) { setFill(e.mat, true); e.flashOn = true; } if (Math.floor(e.fuseT * 8) !== Math.floor((e.fuseT + dt) * 8)) audio.fuse(e.center); if (e.fuseT <= 0) this._explodeBomber(e); return; }
       if (dist < T.fuseRange && Math.abs(dy) < 2.2 && e.los) { e.fuseT = T.fuse; audio.fuse(e.center); return; }
-      if (e.los && dist < 12 && Math.abs(dy) < 1.5) this._steer(e, dt, pp.x, pp.z, T.speed, 45); else this._follow(e, dt, pp, T.speed);
+      if (e.los && dist < 12 && Math.abs(dy) < 1.5) this._steer(e, dt, pp.x, pp.z, T.speed, 45); else this._follow(e, dt, pp, T.speed, P);
       return;
     }
-    // Inteligência progressiva por onda: bots esquivam quando mirados, buscam cobertura quando feridos e flanqueiam melhor
+
+    // Inteligência progressiva sem teto baixo
     const wave = (ctx.game && ctx.game.wave) || 1;
-    const smart = clamp((wave - 1) / 8, 0, 1);
-    e.dodgeCool = Math.max(0, (e.dodgeCool || 0) - dt);
-    if (smart > 0.12 && e.los && dist < 38 && b.onGround && e.dodgeCool <= 0 && P.forward && P.eye) {
-      _v.subVectors(e.center, P.eye).normalize();
-      if (_v.dot(P.forward) > 0.955) {
-        e.dodgeCool = rand(1.6, 2.8) * (1.25 - smart * 0.45);
-        e.strafeDir = Math.random() < 0.5 ? 1 : -1;
-        const juke = (6.5 + smart * 4.5) * this.mods.speed;
-        const lnx = -dz / (dist || 1) * e.strafeDir, lnz = dx / (dist || 1) * e.strafeDir;
-        if (this._groundAhead(e, lnx, lnz)) {
-          b.vel.x += lnx * juke; b.vel.z += lnz * juke;
-          if (smart > 0.45 && Math.random() < 0.4) { b.vel.y = 5.4; b.onGround = false; }
+    const smart = clamp((wave - 1) / 8, 0.15, 1.35) + (e.elite ? 0.35 : 0);
+
+    // Poças tóxicas deixadas por Elites Vampíricos/Sanguinários
+    if (e.elite === 'vampiric') {
+      e.poolT = (e.poolT || 0) - dt;
+      if (e.poolT <= 0 && b.onGround) {
+        e.poolT = 1.8;
+        ctx.effects.bloodPool(b.pos, 1.3, INK.PINK);
+      }
+    }
+
+    // Engenheiro de Drones: lança mini-drones kamikazes voadores periodicamente!
+    if (T.isEngineer) {
+      e.droneCd = Math.max(0, (e.droneCd || 0) - dt);
+      if (e.droneCd <= 0 && dist < 52) {
+        e.droneCd = rand(7.0, 10.5);
+        const liveFlyers = this.enemies.filter((x) => x.alive && x.T.flying).length;
+        if (liveFlyers < 8) {
+          const sp = this.spawn('flyer', e.center.clone().add(_v.set(rand(-1.2, 1.2), 1.6, rand(-1.2, 1.2))));
+          sp.state = 'hunt'; sp.root.scale.setScalar(sp.T.scale);
         }
       }
     }
+
+    // Esquiva tática avançada quando o jogador mira no bot
+    e.dodgeCool = Math.max(0, (e.dodgeCool || 0) - dt);
+    if (!T.isTank && !T.isTitan && e.los && dist < 42 && b.onGround && e.dodgeCool <= 0 && P.forward && P.eye) {
+      _v.subVectors(e.center, P.eye).normalize();
+      if (_v.dot(P.forward) > 0.945) {
+        e.dodgeCool = rand(1.2, 2.3) / Math.max(0.7, smart);
+        e.strafeDir = Math.random() < 0.5 ? 1 : -1;
+        const juke = (7.5 + smart * 4.5) * this.mods.speed;
+        const lnx = -dz / (dist || 1) * e.strafeDir, lnz = dx / (dist || 1) * e.strafeDir;
+        if (this._groundAhead(e, lnx, lnz)) {
+          b.vel.x += lnx * juke; b.vel.z += lnz * juke;
+          if (smart > 0.4 && Math.random() < 0.5) { b.vel.y = 6.2; b.onGround = false; }
+        }
+      }
+    }
+
+    // Verticalidade e Gancho contra jogadores em telhados/mirantes
+    if (this._tryVerticalLeap(e, dt, pp, dist, dy)) return;
+
+    // Cavalaria Tática
+    if (T.weapon === 'cavalry') { this._thinkCavalry(e, dt, pp, pc, dist, dy, yawTo, P, smart); return; }
+    // Tanques de Guerra e Blindados do Comboio
+    if (T.weapon === 'tank' || T.weapon === 'convoy') { this._thinkTank(e, dt, pp, pc, dist, dy, yawTo, P, smart); return; }
+    // Bosses
+    if (T.weapon === 'boss') { this._thinkBoss(e, dt, pp, pc, dist, dy, yawTo, P); return; }
+
     if (T.weapon === 'blade' || T.weapon === 'flag') {
       e.aimAmt = damp(e.aimAmt, 0, 8, dt);
-      // back off after a swing instead of walking into the player
+      // Stalker: dispara shurikens/rajada curta quando está se aproximando de média distância
+      if (T.isStalker && e.los && dist > 6 && dist < 24 && (e.shurikenCd || 0) <= 0) {
+        e.shurikenCd = rand(2.0, 3.2);
+        const muzzle = _v.setFromMatrixPosition((e.tip || e.parts.torso).matrixWorld);
+        this._fireOne(e, muzzle, pc, 0.025, 52, T.dmg * 0.55, 0.045, P);
+        audio.katanaSwing();
+      }
+      e.shurikenCd = Math.max(0, (e.shurikenCd || 0) - dt);
+
       if (e.backoffT > 0) {
         e.backoffT -= dt; e.yawT = yawTo;
-        const a = 26 * dt;
+        const a = 28 * dt;
         b.vel.x += clamp(-nxOf(dx, dist) * T.speed * 0.55 - b.vel.x, -a, a);
         b.vel.z += clamp(-nzOf(dz, dist) * T.speed * 0.55 - b.vel.z, -a, a);
         return;
@@ -699,7 +948,6 @@ export class EnemyManager {
         e.attackT -= dt; b.vel.x = damp(b.vel.x, 0, 8, dt); b.vel.z = damp(b.vel.z, 0, 8, dt); e.yawT = yawTo;
         if (e.attackT < 0.18 && !e.attackHit) {
           e.attackHit = true;
-          // draw the arc of the swing so there is something to read and react to
           _v3.setFromMatrixPosition(e.tip.matrixWorld);
           for (let i = 0; i < 5; i++) {
             const a0 = -0.9 + i * 0.45, a1 = a0 + 0.45;
@@ -707,148 +955,613 @@ export class EnemyManager {
             _v2.set(e.center.x + Math.sin(e.yaw + a1) * 1.5, e.center.y + 0.5 - (i + 1) * 0.18, e.center.z + Math.cos(e.yaw + a1) * 1.5);
             ctx.effects.tracer(_v, _v2, INK.RED, 0.025, 0.16);
           }
-          if (dist < T.reach && Math.abs(dy) < 1.7) {
+          if (dist < T.reach && Math.abs(dy) < 2.1) {
             if (P.tryBlockMelee && P.tryBlockMelee(e)) { e.state = 'stunned'; e.t = 0; e.stunDur = 1.1; b.vel.set(-dx / dist * 7, 3.5, -dz / dist * 7); }
-            else if (P.takeDamage) P.takeDamage(T.dmg * this.mods.damage, e.center);
+            else if (P.takeDamage) {
+              const hitDmg = T.dmg * this.mods.damage * (e.auraDmg || 1);
+              P.takeDamage(hitDmg, e.center);
+              if (e.elite === 'vampiric') e.hp = Math.min(e.maxHp, e.hp + hitDmg * 1.5);
+            }
           } else audio.katanaSwing();
-          e.cool = rand(T.cool[0], T.cool[1]); e.backoffT = rand(0.45, 0.75);
+          e.cool = rand(T.cool[0], T.cool[1]); e.backoffT = rand(0.35, 0.65);
         }
         return;
       }
-      // wind up from just outside arm's length, with a clear telegraph before the swing lands
-      if (dist < T.lunge && Math.abs(dy) < 1.7 && e.cool <= 0 && e.los) {
-        e.attackT = 0.55; e.attackHit = false; audio.lunge(e.center);
-        b.vel.x += (dx / dist) * (2.5 + smart * 1.6); b.vel.z += (dz / dist) * (2.5 + smart * 1.6);
+      if (dist < T.lunge && Math.abs(dy) < 2.1 && e.cool <= 0 && e.los) {
+        e.attackT = 0.5; e.attackHit = false; audio.lunge(e.center);
+        b.vel.x += (dx / dist) * (3.2 + smart * 2.0); b.vel.z += (dz / dist) * (3.2 + smart * 2.0);
         return;
       }
-      // hold at swinging distance rather than trying to stand inside the player
-      if (e.los && dist < 9 && Math.abs(dy) < 1.6) {
+      if (e.los && dist < 11 && Math.abs(dy) < 1.8) {
         if (dist < T.standoff && Math.abs(dy) < 1.2) {
           const a = 24 * dt;
           b.vel.x += clamp(-(dx / dist) * T.speed * 0.4 - b.vel.x, -a, a);
           b.vel.z += clamp(-(dz / dist) * T.speed * 0.4 - b.vel.z, -a, a);
           e.yawT = yawTo;
         } else {
-          const g = dist > 4.5 ? this._approachPoint(e, dt, pp, _goal) : pp;
-          this._steer(e, dt, g.x, g.z, T.speed * (1 + smart * 0.15), 45);
-          if (b.onGround && b.hitWall) { e.stuckT += dt; if (e.stuckT > 0.25) { b.vel.y = 9; e.stuckT = 0; } }
+          const g = dist > 4.5 ? this._approachPoint(e, dt, pp, _goal, P) : pp;
+          this._steer(e, dt, g.x, g.z, T.speed * (1 + smart * 0.18), 48);
+          if (b.onGround && b.hitWall) { e.stuckT += dt; if (e.stuckT > 0.22) { b.vel.y = 9.5; e.stuckT = 0; } }
         }
-      } else this._follow(e, dt, pp, T.speed * (1 + smart * 0.12));
+      } else this._follow(e, dt, pp, T.speed * (1 + smart * 0.15), P);
       return;
     }
-    if (T.weapon === 'boss') { this._thinkBoss(e, dt, pp, pc, dist, dy, yawTo, P); return; }
+
+    // Granadas de Desalojamento para inimigos táticos
+    this._tryThrowFlushGrenade(e, dt, pp, pc, dist, dy, smart);
+
     const inRange = e.los && dist < T.range;
     if (inRange) {
       e.aimAmt = damp(e.aimAmt, 1, 8, dt); e.yawT = yawTo;
       let mx = 0, mz = 0; const nx = dx / dist, nz = dz / dist;
       const lowHp = e.hp < e.maxHp * 0.45 && smart > 0.2;
       if (T.stationary) { mx = 0; mz = 0; }
-      else if (dist > T.stop * e.keepMul) { this._follow(e, dt, pp, T.speed * 0.85); this._shoot(e, dt, pc, P); e.yawT = yawTo; return; }
-      // if the player is up on something, keep working the route up rather than strafing along
-      // a ramp edge and falling off it; they still shoot on the way
-      else if (Math.abs(dy) > 1.2) { this._follow(e, dt, pp, T.speed * 0.85); this._shoot(e, dt, pc, P); e.yawT = yawTo; return; }
-      else if (dist < T.keep * e.keepMul || (lowHp && dist < T.range * 0.65)) { mx = -nx + (-nz * e.strafeDir * 0.6); mz = -nz + (nx * e.strafeDir * 0.6); }
+      else if (dist > T.stop * e.keepMul) { this._follow(e, dt, pp, T.speed * 0.9, P); this._shoot(e, dt, pc, P); e.yawT = yawTo; return; }
+      else if (Math.abs(dy) > 1.4) { this._follow(e, dt, pp, T.speed * 0.9, P); this._shoot(e, dt, pc, P); e.yawT = yawTo; return; }
+      else if (dist < T.keep * e.keepMul || (lowHp && dist < T.range * 0.72)) {
+        // Quando ferido (lowHp), recua em diagonal buscando sair da linha de tiro central
+        mx = -nx + (-nz * e.strafeDir * 0.85); mz = -nz + (nx * e.strafeDir * 0.85);
+      }
       else if (dist > T.range * 0.7 && T.weapon === 'shotgun') { mx = nx + (-nz * e.strafeDir * 0.45); mz = nz + (nx * e.strafeDir * 0.45); }
-      else { e.strafeT -= dt; if (e.strafeT <= 0) { e.strafeT = rand(0.6, 1.7) * (1 - smart * 0.25); e.strafeDir *= -1; } mx = -nz * e.strafeDir; mz = nx * e.strafeDir; }
-      const spd = (T.weapon === 'shotgun' ? T.speed : T.speed * (0.52 + smart * 0.28)) * (lowHp ? 1.25 : 1);
-      if ((mx || mz) && this._groundAhead(e, mx, mz)) { const a = (30 + smart * 14) * dt; b.vel.x += clamp(mx * spd - b.vel.x, -a, a); b.vel.z += clamp(mz * spd - b.vel.z, -a, a); }
+      else {
+        e.strafeT -= dt;
+        if (e.strafeT <= 0) { e.strafeT = rand(0.5, 1.4) / Math.max(0.8, smart); e.strafeDir *= -1; }
+        mx = -nz * e.strafeDir; mz = nx * e.strafeDir;
+      }
+      const spd = (T.weapon === 'shotgun' ? T.speed : T.speed * (0.6 + smart * 0.3)) * (lowHp ? 1.3 : 1);
+      if ((mx || mz) && this._groundAhead(e, mx, mz)) { const a = (32 + smart * 16) * dt; b.vel.x += clamp(mx * spd - b.vel.x, -a, a); b.vel.z += clamp(mz * spd - b.vel.z, -a, a); }
       else { b.vel.x = damp(b.vel.x, 0, 8, dt); b.vel.z = damp(b.vel.z, 0, 8, dt); }
       this._shoot(e, dt, pc, P);
     } else {
       e.aimAmt = damp(e.aimAmt, 0, 5, dt); e.burstLeft = 0; e.aimT = 0; e.aimPoint = null; this._hideLaser(e);
       if (T.stationary && e.t < 5) { b.vel.x = damp(b.vel.x, 0, 8, dt); b.vel.z = damp(b.vel.z, 0, 8, dt); e.yawT = yawTo; }
-      else this._follow(e, dt, pp, T.speed * (1 + smart * 0.1));
+      else this._follow(e, dt, pp, T.speed * (1 + smart * 0.14), P);
       if (e.los) e.yawT = yawTo;
     }
   }
-  _thinkBoss(e, dt, pp, pc, dist, dy, yawTo, P) {
+
+  // ---------------- CAVALARIA DE ASSALTO ----------------
+  _thinkCavalry(e, dt, pp, pc, dist, dy, yawTo, P, smart) {
     const T = e.T, b = e.body, ctx = this.ctx;
-    if (T.bossKind === 'eraser') return this._thinkEraser(e, dt, pp, pc, dist, dy, yawTo, P);
-    if (T.bossKind === 'inkblot') return this._thinkInkblot(e, dt, pp, pc, dist, dy, yawTo, P);
-    if (e.bossAtk) {
-      const a = e.bossAtk; a.t += dt; e.yawT = yawTo; b.vel.x = damp(b.vel.x, 0, 5, dt); b.vel.z = damp(b.vel.z, 0, 5, dt);
-      if (a.kind === 'stomp') {
-        if (a.t > 0.75 && !a.done) {
-          a.done = true; audio.stomp(e.center); ctx.effects.shakeAmt += 0.9; ctx.effects.explosion(b.pos.clone().add(_v.set(0, 0.2, 0)), 7, INK.BLACK);
-          for (let i = 0; i < 24; i++) { const an = i / 24 * TAU; _v.set(b.pos.x + Math.cos(an) * 3, b.pos.y + 0.3, b.pos.z + Math.sin(an) * 3); _v2.set(Math.cos(an) * 14, 2, Math.sin(an) * 14); ctx.effects._spawn('stroke', _v, _v2, { size: 0.06, life: 0.4, ink: INK.BLACK, gravity: 4, stretch: 0.06, drag: 3 }); }
-          for (const t of this.targets()) { const dd = Math.hypot(t.body.pos.x - b.pos.x, t.body.pos.z - b.pos.z); if (t.alive && dd < 7.5 && t.body.pos.y < b.pos.y + 2.5) { t.takeDamage(T.dmg * this.mods.damage, e.center); t.knockback(_d.subVectors(t.center, e.center).normalize(), 9); } }
-          this.blastEnemies(b.pos, 6, 60, e);
-        }
-        if (a.t > 1.3) { e.bossAtk = null; e.cool = rand(T.cool[0], T.cool[1]); }
+    e.aimAmt = damp(e.aimAmt, e.los ? 1 : 0, 8, dt);
+    e.trampleCd = Math.max(0, (e.trampleCd || 0) - dt);
+
+    // Atropelamento de Cavalaria em alta velocidade!
+    if (dist < 2.5 && Math.abs(dy) < 2.2 && e.trampleCd <= 0 && P.takeDamage) {
+      e.trampleCd = 1.1;
+      P.takeDamage((T.trampleDmg || 26) * this.mods.damage, e.center);
+      if (P.knockback) P.knockback(_d.subVectors(P.center, e.center).setY(0.35).normalize(), 11);
+      ctx.effects.shakeAmt += 0.35;
+      audio.stomp(e.center);
+    }
+
+    // Salto de obstáculos e investida galopante
+    if (b.onGround && b.hitWall) {
+      b.vel.y = 10.5; b.onGround = false;
+    }
+    if (e.los && dist < T.range) {
+      this._shoot(e, dt, pc, P);
+      // Cavalaria faz órbitas rápidas e investidas em vez de parar!
+      if (dist < 7) {
+        const tangX = -nzOf(pp.z - b.pos.z, dist) * e.strafeDir + nxOf(pp.x - b.pos.x, dist) * 0.35;
+        const tangZ = nxOf(pp.x - b.pos.x, dist) * e.strafeDir + nzOf(pp.z - b.pos.z, dist) * 0.35;
+        this._steer(e, dt, b.pos.x + tangX * 10, b.pos.z + tangZ * 10, T.speed, 48);
       } else {
-        if (a.t > 0.6 && !a.done) { a.done = true; _v.setFromMatrixPosition(e.parts.head.matrixWorld); _v.y += 1; _d.subVectors(pc, _v); const l = _d.length(); _d.divideScalar(l); _d.y += l * 0.012; _d.normalize(); this.projectiles.fire(_v, _d, 24, T.dmg * 0.9, e, INK.BLACK, 0.4, 1); audio.enemyShot(e.center); }
-        if (a.t > 1.0) { e.bossAtk = null; e.cool = rand(T.cool[0] * 0.6, T.cool[1] * 0.6); }
+        this._steer(e, dt, pp.x, pp.z, T.speed * (1 + smart * 0.12), 48);
+      }
+    } else {
+      this._follow(e, dt, pp, T.speed, P);
+    }
+  }
+
+  // ---------------- TANQUE DE GUERRA & BLINDADO DO COMBOIO ----------------
+  _thinkTank(e, dt, pp, pc, dist, dy, yawTo, P, _smart) {
+    const T = e.T, b = e.body, ctx = this.ctx;
+    e.aimAmt = 1;
+    // Esmaga obstáculos e carros na frente do Tanque
+    e.crushT = (e.crushT || 0) - dt;
+    if (e.crushT <= 0 && Math.hypot(b.vel.x, b.vel.z) > 1.5) {
+      e.crushT = 0.25;
+      if (ctx.destroyEnvironmentAt) ctx.destroyEnvironmentAt(b.pos, 3.6, b.vel);
+    }
+    // Atropelamento pelo Tanque / Blindado
+    e.trampleCd = Math.max(0, (e.trampleCd || 0) - dt);
+    if (dist < 3.2 && Math.abs(dy) < 2.4 && e.trampleCd <= 0 && P.takeDamage) {
+      e.trampleCd = 0.9;
+      P.takeDamage(35 * this.mods.damage, e.center);
+      if (P.knockback) P.knockback(_d.subVectors(P.center, e.center).setY(0.3).normalize(), 13);
+      ctx.effects.shakeAmt += 0.5;
+      audio.stomp(e.center);
+    }
+
+    if (e.los && dist < T.range) {
+      if (dist > T.stop) {
+        this._follow(e, dt, pp, T.speed, P);
+      } else if (dist < T.keep) {
+        this._steer(e, dt, b.pos.x - (pp.x - b.pos.x), b.pos.z - (pp.z - b.pos.z), T.speed * 0.6, 24);
+      } else {
+        b.vel.x = damp(b.vel.x, 0, 5, dt); b.vel.z = damp(b.vel.z, 0, 5, dt);
+        e.yawT = yawTo;
+      }
+      // Disparo do Canhão Principal do Tanque + Metralhadora Coaxial
+      if (T.weapon === 'tank') {
+        if (e.cool <= 0) {
+          e.cool = rand(T.cool[0], T.cool[1]);
+          const muzzle = _v.setFromMatrixPosition(e.tip.matrixWorld);
+          const pVel = (P.body && P.body.vel) ? P.body.vel : _v2.set(0, 0, 0);
+          const leadT = dist / T.pspeed * 0.75;
+          _v3.copy(pc).addScaledVector(pVel, leadT);
+          _d.subVectors(_v3, muzzle); const l = _d.length(); _d.divideScalar(Math.max(1, l)); _d.y += l * 0.004; _d.normalize();
+          this.projectiles.fire(muzzle, _d, T.pspeed, T.dmg * this.mods.damage, e, INK.ORANGE, 0.18, 1.5, null, 4.5);
+          audio.explosion(muzzle);
+          ctx.effects.explosion(muzzle, 1.8, INK.ORANGE);
+          ctx.effects.shakeAmt += 0.35;
+        }
+        // Metralhadora Coaxial entre disparos do canhão
+        e.mgCool = (e.mgCool || 0.4) - dt;
+        if (e.mgCool <= 0 && dist < 42) {
+          e.mgCool = 0.22;
+          const muzzle = _v.setFromMatrixPosition(e.tip.matrixWorld);
+          this._fireOne(e, muzzle, pc, 0.04, 52, T.mgDmg || 8, 0.045, P);
+          audio.enemyShot(e.center);
+        }
+      } else {
+        // Blindado do Comboio (torreta automática pesada)
+        this._shoot(e, dt, pc, P);
+      }
+    } else {
+      this._follow(e, dt, pp, T.speed, P);
+    }
+  }
+
+  // ---------------- ROTEADOR DE BOSSES ----------------
+  _thinkBoss(e, dt, pp, pc, dist, dy, yawTo, P) {
+    const T = e.T;
+    // Transições de Fase (Fase 1: 100%, Fase 2: <= 65% HP, Fase 3: <= 30% HP)
+    const hpFrac = e.hp / e.maxHp;
+    const newPhase = hpFrac <= 0.30 ? 3 : hpFrac <= 0.65 ? 2 : 1;
+    if (newPhase > (e.bossPhase || 1)) {
+      e.bossPhase = newPhase;
+      audio.bossRoar(e.center);
+      this.ctx.effects.strokeBurst(e.center, INK.RED, 45, 11, { life: 0.55, size: 0.055 });
+      this.ctx.effects.shakeAmt += 0.7;
+      if (this.ctx.hud) {
+        const phaseMsg = newPhase === 2 ? '🔥 FASE 2 · MODO FÚRIA ATIVADO!' : '⚡ FASE 3 · SOBRECARGA MORTAL!';
+        this.ctx.hud.message(T.name, phaseMsg, 3.0);
+      }
+    }
+
+    if (T.bossKind === 'lazaro') return this._thinkLazaro(e, dt, pp, pc, dist, dy, yawTo, P);
+    if (T.bossKind === 'titan_eren') return this._thinkTitanEren(e, dt, pp, pc, dist, dy, yawTo, P);
+    if (T.bossKind === 'titan_armored') return this._thinkTitanArmored(e, dt, pp, pc, dist, dy, yawTo, P);
+    if (T.bossKind === 'bomber_boss') return this._thinkBomberBoss(e, dt, pp, pc, dist, dy, yawTo, P);
+  }
+
+  // ---------------- BOSS 1: LÁZARO (Fugitivo Furtivo · Emboscada & Caçada Policial) ----------------
+  _triggerLazaroSmokeEscape(e) {
+    const ctx = this.ctx, b = e.body;
+    ctx.effects.smoke(b.pos.clone().add(_v.set(0, 1, 0)), _up, 12);
+    ctx.effects.strokeBurst(e.center, INK.BLACK, 24, 8, { life: 0.4, size: 0.045 });
+    audio.dash();
+    e.stealthT = 2.6 + (e.bossPhase || 1) * 0.5;
+    e.bossAtk = null;
+    // Salto evasivo lateral/traseiro para trás de cobertura
+    const escAng = e.yaw + Math.PI + (Math.random() < 0.5 ? 0.85 : -0.85);
+    b.vel.x = Math.sin(escAng) * 16;
+    b.vel.z = Math.cos(escAng) * 16;
+    b.vel.y = 7.5;
+    b.onGround = false;
+  }
+
+  _thinkLazaro(e, dt, pp, pc, dist, dy, yawTo, P) {
+    const T = e.T, b = e.body, ctx = this.ctx;
+    const phase = e.bossPhase || 1;
+    e.stealthCd = Math.max(0, (e.stealthCd || 0) - dt);
+    e.ambushCd = Math.max(0, (e.ambushCd || 0) - dt);
+    e.policeRespawnT = (e.policeRespawnT || 12) - dt;
+    if (e.policeRespawnT <= 0) {
+      e.policeRespawnT = 16;
+      this._spawnPoliceTaskForceForLazaro(e);
+    }
+
+    // Se o jogador estiver no alto, Lázaro usa gancho para subir atrás dele
+    if (this._tryVerticalLeap(e, dt, pp, dist, dy)) return;
+
+    // Modo Furtivo / Camuflagem nas sombras (se esconde bem e contorna pelas costas do jogador)
+    if (e.stealthT > 0) {
+      e.stealthT -= dt;
+      // Silhueta baixa furtiva enquanto se esconde
+      e.root.scale.set(T.scale * 0.88, T.scale * 0.62, T.scale * 0.88);
+      const pFwd = (ctx.player && ctx.player.forward) ? ctx.player.forward : _d.set(0, 0, -1);
+      const blindX = ctx.player.body.pos.x - pFwd.x * 11 + pFwd.z * e.strafeDir * 9;
+      const blindZ = ctx.player.body.pos.z - pFwd.z * 11 - pFwd.x * e.strafeDir * 9;
+      this._steer(e, dt, blindX, blindZ, T.speed * 1.55, 58);
+      if (e.stealthT <= 0.15) {
+        e.root.scale.setScalar(T.scale);
+        // Ao sair da furtividade, dispara emboscada surpresa!
+        e.bossAtk = { kind: 'ambush', t: 0, shots: 0, slashed: false };
       }
       return;
     }
+
+    if (e.bossAtk) {
+      const a = e.bossAtk; a.t += dt; e.yawT = yawTo;
+      if (a.kind === 'ambush') {
+        // Investida relâmpago pelas costas/flanco + rajada de carabina + golpe de facão + recuo para cobertura!
+        const spd = (17 + phase * 2.5) * this.mods.speed;
+        if (a.t < 0.65) {
+          this._steer(e, dt, pp.x, pp.z, spd, 65);
+          if (a.t > 0.1 + a.shots * 0.08 && a.shots < 4 + phase) {
+            const muzzle = _v.setFromMatrixPosition(e.tip.matrixWorld);
+            this._fireOne(e, muzzle, pc, 0.025, 54, T.dmg * 0.55, 0.045, P);
+            audio.enemyShot(e.center);
+            a.shots++;
+          }
+          if (dist < 3.4 && Math.abs(dy) < 2.2 && !a.slashed) {
+            a.slashed = true;
+            audio.katanaHit();
+            ctx.effects.strokeBurst(e.center, INK.RED, 22, 8, { life: 0.3, size: 0.04 });
+            if (P.takeDamage) P.takeDamage(T.dmg * 1.25 * this.mods.damage, e.center);
+            if (P.knockback) P.knockback(_d.subVectors(P.center, e.center).setY(0.3).normalize(), 9);
+          }
+        } else if (a.t < 1.1) {
+          // Recua rapidamente após o ataque surpresa
+          this._steer(e, dt, b.pos.x - (pp.x - b.pos.x) * 2, b.pos.z - (pp.z - b.pos.z) * 2, T.speed * 1.4, 55);
+        } else {
+          e.bossAtk = null;
+          e.cool = rand(T.cool[0], T.cool[1]) / (1 + (phase - 1) * 0.2);
+        }
+        return;
+      }
+    }
+
+    // Se o jogador mirar diretamente no Lázaro e o cooldown permitir, ele solta fumaça e some para emboscar!
+    if (e.stealthCd <= 0 && e.los && ctx.player && ctx.player.forward && ctx.player.eye) {
+      _v.subVectors(e.center, ctx.player.eye).normalize();
+      if (_v.dot(ctx.player.forward) > 0.94) {
+        e.stealthCd = rand(4.5, 7.0) / (1 + (phase - 1) * 0.25);
+        this._triggerLazaroSmokeEscape(e);
+        return;
+      }
+    }
+
+    // Inicia Emboscada Surpresa periodicamente
+    if (e.ambushCd <= 0 && dist < 34) {
+      e.ambushCd = rand(4.2, 6.8) / (1 + (phase - 1) * 0.22);
+      if (dist > 10 && Math.random() < 0.65) {
+        this._triggerLazaroSmokeEscape(e);
+      } else {
+        e.bossAtk = { kind: 'ambush', t: 0, shots: 0, slashed: false };
+      }
+      return;
+    }
+
+    // Combate versátil de média distância usando cobertura e strafe veloz
+    e.aimAmt = damp(e.aimAmt, e.los ? 1 : 0, 8, dt);
+    if (e.los && dist < T.range) {
+      e.yawT = yawTo;
+      if (e.cool <= 0) {
+        e.cool = rand(T.cool[0], T.cool[1]) / (1 + (phase - 1) * 0.2);
+        const muzzle = _v.setFromMatrixPosition(e.tip.matrixWorld);
+        for (let i = 0; i < 3 + phase; i++) {
+          setTimeout(() => {
+            if (!e.alive || this.mirror) return;
+            const mz = _v.setFromMatrixPosition(e.tip.matrixWorld);
+            this._fireOne(e, mz, P.center, 0.022, 54, T.dmg * 0.48, 0.045, P);
+            audio.enemyShot(e.center);
+          }, i * 75);
+        }
+      }
+      e.strafeT -= dt;
+      if (e.strafeT <= 0) { e.strafeT = rand(0.4, 1.0); e.strafeDir *= -1; }
+      const nx = dx / (dist || 1), nz = dz / (dist || 1);
+      const wantKeep = dist < 12 ? -0.6 : dist > 24 ? 0.5 : 0;
+      const mx = nx * wantKeep - nz * e.strafeDir;
+      const mz = nz * wantKeep + nx * e.strafeDir;
+      this._steer(e, dt, b.pos.x + mx * 10, b.pos.z + mz * 10, T.speed * (1 + (phase - 1) * 0.15), 52);
+    } else {
+      this._follow(e, dt, pp, T.speed * 1.15, P);
+    }
+  }
+
+  // ---------------- BOSS 2: TITÃ DE ATAQUE (EREN) — Destruição Real do Cenário ----------------
+  _thinkTitanEren(e, dt, pp, pc, dist, dy, yawTo, P) {
+    const T = e.T, b = e.body, ctx = this.ctx;
+    const phase = e.bossPhase || 1;
+    const spdMul = 1 + (phase - 1) * 0.22;
+
+    // Passos colossais: tremem a tela e destroem objetos/carros no caminho!
+    e.stepCrushT = (e.stepCrushT || 0) - dt;
+    if (e.stepCrushT <= 0 && Math.hypot(b.vel.x, b.vel.z) > 1.5) {
+      e.stepCrushT = 0.45;
+      if (ctx.destroyEnvironmentAt) ctx.destroyEnvironmentAt(b.pos, 4.2, b.vel);
+      if (dist < 38) ctx.effects.shakeAmt += 0.12;
+      audio.stomp(b.pos);
+    }
+    // Vapor regenerativo de Titã na Fase 2 e 3
+    if (phase >= 2 && Math.random() < dt * 4) {
+      ctx.effects.smoke(e.center.clone().add(_v.set(rand(-1, 1), 1.8, rand(-1, 1))), _up, 2);
+      if (phase === 3) e.hp = Math.min(e.maxHp, e.hp + 18 * dt);
+    }
+
+    if (e.bossAtk) {
+      const a = e.bossAtk; a.t += dt; e.yawT = yawTo;
+      if (a.kind === 'stomp') {
+        b.vel.x = damp(b.vel.x, 0, 5, dt); b.vel.z = damp(b.vel.z, 0, 5, dt);
+        if (a.t > 0.65 && !a.done) {
+          a.done = true;
+          audio.stomp(e.center); audio.bossRoar(e.center);
+          ctx.effects.shakeAmt += 1.1;
+          const stompR = 9.5 + phase * 1.5;
+          ctx.effects.explosion(b.pos.clone().add(_v.set(0, 0.3, 0)), stompR * 0.85, INK.RED);
+          if (ctx.destroyEnvironmentAt) ctx.destroyEnvironmentAt(b.pos, stompR);
+          for (const t of this.targets()) {
+            const dd = Math.hypot(t.body.pos.x - b.pos.x, t.body.pos.z - b.pos.z);
+            if (t.alive && dd < stompR && Math.abs(t.body.pos.y - b.pos.y) < 4.5) {
+              t.takeDamage(T.dmg * 1.15 * this.mods.damage, e.center);
+              t.knockback(_d.subVectors(t.center, e.center).setY(0.45).normalize(), 13);
+            }
+          }
+          this.blastEnemies(b.pos, stompR * 0.8, 90, e);
+        }
+        if (a.t > 1.2) { e.bossAtk = null; e.cool = rand(T.cool[0], T.cool[1]) / spdMul; }
+        return;
+      }
+      if (a.kind === 'boulder') {
+        b.vel.x = damp(b.vel.x, 0, 6, dt); b.vel.z = damp(b.vel.z, 0, 6, dt);
+        if (a.t > 0.55 && !a.done) {
+          a.done = true;
+          // Arranca concreto real do chão e arremessa!
+          if (ctx.destroyEnvironmentAt) ctx.destroyEnvironmentAt(b.pos, 5.0);
+          _v.setFromMatrixPosition(e.parts.head.matrixWorld); _v.y += 1.2;
+          const pVel = (P.body && P.body.vel) ? P.body.vel : _v2.set(0, 0, 0);
+          const leadT = dist / 30 * 0.7;
+          _v3.copy(pc).addScaledVector(pVel, leadT);
+          _d.subVectors(_v3, _v); const l = _d.length(); _d.divideScalar(Math.max(1, l)); _d.y += l * 0.009; _d.normalize();
+          this.projectiles.fire(_v, _d, 30, T.dmg * 1.1, e, INK.BLACK, 0.55, 1.6, null, 7.5);
+          if (phase >= 2) {
+            for (const s of [-0.16, 0.16]) {
+              const dSide = _d.clone().applyAxisAngle(_up, s).normalize();
+              this.projectiles.fire(_v, dSide, 28, T.dmg * 0.85, e, INK.ORANGE, 0.42, 1.3, null, 7.5);
+            }
+          }
+          audio.explosion(_v);
+        }
+        if (a.t > 1.0) { e.bossAtk = null; e.cool = rand(T.cool[0] * 0.65, T.cool[1] * 0.65) / spdMul; }
+        return;
+      }
+      if (a.kind === 'leap_smash') {
+        if (a.t < 0.35 && !a.jumped) {
+          a.jumped = true;
+          audio.bossRoar(e.center);
+          const flightT = 0.85;
+          b.vel.x = (pp.x - b.pos.x) / flightT;
+          b.vel.z = (pp.z - b.pos.z) / flightT;
+          b.vel.y = 14.5;
+          b.onGround = false;
+        } else if (a.jumped && (b.onGround || a.t > 1.25) && !a.done) {
+          a.done = true;
+          audio.stomp(e.center);
+          ctx.effects.shakeAmt += 1.25;
+          ctx.effects.explosion(b.pos, 9.5, INK.RED);
+          if (ctx.destroyEnvironmentAt) ctx.destroyEnvironmentAt(b.pos, 10.5);
+          for (const t of this.targets()) {
+            const dd = Math.hypot(t.body.pos.x - b.pos.x, t.body.pos.z - b.pos.z);
+            if (t.alive && dd < 10.0) {
+              t.takeDamage(T.dmg * 1.3 * this.mods.damage, e.center);
+              t.knockback(_d.subVectors(t.center, e.center).setY(0.5).normalize(), 15);
+            }
+          }
+        }
+        if (a.t > 1.5) { e.bossAtk = null; e.cool = rand(T.cool[0], T.cool[1]) / spdMul; }
+        return;
+      }
+      return;
+    }
+
     e.aimAmt = damp(e.aimAmt, e.los ? 1 : 0, 6, dt);
-    if (e.cool <= 0 && e.los) { if (dist < 7 && Math.abs(dy) < 3) { e.bossAtk = { kind: 'stomp', t: 0, done: false }; audio.bossRoar(e.center); return; } if (dist < T.range) { e.bossAtk = { kind: 'throw', t: 0, done: false }; return; } }
-    if (e.los && dist < 14 && Math.abs(dy) < 2) this._steer(e, dt, pp.x, pp.z, T.speed, 30); else this._follow(e, dt, pp, T.speed);
+    if (e.cool <= 0 && e.los) {
+      if (dist < 9.5 && Math.abs(dy) < 4.5) {
+        e.bossAtk = { kind: 'stomp', t: 0, done: false };
+        audio.bossRoar(e.center);
+        return;
+      }
+      if (phase >= 2 && dist > 11 && dist < 34 && Math.random() < 0.45) {
+        e.bossAtk = { kind: 'leap_smash', t: 0, jumped: false, done: false };
+        return;
+      }
+      if (dist < T.range) {
+        e.bossAtk = { kind: 'boulder', t: 0, done: false };
+        return;
+      }
+    }
+    if (e.los && dist < 18 && Math.abs(dy) < 3) this._steer(e, dt, pp.x, pp.z, T.speed * spdMul, 36);
+    else this._follow(e, dt, pp, T.speed * spdMul, P);
     if (e.los) e.yawT = yawTo;
   }
-  // THE ERASER: a rubber brick that charges across the ground, then scrubs the page and calls
-  // in bombers. It wants to be close; keep moving and it skids past you.
-  _thinkEraser(e, dt, pp, pc, dist, dy, yawTo, P) {
-    const T = e.T, b = e.body, ctx = this.ctx; e.aimAmt = damp(e.aimAmt, 0, 6, dt);
+
+  // ---------------- BOSS 3: TITÃ BLINDADO — Investida Locomotiva & Destruição Total ----------------
+  _thinkTitanArmored(e, dt, pp, pc, dist, dy, yawTo, P) {
+    const T = e.T, b = e.body, ctx = this.ctx;
+    const phase = e.bossPhase || 1;
+    const spdMul = 1 + (phase - 1) * 0.22;
+    e.aimAmt = damp(e.aimAmt, 0, 6, dt);
+
+    e.stepCrushT = (e.stepCrushT || 0) - dt;
+    if (e.stepCrushT <= 0 && Math.hypot(b.vel.x, b.vel.z) > 1.5) {
+      e.stepCrushT = 0.4;
+      if (ctx.destroyEnvironmentAt) ctx.destroyEnvironmentAt(b.pos, 4.5, b.vel);
+    }
+
     if (e.bossAtk) {
       const a = e.bossAtk; a.t += dt;
       if (a.kind === 'charge') {
-        if (a.t < 0.7) { e.yawT = yawTo; b.vel.x = damp(b.vel.x, 0, 8, dt); b.vel.z = damp(b.vel.z, 0, 8, dt); if (a.t > 0.55 && !a.dir) { a.dir = new THREE.Vector3(pp.x - b.pos.x, 0, pp.z - b.pos.z).normalize(); audio.bossRoar(e.center); } }
-        else if (a.t < 1.9) {
-          b.vel.x = a.dir.x * 17 * this.mods.speed; b.vel.z = a.dir.z * 17 * this.mods.speed;
-          for (const t of this.targets()) { if (!t.alive) continue; const d = Math.hypot(t.body.pos.x - b.pos.x, t.body.pos.z - b.pos.z); if (d < 2.6 && Math.abs(t.body.pos.y - b.pos.y) < 3 && !a.hit) { a.hit = true; t.takeDamage(T.dmg * this.mods.damage, e.center); t.knockback(_d.subVectors(t.center, e.center).setY(0.2).normalize(), 13); ctx.effects.shakeAmt += 0.5; } }
-          if (b.hitWall) { a.t = 1.9; ctx.effects.strokeBurst(e.center, INK.PINK, 30, 9, { life: 0.4, size: 0.05 }); audio.stomp(e.center); ctx.effects.shakeAmt += 0.6; }
-          if (Math.floor(a.t * 10) !== Math.floor((a.t - dt) * 10)) ctx.effects.strokeBurst(b.pos.clone().add(_v.set(0, 0.3, 0)), INK.PINK, 4, 3, { life: 0.35, size: 0.06 });
-        } else { b.vel.x = damp(b.vel.x, 0, 4, dt); b.vel.z = damp(b.vel.z, 0, 4, dt); if (a.t > 2.7) { e.bossAtk = null; e.cool = rand(T.cool[0], T.cool[1]); e.charges = (e.charges || 0) + 1; } }
-      } else {
+        if (a.t < 0.55) {
+          e.yawT = yawTo; b.vel.x = damp(b.vel.x, 0, 8, dt); b.vel.z = damp(b.vel.z, 0, 8, dt);
+          if (a.t > 0.4 && !a.dir) {
+            const pVel = (P.body && P.body.vel) ? P.body.vel : _v2.set(0, 0, 0);
+            const tx = pp.x + pVel.x * 0.45 - b.pos.x;
+            const tz = pp.z + pVel.z * 0.45 - b.pos.z;
+            a.dir = new THREE.Vector3(tx, 0, tz).normalize();
+            audio.bossRoar(e.center);
+          }
+        } else if (a.t < 2.1) {
+          const chargeSpd = (21 + phase * 2.5) * this.mods.speed;
+          b.vel.x = a.dir.x * chargeSpd; b.vel.z = a.dir.z * chargeSpd;
+          // Destrói TUDO pela frente durante a investida locomotiva!
+          if (ctx.destroyEnvironmentAt) ctx.destroyEnvironmentAt(b.pos, 5.8, a.dir);
+          for (const t of this.targets()) {
+            if (!t.alive) continue;
+            const d = Math.hypot(t.body.pos.x - b.pos.x, t.body.pos.z - b.pos.z);
+            if (d < 3.8 && Math.abs(t.body.pos.y - b.pos.y) < 4.2 && !a.hit) {
+              a.hit = true;
+              t.takeDamage(T.dmg * 1.25 * this.mods.damage, e.center);
+              t.knockback(_d.subVectors(t.center, e.center).setY(0.35).normalize(), 16);
+              ctx.effects.shakeAmt += 0.8;
+            }
+          }
+          if (Math.floor(a.t * 10) !== Math.floor((a.t - dt) * 10)) {
+            ctx.effects.strokeBurst(b.pos.clone().add(_v.set(0, 0.4, 0)), INK.ORANGE, 8, 5, { life: 0.35, size: 0.06 });
+            audio.stomp(b.pos);
+          }
+        } else {
+          b.vel.x = damp(b.vel.x, 0, 5, dt); b.vel.z = damp(b.vel.z, 0, 5, dt);
+          // Janela breve de superaquecimento da armadura após a investida
+          e.armorBroken = true;
+          if (a.t > 2.75) {
+            e.armorBroken = false;
+            e.bossAtk = null;
+            e.cool = rand(T.cool[0], T.cool[1]) / spdMul;
+            e.charges = (e.charges || 0) + 1;
+          }
+        }
+        return;
+      }
+      if (a.kind === 'fissure') {
         e.yawT = yawTo; b.vel.x = damp(b.vel.x, 0, 6, dt); b.vel.z = damp(b.vel.z, 0, 6, dt);
-        if (a.t > 0.9 && !a.done) {
-          a.done = true; audio.stomp(e.center); ctx.effects.shakeAmt += 0.8;
-          // scrubs the page clean around itself, and the rubbings get up and walk
-          ctx.effects.explosion(b.pos.clone().add(_v.set(0, 0.2, 0)), 6, INK.PINK);
-          const live = this.enemies.filter((x) => x.alive && x.type === 'bomber').length;
-          for (let i = 0; i < 2 && live + i < 4; i++) { const an = rand(0, TAU); const sp = this.spawn('bomber', b.pos.clone().add(_v.set(Math.cos(an) * 3, 0, Math.sin(an) * 3))); sp.state = 'hunt'; sp.root.scale.setScalar(sp.T.scale); }
-          for (const t of this.targets()) { const d = Math.hypot(t.body.pos.x - b.pos.x, t.body.pos.z - b.pos.z); if (t.alive && d < 6.5 && t.body.pos.y < b.pos.y + 3) { t.takeDamage(T.dmg * 0.8 * this.mods.damage, e.center); t.knockback(_d.subVectors(t.center, e.center).normalize(), 9); } }
+        if (a.t > 0.7 && !a.done) {
+          a.done = true;
+          audio.stomp(e.center); ctx.effects.shakeAmt += 1.0;
+          const dir = new THREE.Vector3(pp.x - b.pos.x, 0, pp.z - b.pos.z).normalize();
+          for (let k = 1; k <= 5; k++) {
+            const blastPos = b.pos.clone().addScaledVector(dir, k * 4.8);
+            setTimeout(() => {
+              if (!e.alive || this.mirror) return;
+              ctx.effects.explosion(blastPos, 4.5, INK.ORANGE);
+              audio.explosion(blastPos);
+              if (ctx.destroyEnvironmentAt) ctx.destroyEnvironmentAt(blastPos, 5.2, dir);
+              for (const t of this.targets()) {
+                if (t.alive && t.body.pos.distanceTo(blastPos) < 4.8) {
+                  t.takeDamage(T.dmg * 0.85 * this.mods.damage, blastPos);
+                  t.knockback(_up, 9);
+                }
+              }
+            }, (k - 1) * 110);
+          }
         }
-        if (a.t > 1.6) { e.bossAtk = null; e.cool = rand(T.cool[0], T.cool[1]); }
+        if (a.t > 1.45) { e.bossAtk = null; e.cool = rand(T.cool[0], T.cool[1]) / spdMul; }
+        return;
       }
       return;
     }
-    if (e.cool <= 0 && e.los) { if ((e.charges || 0) % 3 === 2 && dist < 12) { e.bossAtk = { kind: 'rub', t: 0, done: false }; e.charges++; return; } if (dist < T.range && dist > 3) { e.bossAtk = { kind: 'charge', t: 0, hit: false, dir: null }; return; } }
-    if (e.los && dist < 16 && Math.abs(dy) < 2) this._steer(e, dt, pp.x, pp.z, T.speed, 30); else this._follow(e, dt, pp, T.speed);
+
+    if (e.cool <= 0 && e.los) {
+      if ((e.charges || 0) % 2 === 1 && dist < 28) {
+        e.bossAtk = { kind: 'fissure', t: 0, done: false };
+        e.charges++;
+        return;
+      }
+      if (dist < T.range && dist > 3.5) {
+        e.bossAtk = { kind: 'charge', t: 0, hit: false, dir: null };
+        return;
+      }
+    }
+    if (e.los && dist < 18 && Math.abs(dy) < 3) this._steer(e, dt, pp.x, pp.z, T.speed * spdMul, 34);
+    else this._follow(e, dt, pp, T.speed * spdMul, P);
     if (e.los) e.yawT = yawTo;
   }
-  // THE INKBLOT: hops around the arena, sprays fans of bursting ink, and shakes wasps loose.
-  _thinkInkblot(e, dt, pp, pc, dist, dy, yawTo, P) {
-    const T = e.T, b = e.body, ctx = this.ctx; e.aimAmt = damp(e.aimAmt, e.los ? 1 : 0, 6, dt);
+
+  // ---------------- BOSS 4: O HOMEM-BOMBA — Chuva de C4 & Detonação Reativa ----------------
+  _thinkBomberBoss(e, dt, pp, pc, dist, dy, yawTo, P) {
+    const T = e.T, b = e.body, ctx = this.ctx;
+    const phase = e.bossPhase || 1;
+    const spdMul = 1 + (phase - 1) * 0.2;
+    e.aimAmt = damp(e.aimAmt, e.los ? 1 : 0, 7, dt);
+
     if (e.bossAtk) {
-      const a = e.bossAtk; a.t += dt; e.yawT = yawTo; b.vel.x = damp(b.vel.x, 0, 6, dt); b.vel.z = damp(b.vel.z, 0, 6, dt);
-      if (a.kind === 'spray') {
-        if (a.t > 0.6 && a.shots < 9 && a.t > 0.6 + a.shots * 0.09) {
-          _v.setFromMatrixPosition(e.parts.torso.matrixWorld); _v.y += 0.8;
-          const base = Math.atan2(pp.x - b.pos.x, pp.z - b.pos.z); const an = base + (a.shots - 4) * 0.19;
-          _d.set(Math.sin(an), 0.18 + rand(-0.05, 0.05), Math.cos(an)).normalize();
-          this.projectiles.fire(_v, _d, 20, T.dmg * 0.55 * this.mods.damage, e, INK.BLACK, 0.3, 1); a.shots++; if (a.shots === 1) audio.enemyShot(e.center);
+      const a = e.bossAtk; a.t += dt; e.yawT = yawTo;
+      if (a.kind === 'c4_barrage') {
+        b.vel.x = damp(b.vel.x, 0, 6, dt); b.vel.z = damp(b.vel.z, 0, 6, dt);
+        const totalShots = 4 + phase * 2;
+        if (a.t > 0.35 && a.shots < totalShots && a.t > 0.35 + a.shots * 0.11) {
+          _v.setFromMatrixPosition(e.parts.torso.matrixWorld); _v.y += 0.6;
+          const base = Math.atan2(pp.x - b.pos.x, pp.z - b.pos.z);
+          const spreadAng = base + (a.shots - (totalShots - 1) / 2) * 0.18;
+          const grav = 11.5;
+          const flightT = clamp(dist / 22, 0.55, 1.45);
+          const spd = dist / flightT;
+          _d.set(Math.sin(spreadAng) * spd, (pp.y + 1.0 - _v.y + 0.5 * grav * flightT * flightT) / flightT, Math.cos(spreadAng) * spd);
+          const totalSpd = _d.length();
+          _d.divideScalar(Math.max(1, totalSpd));
+          this.projectiles.fire(_v, _d, totalSpd, T.dmg * 0.75 * this.mods.damage, e, INK.ORANGE, 0.19, 1.35, null, grav);
+          audio.fuse(_v);
+          a.shots++;
         }
-        if (a.t > 1.8) { e.bossAtk = null; e.cool = rand(T.cool[0], T.cool[1]); e.sprays = (e.sprays || 0) + 1; }
-      } else {
-        if (a.t > 0.8 && !a.done) {
-          a.done = true; audio.bossRoar(e.center); ctx.effects.strokeBurst(e.center, INK.BLACK, 40, 10, { life: 0.5, size: 0.05 });
-          const live = this.enemies.filter((x) => x.alive && x.type === 'flyer').length;
-          for (let i = 0; i < 3 && live + i < 6; i++) { const sp = this.spawn('flyer', e.center.clone().add(_v.set(rand(-2, 2), 2 + i, rand(-2, 2)))); sp.state = 'hunt'; sp.root.scale.setScalar(sp.T.scale); }
+        if (a.t > 1.5) { e.bossAtk = null; e.cool = rand(T.cool[0], T.cool[1]) / spdMul; e.barrages = (e.barrages || 0) + 1; }
+        return;
+      }
+      if (a.kind === 'vest_blast') {
+        // Corre apitando em direção ao jogador e detona o colete reativo!
+        if (a.t < 0.95) {
+          this._steer(e, dt, pp.x, pp.z, T.speed * 1.65 * spdMul, 58);
+          if (Math.floor(a.t * 10) !== Math.floor((a.t - dt) * 10)) {
+            audio.fuse(e.center);
+            ctx.effects.strokeBurst(e.center, INK.RED, 6, 4, { life: 0.2, size: 0.04 });
+          }
+        } else if (!a.done) {
+          a.done = true;
+          const blastR = 8.0 + phase * 1.2;
+          ctx.effects.explosion(e.center, blastR * 0.85, INK.ORANGE);
+          audio.explosion(e.center);
+          ctx.effects.shakeAmt += 1.0;
+          if (ctx.destroyEnvironmentAt) ctx.destroyEnvironmentAt(b.pos, blastR);
+          for (const t of this.targets()) {
+            const dd = t.center.distanceTo(e.center);
+            if (t.alive && dd < blastR) {
+              t.takeDamage(T.dmg * 1.35 * this.mods.damage * (1 - dd / blastR * 0.5), e.center);
+              t.knockback(_d.subVectors(t.center, e.center).setY(0.4).normalize(), 14);
+            }
+          }
+          // Invoca demolidores explosivos no impacto
+          const liveB = this.enemies.filter((x) => x.alive && x.type === 'bomber').length;
+          for (let i = 0; i < 2 && liveB + i < 5; i++) {
+            const an = rand(0, TAU);
+            const sp = this.spawn('bomber', b.pos.clone().add(_v.set(Math.cos(an) * 3.5, 0.3, Math.sin(an) * 3.5)));
+            sp.state = 'hunt'; sp.root.scale.setScalar(sp.T.scale);
+          }
         }
-        if (a.t > 1.4) { e.bossAtk = null; e.cool = rand(T.cool[0], T.cool[1]); }
+        if (a.t > 1.45) { e.bossAtk = null; e.cool = rand(T.cool[0], T.cool[1]) / spdMul; }
+        return;
       }
       return;
     }
-    // it moves in hops: a big jump toward you every couple of seconds, a slam of ink on landing
-    e.hopT = (e.hopT ?? 1) - dt;
-    if (b.onGround && e.hopT <= 0 && dist > 4) { e.hopT = rand(1.6, 2.4); const nx = (pp.x - b.pos.x) / dist, nz = (pp.z - b.pos.z) / dist; b.vel.set(nx * 11, 13, nz * 11); b.onGround = false; e.hopping = true; }
-    if (e.hopping && b.onGround) { e.hopping = false; audio.stomp(e.center); ctx.effects.shakeAmt += 0.4; ctx.effects.bloodPool(b.pos, 3.5, INK.BLACK); for (const t of this.targets()) { const d = Math.hypot(t.body.pos.x - b.pos.x, t.body.pos.z - b.pos.z); if (t.alive && d < 4.5 && Math.abs(t.body.pos.y - b.pos.y) < 2.5) { t.takeDamage(T.dmg * 0.7 * this.mods.damage, e.center); t.knockback(_d.subVectors(t.center, e.center).normalize(), 8); } } }
-    if (e.cool <= 0 && e.los) { if ((e.sprays || 0) % 3 === 2) { e.bossAtk = { kind: 'summon', t: 0, done: false }; e.sprays++; return; } if (dist < T.range) { e.bossAtk = { kind: 'spray', t: 0, shots: 0 }; return; } }
-    if (!e.hopping) { if (e.los && dist < 14 && Math.abs(dy) < 2) this._steer(e, dt, pp.x, pp.z, T.speed, 30); else this._follow(e, dt, pp, T.speed); }
+
+    if (e.cool <= 0 && e.los) {
+      if (dist < 13 || ((e.barrages || 0) % 2 === 1 && dist < 24)) {
+        e.bossAtk = { kind: 'vest_blast', t: 0, done: false };
+        e.barrages = (e.barrages || 0) + 1;
+        return;
+      }
+      if (dist < T.range) {
+        e.bossAtk = { kind: 'c4_barrage', t: 0, shots: 0 };
+        return;
+      }
+    }
+    if (e.los && dist < 16 && Math.abs(dy) < 2) this._steer(e, dt, pp.x, pp.z, T.speed * spdMul, 40);
+    else this._follow(e, dt, pp, T.speed * spdMul, P);
     if (e.los) e.yawT = yawTo;
   }
+
   _thinkFlyer(e, dt, pc, P) {
     const T = e.T, b = e.body, ctx = this.ctx; e.flyT -= dt; e.cool -= dt;
     const want = _v2;
@@ -860,33 +1573,33 @@ export class EnemyManager {
       if (e.cool <= 0 && P.alive && ctx.world.hasLineOfSight(e.center, pc, SEE_THROUGH)) { e.flyState = 'dive'; e.flyT = 1.6; e.diveHit = false; audio.flyerDive(e.center); }
       if (Math.random() < dt * 1.5) audio.flyerBuzz(e.center);
     } else if (e.flyState === 'dive') {
-      want.copy(pc); this._flyTo(e, want, 16, 28, dt);
+      want.copy(pc); this._flyTo(e, want, 18, 30, dt);
       const d = e.center.distanceTo(pc);
-      if (d < 1.4 && !e.diveHit) { e.diveHit = true; if (P.tryBlockMelee(e)) { e.flyState = 'stunned'; e.state = 'stunned'; e.t = 0; b.vel.set(-b.vel.x * 0.3, -3, -b.vel.z * 0.3); } else if (P.alive) { P.takeDamage(T.dmg * this.mods.damage, e.center); P.knockback(_d.copy(b.vel).normalize(), 3); } }
+      if (d < 1.45 && !e.diveHit) { e.diveHit = true; if (P.tryBlockMelee && P.tryBlockMelee(e)) { e.flyState = 'stunned'; e.state = 'stunned'; e.t = 0; b.vel.set(-b.vel.x * 0.3, -3, -b.vel.z * 0.3); } else if (P.alive) { P.takeDamage(T.dmg * this.mods.damage, e.center); P.knockback(_d.copy(b.vel).normalize(), 3.5); } }
       if (e.flyT <= 0 || e.diveHit || b.hitWall) { e.flyState = 'climb'; e.flyT = 1.1; e.cool = rand(T.cool[0], T.cool[1]); }
     } else {
       want.set(pc.x + (b.pos.x - pc.x) * 1.5, pc.y + 8, pc.z + (b.pos.z - pc.z) * 1.5); this._flyTo(e, want, T.speed, 18, dt);
       if (e.flyT <= 0) e.flyState = 'orbit';
     }
-    // avoid geometry: look ahead and above the ground
     const sp = b.vel.length();
     if (sp > 0.5) { _d.copy(b.vel).divideScalar(sp); const h = ctx.world.raycast(e.center, _d, 3.5); if (h) { b.vel.addScaledVector(h.normal, 14 * dt); b.vel.y += 12 * dt; } }
     const g = ctx.world.raycast(e.center, _v3.set(0, -1, 0), 2.5); if (g) b.vel.y += 12 * dt;
     _d.copy(b.vel); if (_d.lengthSq() > 0.1) e.yawT = Math.atan2(_d.x, _d.z);
   }
   _flyTo(e, target, speed, accel, dt) { const b = e.body; _d.subVectors(target, b.pos); const l = _d.length(); if (l < 0.3) { b.vel.multiplyScalar(Math.max(0, 1 - 4 * dt)); return; } _d.divideScalar(l).multiplyScalar(speed * this.mods.speed); _v3.subVectors(_d, b.vel); const m = _v3.length(); if (m > accel * dt) _v3.multiplyScalar(accel * dt / m); b.vel.add(_v3); }
+
   _shoot(e, dt, pc, P) {
     const T = e.T, ctx = this.ctx; const muzzle = _v.setFromMatrixPosition(e.tip.matrixWorld);
+    const rateMul = (e.elite === 'berserker' ? 1.5 : 1) * (e.auraDmg || 1);
     if (T.weapon === 'sniper') {
       if (e.cool > 0) { this._hideLaser(e); return; }
-      e.aimT += dt;
-      // Predictive sniper aiming: leads moving targets based on bullet velocity
+      e.aimT += dt * rateMul;
       const pVel = (P.body && P.body.vel) ? P.body.vel : _v2.set(0, 0, 0);
-      const leadTime = muzzle.distanceTo(pc) / Math.max(1, T.pspeed || 120);
-      const isElite = (T.name && T.name.includes('Precisão')) || T.spread < 0.002;
-      const leadFactor = isElite ? 0.95 : 0.6;
+      const leadTime = muzzle.distanceTo(pc) / Math.max(1, T.pspeed || 150);
+      const isElite = (T.name && T.name.includes('Precisão')) || T.spread < 0.002 || !!e.elite;
+      const leadFactor = isElite ? 0.96 : 0.72;
       const targetPredict = _v3.copy(pc).addScaledVector(pVel, leadTime * leadFactor);
-      const trackRate = isElite ? 8.8 : 5.8;
+      const trackRate = isElite ? 9.5 : 6.5;
 
       if (!e.aimPoint) { e.aimPoint = targetPredict.clone(); }
       else e.aimPoint.lerp(targetPredict, 1 - Math.exp(-trackRate * dt));
@@ -894,24 +1607,62 @@ export class EnemyManager {
       this._showLaser(e, muzzle, e.aimPoint, clamp(e.aimT / T.aimTime, 0, 1));
       if (e.aimT > T.aimTime * 0.45 && !e.aimWarned) { e.aimWarned = true; audio.sniperAim(e.center); }
       if (e.aimT >= T.aimTime) {
-        e.aimT = 0; e.aimWarned = false; e.cool = rand(T.cool[0], T.cool[1]);
-        this._fireOne(e, muzzle, e.aimPoint, T.spread, T.pspeed, T.dmg, isElite ? 0.09 : 0.07, P);
+        e.aimT = 0; e.aimWarned = false; e.cool = rand(T.cool[0], T.cool[1]) / rateMul;
+        this._fireOne(e, muzzle, e.aimPoint, T.spread, T.pspeed, T.dmg * (e.auraDmg || 1), isElite ? 0.09 : 0.07, P);
         audio.sniperShot(e.center);
         this._hideLaser(e); e.aimPoint = null;
       }
       return;
     }
-    if (e.burstLeft > 0) { e.burstT -= dt; if (e.burstT <= 0) { e.burstT = T.burstInt; e.burstLeft--; this._fireOne(e, muzzle, pc, T.spread, T.pspeed, T.dmg, 0.045, P); audio.enemyShot(e.center); if (e.burstLeft === 0) e.cool = rand(T.cool[0], T.cool[1]); } return; }
-    if (e.cool <= 0) {
-      if (T.weapon === 'shotgun') { for (let i = 0; i < T.pellets; i++) this._fireOne(e, muzzle, pc, T.spread, T.pspeed * rand(0.85, 1.1), T.dmg, 0.05, P); audio.shotgun(e.center); e.cool = rand(T.cool[0], T.cool[1]); ctx.effects.strokeBurst(muzzle, INK.ORANGE, 8, 5, { life: 0.1, size: 0.04 }); }
-      else if (T.weapon === 'bazooka') {
-        _d.subVectors(pc, muzzle); const l = _d.length(); _d.divideScalar(Math.max(1, l)); _d.y += l * 0.008; _d.normalize();
-        this.projectiles.fire(muzzle, _d, T.pspeed, T.dmg * this.mods.damage, e, INK.ORANGE, 0.11, 1);
-        audio.explosion(muzzle); ctx.effects.strokeBurst(muzzle, INK.ORANGE, 10, 6, { life: 0.16, size: 0.045 });
-        e.cool = rand(T.cool[0], T.cool[1]);
+    if (e.burstLeft > 0) {
+      e.burstT -= dt * rateMul;
+      if (e.burstT <= 0) {
+        e.burstT = T.burstInt; e.burstLeft--;
+        if (T.weapon === 'mortar') {
+          this._fireMortar(e, muzzle, pc, P);
+        } else {
+          this._fireOne(e, muzzle, pc, T.spread, T.pspeed, T.dmg * (e.auraDmg || 1), 0.045, P);
+          audio.enemyShot(e.center);
+        }
+        if (e.burstLeft === 0) e.cool = rand(T.cool[0], T.cool[1]) / rateMul;
       }
-      else { e.burstLeft = T.burst; e.burstT = 0; }
+      return;
     }
+    if (e.cool <= 0) {
+      if (T.weapon === 'shotgun') {
+        for (let i = 0; i < T.pellets; i++) this._fireOne(e, muzzle, pc, T.spread, T.pspeed * rand(0.85, 1.1), T.dmg * (e.auraDmg || 1), 0.05, P);
+        audio.shotgun(e.center); e.cool = rand(T.cool[0], T.cool[1]) / rateMul;
+        ctx.effects.strokeBurst(muzzle, INK.ORANGE, 8, 5, { life: 0.1, size: 0.04 });
+      } else if (T.weapon === 'bazooka') {
+        const pVel = (P.body && P.body.vel) ? P.body.vel : _v2.set(0, 0, 0);
+        const leadT = muzzle.distanceTo(pc) / Math.max(12, T.pspeed) * 0.65;
+        _v3.copy(pc).addScaledVector(pVel, leadT);
+        _d.subVectors(_v3, muzzle); const l = _d.length(); _d.divideScalar(Math.max(1, l)); _d.y += l * 0.008; _d.normalize();
+        this.projectiles.fire(muzzle, _d, T.pspeed, T.dmg * this.mods.damage * (e.auraDmg || 1), e, INK.ORANGE, 0.12, 1.2);
+        audio.explosion(muzzle); ctx.effects.strokeBurst(muzzle, INK.ORANGE, 10, 6, { life: 0.16, size: 0.045 });
+        e.cool = rand(T.cool[0], T.cool[1]) / rateMul;
+      } else {
+        e.burstLeft = T.burst || 3; e.burstT = 0;
+      }
+    }
+  }
+  _fireMortar(e, muzzle, pc, P) {
+    const T = e.T;
+    const pVel = (P.body && P.body.vel) ? P.body.vel : _v2.set(0, 0, 0);
+    const dist = muzzle.distanceTo(pc);
+    const grav = 13.5;
+    const flightT = clamp(dist / 22, 0.65, 1.75);
+    const tx = pc.x + pVel.x * flightT * 0.65 + rand(-1.2, 1.2);
+    const tz = pc.z + pVel.z * flightT * 0.65 + rand(-1.2, 1.2);
+    const ty = pc.y;
+    const vx = (tx - muzzle.x) / flightT;
+    const vz = (tz - muzzle.z) / flightT;
+    const vy = (ty - muzzle.y + 0.5 * grav * flightT * flightT) / flightT;
+    _d.set(vx, vy, vz);
+    const spd = _d.length();
+    _d.divideScalar(Math.max(1, spd));
+    this.projectiles.fire(muzzle, _d, spd, T.dmg * this.mods.damage * (e.auraDmg || 1), e, INK.ORANGE, 0.15, 1.25, null, grav);
+    audio.explosion(muzzle);
   }
   _showLaser(e, from, to, charge) {
     if (!e.laser) {
@@ -919,8 +1670,6 @@ export class EnemyManager {
       e.laser.frustumCulled = false; this.ctx.scene.add(e.laser);
     }
     e.laser.visible = true;
-    // stop the beam short of where it is pointing, otherwise a shot aimed at your face
-    // renders as a red slab filling the screen instead of a thin telegraph line
     const d = _v2.subVectors(to, from); const len = d.length();
     if (len < 2) { e.laser.visible = false; return; }
     _v3.copy(from).addScaledVector(d, 1 - 1.6 / len);
@@ -930,20 +1679,22 @@ export class EnemyManager {
   _removeLaser(e) { if (e.laser) { this.ctx.scene.remove(e.laser); e.laser.geometry.dispose(); e.laser = null; } }
   _fireOne(e, muzzle, pc, spread, speed, dmg, thick, P = this.ctx.player) {
     const wave = (this.ctx.game && this.ctx.game.wave) || 1;
-    const smart = clamp((wave - 1) / 8, 0, 1);
+    const smart = clamp((wave - 1) / 8, 0.2, 1.25) + (e.elite ? 0.25 : 0);
     const pVel = (P && P.body && P.body.vel) ? P.body.vel : null;
-    if (pVel && smart > 0.1 && e.T.weapon !== 'sniper') {
-      const leadT = muzzle.distanceTo(pc) / Math.max(12, speed || 30) * smart * 0.58;
+    if (pVel && e.T.weapon !== 'sniper') {
+      const leadT = muzzle.distanceTo(pc) / Math.max(12, speed || 36) * Math.min(0.92, smart * 0.68);
       _v3.copy(pc).addScaledVector(pVel, leadT);
       _d.subVectors(_v3, muzzle);
     } else {
       _d.subVectors(pc, muzzle);
     }
-    _d.y += rand(-0.2, 0.3); _d.normalize();
+    _d.y += rand(-0.15, 0.22); _d.normalize();
     const pSpd = pVel ? Math.hypot(pVel.x, pVel.z) : (P.speed || 0);
-    const sp = spread * (1 + pSpd * 0.05) * (1 - smart * 0.28); _d.x += rand(-sp, sp); _d.y += rand(-sp, sp); _d.z += rand(-sp, sp); _d.normalize();
+    const sp = spread * (1 + pSpd * 0.035) * Math.max(0.45, 1 - smart * 0.32);
+    _d.x += rand(-sp, sp); _d.y += rand(-sp, sp); _d.z += rand(-sp, sp); _d.normalize();
     const pInk = e.T.weapon === 'laser' ? INK.ORANGE : INK.RED;
-    this.projectiles.fire(muzzle, _d, speed, dmg * this.mods.damage, e, pInk, e.T.weapon === 'laser' ? 0.06 : thick); this.ctx.effects.strokeBurst(muzzle, INK.ORANGE, 4, 4, { life: 0.07, size: 0.03 });
+    this.projectiles.fire(muzzle, _d, speed, dmg * this.mods.damage, e, pInk, e.T.weapon === 'laser' ? 0.06 : thick);
+    this.ctx.effects.strokeBurst(muzzle, INK.ORANGE, 4, 4, { life: 0.07, size: 0.03 });
   }
   _animateFlyer(e, dt) {
     const J = e.J, b = e.body; e.phase += dt * 14; const flap = Math.sin(e.phase) * 0.35;
@@ -956,6 +1707,27 @@ export class EnemyManager {
     e.walk = damp(e.walk, clamp(sp / 4, 0, 1), 10, dt); const w = e.walk;
     e.phase += dt * (sp * 2.2 + (sp > 0.4 ? 3 : 0)); const s = Math.sin(e.phase), c = Math.cos(e.phase);
 
+    if (T.model === 'tank' || T.model === 'convoy') {
+      if (J.headG && pc) {
+        _v.subVectors(pc, e.center); const yawTo = Math.atan2(_v.x, _v.z);
+        J.headG.rotation.y = wrapAngle(yawTo - e.yaw);
+      }
+      if (J.torso) J.torso.rotation.x = Math.sin(e.phase * 2) * 0.025 * w;
+      return;
+    }
+    if (T.model === 'cavalry') {
+      if (J.legFL && J.legBL) {
+        J.legFL.rotation.x = s * 1.05 * w; J.legFR.rotation.x = -s * 1.05 * w;
+        J.legBL.rotation.x = -s * 1.05 * w; J.legBR.rotation.x = s * 1.05 * w;
+      }
+      if (J.hips) J.hips.position.y = 0.92 + Math.abs(c) * 0.09 * w;
+      if (J.tail) J.tail.rotation.y = Math.sin(e.t * 9) * 0.4;
+      if (J.headG && pc) {
+        _v.subVectors(pc, e.center); const yawTo = Math.atan2(_v.x, _v.z);
+        J.headG.rotation.y = clamp(wrapAngle(yawTo - e.yaw), -0.95, 0.95);
+      }
+      return;
+    }
     if (T.model === 'quadruped') {
       if (J.legFL && J.legBL) {
         J.legFL.rotation.x = s * 0.9 * w; J.legFR.rotation.x = -s * 0.9 * w;
@@ -1008,8 +1780,8 @@ export class EnemyManager {
     const aim = e.aimAmt;
     if (T.weapon === 'blade' || T.weapon === 'flag') {
       const at = e.attackT;
-      const wind = at > 0.18 ? clamp((0.55 - at) / 0.37, 0, 1) : 0;      // arm goes up and back
-      const strike = at > 0 && at <= 0.18 ? 1 - at / 0.18 : 0;           // then chops down
+      const wind = at > 0.18 ? clamp((0.55 - at) / 0.37, 0, 1) : 0;
+      const strike = at > 0 && at <= 0.18 ? 1 - at / 0.18 : 0;
       if (J.armR) {
         J.armR.rotation.x = -0.8 * (1 - w) - s * 0.9 * w - wind * 2.2 + strike * 1.5;
         J.armR.rotation.z = -0.3 + wind * 0.7 - strike * 0.5;
@@ -1021,14 +1793,17 @@ export class EnemyManager {
         J.torso.rotation.x = -0.3 * w + e.flinch * 0.35 - wind * 0.25 + strike * 0.55;
         J.torso.rotation.y = wind * 0.5 - strike * 0.6;
       }
-    } else if (T.weapon === 'boss') {
-      const a = e.bossAtk; let raise = 0, slam = 0; if (a && a.kind === 'stomp') { raise = a.t < 0.75 ? clamp(a.t / 0.6, 0, 1) : 0; slam = a.t >= 0.75 ? 1 : 0; }
-      if (a && a.kind === 'throw') { raise = a.t < 0.6 ? clamp(a.t / 0.5, 0, 1) : 0; }
-      if (J.armR) { J.armR.rotation.x = -0.4 - s * 0.5 * w - raise * 2.4 + slam * 0.9; J.armR.rotation.z = -0.35; }
-      if (J.foreR) J.foreR.rotation.x = -0.6 - raise * 0.4;
-      if (J.armL) { J.armL.rotation.x = s * 0.6 * w - raise * 0.8; J.armL.rotation.z = 0.35; }
-      if (J.foreL) J.foreL.rotation.x = -0.5;
-      if (J.torso) J.torso.rotation.x = -0.1 * w + e.flinch * 0.15 - raise * 0.3 + slam * 0.5;
+    } else if (T.weapon === 'boss' && T.isTitan) {
+      const a = e.bossAtk;
+      let raise = 0, slam = 0, chargeLean = 0;
+      if (a && (a.kind === 'stomp' || a.kind === 'fissure')) { raise = a.t < 0.65 ? clamp(a.t / 0.55, 0, 1) : 0; slam = a.t >= 0.65 ? 1 : 0; }
+      if (a && a.kind === 'boulder') { raise = a.t < 0.55 ? clamp(a.t / 0.45, 0, 1) : 0; }
+      if (a && a.kind === 'charge' && a.t >= 0.55 && a.t < 2.1) chargeLean = 1;
+      if (J.armR) { J.armR.rotation.x = -0.4 - s * 0.65 * w - raise * 2.4 + slam * 1.1 - chargeLean * 0.8; J.armR.rotation.z = -0.35 - chargeLean * 0.3; }
+      if (J.foreR) J.foreR.rotation.x = -0.65 - raise * 0.4 - chargeLean * 0.6;
+      if (J.armL) { J.armL.rotation.x = s * 0.65 * w - raise * 2.2 + slam * 1.0 - chargeLean * 1.1; J.armL.rotation.z = 0.35 + chargeLean * 0.3; }
+      if (J.foreL) J.foreL.rotation.x = -0.55 - chargeLean * 0.7;
+      if (J.torso) J.torso.rotation.x = -0.15 * w + e.flinch * 0.15 - raise * 0.3 + slam * 0.55 - chargeLean * 0.45;
     } else {
       if (J.armR) { J.armR.rotation.x = (-s * 1.0 * w) * (1 - aim) + (-1.35 + e.flinch * 0.35) * aim; J.armR.rotation.z = -0.25 * (1 - aim); }
       if (J.foreR) J.foreR.rotation.x = -0.35 * (1 - aim) + -0.2 * aim;

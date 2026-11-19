@@ -1,6 +1,18 @@
 // The in-match shop: cash, and buying weapons, armor, ammo and grenades. Mixed into Player.
 import { audio } from '../audio.js';
 
+export const SHOP_WEAPONS = {
+  punisher: { cost: 500, label: 'Punisher Five-SeveN', ammoLabel: 'Munição 5.7mm Perf.' },
+  deagle: { cost: 700, label: 'Desert Eagle .50', ammoLabel: 'Munição .50 AE' },
+  requiem: { cost: 1600, label: 'Requiem .500 Magnum', ammoLabel: 'Munição .500 Magnum' },
+  shotgun: { cost: 600, label: 'Escopeta', ammoLabel: 'Cartuchos de Escopeta' },
+  smg: { cost: 750, label: 'Submetralhadora SMG', ammoLabel: 'Munição SMG' },
+  rifle: { cost: 900, label: 'Rifle de Assalto', ammoLabel: 'Munição Rifle' },
+  sniper: { cost: 1200, label: 'Sniper', ammoLabel: 'Munição Sniper' },
+  laser: { cost: 1500, label: 'Fuzil de Plasma', ammoLabel: 'Células de Plasma' },
+  bazooka: { cost: 1800, label: 'Bazuca', ammoLabel: 'Foguetes Bazuca' },
+};
+
 export const ShopMixin = {
   addCash(amount, reason = '') {
     this.money += amount;
@@ -20,6 +32,9 @@ export const ShopMixin = {
   },
   buyItem(key) {
     const PRICES = {
+      punisher: 500,
+      deagle: 700,
+      requiem: 1600,
       shotgun: 600,
       smg: 750,
       rifle: 900,
@@ -38,59 +53,18 @@ export const ShopMixin = {
       if (this.ctx.hud) this.ctx.hud.message('Saldo Insuficiente!', `Necessário $${cost}`, 1.2);
       return false;
     }
-    if (key === 'shotgun') {
-      if (this.weapons[1].owned) {
-        this.weapons[1].addAmmo(this.weapons[1].maxReserve);
-        this.spendCash(cost, 'Munição Escopeta');
+    const wInfo = SHOP_WEAPONS[key];
+    if (wInfo) {
+      const idx = this.weapons.findIndex((w) => w.kind === key);
+      if (idx < 0) return false;
+      const w = this.weapons[idx];
+      if (w.owned) {
+        w.addAmmo(w.maxReserve);
+        this.spendCash(cost, wInfo.ammoLabel);
       } else {
-        this.spendCash(cost, 'Escopeta Adquirida');
-        this.weapons[1].owned = true;
-        this.switchTo(1);
-      }
-    } else if (key === 'smg') {
-      if (this.weapons[2].owned) {
-        this.weapons[2].addAmmo(this.weapons[2].maxReserve);
-        this.spendCash(cost, 'Munição SMG');
-      } else {
-        this.spendCash(cost, 'Submetralhadora Adquirida');
-        this.weapons[2].owned = true;
-        this.switchTo(2);
-      }
-    } else if (key === 'rifle') {
-      if (this.weapons[3].owned) {
-        this.weapons[3].addAmmo(this.weapons[3].maxReserve);
-        this.spendCash(cost, 'Munição Rifle');
-      } else {
-        this.spendCash(cost, 'Rifle Adquirido');
-        this.weapons[3].owned = true;
-        this.switchTo(3);
-      }
-    } else if (key === 'sniper') {
-      if (this.weapons[4].owned) {
-        this.weapons[4].addAmmo(this.weapons[4].maxReserve);
-        this.spendCash(cost, 'Munição Sniper');
-      } else {
-        this.spendCash(cost, 'Sniper Adquirida');
-        this.weapons[4].owned = true;
-        this.switchTo(4);
-      }
-    } else if (key === 'laser') {
-      if (this.weapons[5].owned) {
-        this.weapons[5].addAmmo(this.weapons[5].maxReserve);
-        this.spendCash(cost, 'Células de Plasma');
-      } else {
-        this.spendCash(cost, 'Fuzil de Plasma Adquirido');
-        this.weapons[5].owned = true;
-        this.switchTo(5);
-      }
-    } else if (key === 'bazooka') {
-      if (this.weapons[6].owned) {
-        this.weapons[6].addAmmo(this.weapons[6].maxReserve);
-        this.spendCash(cost, 'Foguetes Bazuca');
-      } else {
-        this.spendCash(cost, 'Bazuca Adquirida');
-        this.weapons[6].owned = true;
-        this.switchTo(6);
+        this.spendCash(cost, wInfo.label + ' Adquirida');
+        w.owned = true;
+        this.switchTo(idx);
       }
     } else if (key === 'armor_light') {
       if (this.armor >= this.maxArmor) {
