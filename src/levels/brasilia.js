@@ -17,6 +17,7 @@ import * as M from './brasiliaLandmarks.js';
 import { terrainHeight as TH } from './data/brasiliaElev.js';
 
 import { buildBrasiliaRoads } from './brasiliaRoads.js';
+import * as P from './brasiliaProps.js';
 
 const { BLUE: BL, RED: RD, BLACK: BK, ORANGE: OR, GREEN: GN, PINK: PK } = INK;
 
@@ -65,14 +66,17 @@ export function buildBrasilia(B, arena = false) {
   // relevo real (DEM): superfície verde CONTÍNUA e suave — cada célula usa a altura real nos 4 cantos,
   // então células vizinhas se encaixam sem degrau (sem facetamento). O acabamento das vias (meio-fio
   // elevado) é que garante a borda limpa onde o asfalto encontra a grama.
+  // Subdivisão alinhada a uma GRADE GLOBAL de 6 u: onde dois retângulos de chão se sobrepõem, os
+  // triângulos ficam idênticos (mesma profundidade) — antes cada retângulo tinha a própria grade e as
+  // camadas brigavam pela profundidade, gerando pontinhos e tracejados pretos espalhados pela grama.
+  const GG = 6;
+  const cuts = (a, b) => { const c = [a]; for (let v = Math.floor(a / GG) * GG + GG; v < b - 0.05; v += GG) if (v > a + 0.05) c.push(v); c.push(b); return c; };
   for (const [x1, z1, x2, z2] of D.ground) {
-    const w = x2 - x1, d = z2 - z1;
-    const nxc = Math.max(1, Math.min(80, Math.ceil(w / 8))), nzc = Math.max(1, Math.min(80, Math.ceil(d / 8)));
-    const cxg = (x1 + x2) / 2, czg = (z1 + z2) / 2;
-    for (let iz = 0; iz < nzc; iz++) for (let ix = 0; ix < nxc; ix++) {
-      const ax = x1 + w * ix / nxc, bx = x1 + w * (ix + 1) / nxc;
-      const az = z1 + d * iz / nzc, bz = z1 + d * (iz + 1) / nzc;
-      quad(acc('u:' + GN, cxg, czg), [ax, TH(ax, az) - 0.16, az], [bx, TH(bx, az) - 0.16, az], [bx, TH(bx, bz) - 0.16, bz], [ax, TH(ax, bz) - 0.16, bz], UP);
+    const xs = cuts(x1, x2), zs = cuts(z1, z2);
+    const hgt = zs.map((z) => xs.map((x) => TH(x, z) - 0.16));
+    for (let iz = 0; iz < zs.length - 1; iz++) for (let ix = 0; ix < xs.length - 1; ix++) {
+      const ax = xs[ix], bx = xs[ix + 1], az = zs[iz], bz = zs[iz + 1];
+      quad(acc('u:' + GN, (ax + bx) / 2, (az + bz) / 2), [ax, hgt[iz][ix], az], [bx, hgt[iz][ix + 1], az], [bx, hgt[iz + 1][ix + 1], bz], [ax, hgt[iz + 1][ix], bz], UP);
     }
   }
   // Barreiras perimetrais sólidas e visíveis (muralha de contenção urbana de 4.5m intransponível)
@@ -117,6 +121,7 @@ export function buildBrasilia(B, arena = false) {
   const boxRot = (cx, y, cz, w, h, d, ang, ink, near = false) => { const g = new THREE.BoxGeometry(w, h, d); g.rotateY(-ang); g.translate(cx, y + h / 2, cz); if (near) addNearGeo(g, ink); else addGeo(g, ink); };
   let bi = 0;
   const roofs = [];
+  const FACADE = 7 * 0.0625;   // etiqueta de material 7 = fachada de prédio
   for (const b of D.blds) {
     bi++;
     if (b[0] === 'r') {
@@ -125,7 +130,7 @@ export function buildBrasilia(B, arena = false) {
       const S = STYLE[st] || STYLE.gen, body = S.body[bi % S.body.length], trim = S.trim[(bi * 7) % S.trim.length];
       const ca = Math.cos(ang), sa = Math.sin(ang);
       const L2 = (u, v) => [cx + ca * u - sa * v, cz + sa * u + ca * v];
-      boxRot(cx, pil + ty, cz, Lg, h - pil, Dp, ang, body);
+      boxRot(cx, pil + ty, cz, Lg, h - pil, Dp, ang, body + FACADE);   // fachada: janelas/textura no shader
       if (pil > 0) { // pilotis: colunas e portaria de vidro
         for (let u = -Lg / 2 + 1; u <= Lg / 2 - 1 + 0.01; u += Math.max(3, (Lg - 2) / 5)) for (const v of [-Dp / 2 + 0.8, Dp / 2 - 0.8]) { const [px, pz] = L2(u, v); box(px, ty, pz, 0.55, pil, 0.55, { ink: BK, noCollide: true }); }
         boxRot(cx, ty, cz, Math.min(5, Lg * 0.25), pil, Dp * 0.6, ang, BL);
@@ -153,7 +158,7 @@ export function buildBrasilia(B, arena = false) {
       if (THREE.ShapeUtils.isClockWise(pts)) pts.reverse();
       const n = pts.length; let cx = 0, cz = 0; for (const p of pts) { cx += p.x / n; cz += p.y / n; }
       const ty = TH(cx, cz);                                         // base do prédio sobre o relevo real
-      const a = acc('u:' + body, cx, cz);
+      const a = acc('u:' + (body + FACADE), cx, cz);
       for (let i = 0; i < n; i++) { const p = pts[i], q = pts[(i + 1) % n]; quad(a, [p.x, ty, p.y], [q.x, ty, q.y], [q.x, h + ty, q.y], [p.x, h + ty, p.y], [q.y - p.y, 0, -(q.x - p.x)]); }
       const tris = THREE.ShapeUtils.triangulateShape(pts, []);
       for (const [i0, i1, i2] of tris) { const base = a.pos.length / 3; for (const k of [i0, i2, i1]) a.pos.push(pts[k].x, h + ty, pts[k].y); a.idx.push(base, base + 1, base + 2); }
@@ -211,38 +216,101 @@ export function buildBrasilia(B, arena = false) {
   }
 
   // ------------------------------------------------------------------ árvores, postes e paradas (instanciados)
-  const treeProto = () => {
-    const trunk = new THREE.CylinderGeometry(0.16, 0.24, 3.2, 6); trunk.translate(0, 1.6, 0);
-    const c1 = new THREE.SphereGeometry(1, 8, 6); c1.scale(2.3, 1.15, 2.3); c1.translate(0, 3.7, 0);
-    return [{ geo: trunk, ink: BK, fill: true }, { geo: c1, ink: GN, allowOverride: true }];
+  // vegetação: espécies típicas do Plano (cerrado retorcido, mangueiras, ipês floridos, palmeiras-imperiais),
+  // 2 variações cada, versão detalhada perto e leve longe; moitas e canteiros Burle Marx em volta.
+  const hsh = (x, z, k = 0) => { const v = Math.sin(x * 12.9898 + z * 78.233 + k * 37.719) * 43758.5453; return v - Math.floor(v); };
+  // grade das caixas sólidas (prédios, pilares…) para não plantar nada dentro deles
+  const OCC = 8, occ = new Map();
+  for (const bx of B.world.boxes) {
+    if (bx.max.y - bx.min.y < 0.5) continue;
+    for (let ix = Math.floor(bx.min.x / OCC); ix <= Math.floor(bx.max.x / OCC); ix++) for (let iz = Math.floor(bx.min.z / OCC); iz <= Math.floor(bx.max.z / OCC); iz++) {
+      const k = ix * 65536 + iz; let a = occ.get(k); if (!a) occ.set(k, a = []); a.push(bx);
+    }
+  }
+  const blocked = (x, z, r, y) => {
+    for (let ix = Math.floor((x - r) / OCC); ix <= Math.floor((x + r) / OCC); ix++) for (let iz = Math.floor((z - r) / OCC); iz <= Math.floor((z + r) / OCC); iz++) {
+      const a = occ.get(ix * 65536 + iz); if (!a) continue;
+      for (const bx of a) if (bx.min.x < x + r && bx.max.x > x - r && bx.min.z < z + r && bx.max.z > z - r && bx.max.y > y + 0.2 && bx.min.y < y + 3) return true;
+    }
+    return false;
   };
-  const TREE_INK = [GN, GN, OR, PK, PK, BK];
+  const onGround = (x, z) => { const t = B.world.terrainAt(x, z); return t === t; };
+  const SPECIES = {
+    cerrado: [P.treeCerrado(11)], manga: [P.treeMangueira(7)], ipe: [P.treeIpe(3)], palm: [P.treePalmeira(5)],
+  };
+  const IPE_INK = { 2: OR, 3: PK, 5: BK };   // ipê-amarelo, ipê-roxo, ipê-branco
+  const shrubP = P.shrub(17), bedP = P.flowerBed(23);
+  const BED_INK = [PK, OR, RD, BK, PK];
   for (const [x, z, t] of D.trees) {
     if (Math.abs(x) < 18 && z > -350 && z < 660) continue;
-    const s = t < 2 ? 1.25 + ((x * 7 + z * 3) % 1 + 1) % 1 * 0.5 : 0.95;
-    const tty = TH(x, z);
-    addInstance('tree', treeProto, x, tty, z, (x + z) % TAU, s, s * (t < 2 ? 1.15 : 1), s, TREE_INK[t]);
+    const h = hsh(x, z), tty = TH(x, z), v = h < 0.5 ? 0 : 1;
+    let sp, ink = GN, s;
+    if (t === 2 || t === 3 || t === 5) { sp = 'ipe'; ink = IPE_INK[t]; s = 0.9 + hsh(x, z, 1) * 0.35; }
+    else if (t === 1) { sp = 'manga'; s = 0.85 + hsh(x, z, 1) * 0.4; }
+    else if (t === 4 && h < 0.4) { sp = 'palm'; s = 0.9 + hsh(x, z, 1) * 0.2; }
+    else { sp = 'cerrado'; s = 0.9 + hsh(x, z, 1) * 0.45; }
+    const protos = SPECIES[sp], pv = protos[Math.min(protos.length - 1, v)];
+    addInstance('tree_' + sp + '_' + (protos.length > 1 ? v : 0), pv, x, tty, z, h * TAU * 7, s, s * (0.9 + hsh(x, z, 2) * 0.25), s, ink);
     if (inNav(x, z) && !inSegList(allRoadSegs, x, z, 0.85)) collider(x, tty, z, 0.6, 3, 0.6, { noNav: false });
+    // moita ou canteiro florido perto de algumas árvores
+    const g = hsh(x, z, 3);
+    if (g < 0.42) {
+      const a = hsh(x, z, 4) * TAU, d = 3 + hsh(x, z, 5) * 3.5, sx = x + Math.cos(a) * d, sz = z + Math.sin(a) * d;
+      const bed = g < 0.07;
+      if (onGround(sx, sz) && !inSegList(allRoadSegs, sx, sz, bed ? 3.2 : 1.6)) {
+        const sy = TH(sx, sz);
+        if (!blocked(sx, sz, bed ? 2.6 : 1.4, sy)) {
+          if (bed) addInstance('bed', bedP, sx, sy, sz, a, 1, 1, 1, BED_INK[Math.floor(hsh(x, z, 6) * 5)]);
+          else addInstance('shrub', shrubP, sx, sy, sz, a, 0.8 + hsh(x, z, 7) * 0.6, 0.8 + hsh(x, z, 8) * 0.5, 0.8 + hsh(x, z, 7) * 0.6, GN);
+        }
+      }
+    }
   }
-  const lampProto = () => {
-    const pole = new THREE.CylinderGeometry(0.1, 0.14, 8, 6); pole.translate(0, 4, 0);
-    const arm = new THREE.BoxGeometry(0.14, 0.14, 2.2); arm.translate(0, 7.9, -1.0);
-    const lamp = new THREE.BoxGeometry(0.5, 0.25, 0.7); lamp.translate(0, 7.75, -2.0);
-    return [{ geo: pole, ink: BK, fill: true }, { geo: arm, ink: BK, fill: true }, { geo: lamp, ink: OR, fill: true }];
-  };
-  for (const [x, z, a] of D.lamps) addInstance('lamp', lampProto, x, TH(x, z), z, a + Math.PI, 1, 1, 1);
-  const stopProto = () => {
-    const roof = new THREE.BoxGeometry(3.8, 0.16, 1.9); roof.translate(0, 2.7, 0.15);
-    const back = new THREE.BoxGeometry(3.8, 2.4, 0.08); back.translate(0, 1.3, 0.95);
-    const bench = new THREE.BoxGeometry(3.0, 0.12, 0.45); bench.translate(0, 0.5, 0.6);
-    const sign = new THREE.BoxGeometry(0.1, 3.1, 0.1); sign.translate(2.2, 1.55, -0.4);
-    const plate = new THREE.BoxGeometry(0.06, 0.55, 0.7); plate.translate(2.2, 3.0, -0.4);
-    return [{ geo: roof, ink: BK }, { geo: back, ink: BL }, { geo: bench, ink: BK, fill: true }, { geo: sign, ink: BK, fill: true }, { geo: plate, ink: BL, fill: true }];
-  };
+  // postes com braço curvo; guardamos a posição de cada luminária para a luz noturna
+  const lampP = P.lampPost();
+  L.lampHeads = [];
+  for (const [x, z, a] of D.lamps) {
+    const ly = TH(x, z), th = a + Math.PI;
+    addInstance('lamp', lampP, x, ly, z, th, 1, 1, 1);
+    L.lampHeads.push(new THREE.Vector3(x + P.LAMP_HEAD[2] * Math.sin(th), ly + P.LAMP_HEAD[1] - 0.6, z + P.LAMP_HEAD[2] * Math.cos(th)));
+  }
+  // semáforos: só nos cruzamentos da W3 e da L2 (o resto do Plano é tesourinha e balão, sem sinal)
+  {
+    const SIG = new Set(['W3 Sul', 'W3 Norte', 'W3 Central', 'L2 Norte', 'L2 Sul']);
+    const deg = new Map(), kk = (x, z) => Math.round(x) + ',' + Math.round(z);
+    for (const r of roads) { if (!(r.lanes > 0)) continue; const p = r.pts; for (const i of [0, p.length - 3]) { const k = kk(p[i], p[i + 2]); deg.set(k, (deg.get(k) || 0) + 1); } }
+    const tlP = P.trafficLight(), placed = [];
+    for (const r of roads) {
+      if (!SIG.has(r.name) || r.pts.length < 6) continue;
+      const p = r.pts, hw = r.width / 2;
+      for (const end of [0, 1]) {
+        const i = end ? p.length - 3 : 0, j = end ? p.length - 6 : 3;
+        if ((deg.get(kk(p[i], p[i + 2])) || 0) < 3) continue;
+        let ax = p[i] - p[j], az = p[i + 2] - p[j + 2]; const al = Math.hypot(ax, az) || 1; ax /= al; az /= al;   // sentido de quem chega
+        if (end === 0 && r.oneway) continue;           // mão única: o início é saída, não chegada
+        const jx = p[i], jz = p[i + 2];
+        if (placed.some(([x, z]) => (x - jx) ** 2 + (z - jz) ** 2 < 14 * 14)) continue;
+        const rx = -az, rz = ax;                        // lado direito de quem dirige
+        let px = 0, pz = 0, ok = false;
+        for (const off of [hw + 1.3, hw + 2.4, hw + 3.6]) {
+          px = jx - ax * 7 + rx * off; pz = jz - az * 7 + rz * off;
+          if (!inSegList(allRoadSegs, px, pz, 0.5) && onGround(px, pz) && !blocked(px, pz, 0.4, TH(px, pz))) { ok = true; break; }
+        }
+        if (!ok) continue;
+        const Lx = -rx, Lz = -rz;                       // braço por cima da pista
+        placed.push([jx, jz, px, pz, Math.atan2(-Lx, -Lz)]);
+        addInstance('semaforo', tlP, px, TH(px, pz), pz, Math.atan2(-Lx, -Lz), 1, 1, 1);
+        collider(px, TH(px, pz), pz, 0.4, 5.6, 0.4, { noNav: true });
+      }
+    }
+    L.trafficLights = placed.map(([, , x, z, a]) => ({ x, z, a }));
+  }
+  const stopProto = P.busStop();
   L.busStops = [];
   for (const [x, z, nx, nz, dx, dz, edges] of D.stops) {
     const sty = TH(x, z);
     addInstance('stop', stopProto, x, sty, z, Math.atan2(nx, nz), 1, 1, 1);
+    L.lampHeads.push(new THREE.Vector3(x, sty + 2.4, z));
     collider(x + nx * 0.95, sty, z + nz * 0.95, 1.6, 2.4, 1.6, { noNav: true });
     L.busStops.push({ x, z, y: sty, waitX: x + nx * 0.3, waitZ: z + nz * 0.3, faceYaw: Math.atan2(-nx, -nz), dx, dz, edges });
   }
@@ -251,7 +319,8 @@ export function buildBrasilia(B, arena = false) {
   const tnet = { nodes: D.tnodes, edges: D.tedges, sources: D.tsources, sinks: D.tsinks, speed: D.speed,
     roads: roads.map((r) => ({ pts: r.pts, lanes: r.lanes, width: r.width, oneway: r.oneway, cls: r.cls, name: r.name })),
     stops: L.busStops.map((s) => ({ edges: s.edges })) };
-  const traffic = buildGraphTraffic(B, tnet, { count: arena ? 160 : 280, targets: () => (L.targetsFn ? L.targetsFn() : []) });
+  const traffic = buildGraphTraffic(B, tnet, { count: arena ? 160 : 280, targets: () => (L.targetsFn ? L.targetsFn() : []),
+    density: () => { const g = typeof window !== 'undefined' && window.__game, e = g && g.ctx && g.ctx.env; return e ? 0.28 + 0.72 * e.rush : 1; } });
   L.animated.push({ mesh: null, update: (t) => traffic.update(t) });
   L.cars = traffic.cars;
   L.allBusStops = L.busStops; L.busStops = L.busStops.filter((s) => inNav(s.x, s.z, 6)); // passageiros só usam as paradas da área jogável

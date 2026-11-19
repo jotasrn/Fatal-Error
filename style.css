@@ -62,6 +62,8 @@ kbd { display: inline-block; min-width: 1.2em; padding: 1px 7px 2px; font: 600 0
 .stat .lbl { letter-spacing: 1.8px; }
 .stat b { display: block; font-size: 26px; line-height: 1; font-weight: 700; font-variant-numeric: tabular-nums; }
 .stat.money b { color: var(--hud-cash); }
+.stat.clock b { color: #ffe2b0; }
+.stat.clock.rain b { color: #9fd3ff; }
 .money-flash { position: relative; height: 0; }
 .m-item { position: absolute; right: 4px; top: -4px; white-space: nowrap; font-size: 17px; font-weight: 700; padding: 2px 11px; border-radius: 8px; background: var(--hud-panel-solid); -webkit-backdrop-filter: var(--hud-blur); backdrop-filter: var(--hud-blur); border: 1px solid var(--hud-stroke); animation: mfade 1.6s ease-out forwards; }
 .m-item small { font-weight: 500; color: var(--hud-dim); font-size: 12px; }

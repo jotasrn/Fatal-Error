@@ -129,9 +129,11 @@ export function createBrasiliaTraffic(ctx, deps) {
     const level = ctx.level, nav = ctx.nav, enemies = ctx.enemies, player = ctx.player;
     pedTimer -= dt;
     if (pedTimer > 0) return;
-    pedTimer = 3.5;
+    // horário de pico: mais gente e nascendo mais rápido; de madrugada a cidade esvazia
+    const env = ctx.env, rush = env ? env.rush : 0.5, hour = env ? env.hour : 12;
+    pedTimer = 4.2 - 3.0 * rush;
     const aliveCivs = enemies.enemies.filter((e) => e.alive && (e.T.isCivilian || e.T.isVendor || e.T.isPolitician)).length;
-    if (aliveCivs >= 35) return;
+    if (aliveCivs >= Math.round(10 + 40 * rush)) return;
     const civSpots = level.civSpots;
     if (!civSpots || !civSpots.length || !player || !player.body) return;
     const px = player.body.pos.x, pz = player.body.pos.z;
@@ -140,7 +142,23 @@ export function createBrasiliaTraffic(ctx, deps) {
       return d > 35 && d < 120;
     });
     if (!candidates.length) return;
-    const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+    // onde a gente se junta em cada hora: ida/volta do trabalho = Rodoviária, paradas e Esplanada;
+    // almoço = Setor Comercial e Rodoviária; noite = Torre de TV (feirinha) e Rodoviária
+    const LM = level.landmarks || {};
+    const near = (s, k, r) => { const p = LM[k] && LM[k].pos; return p ? Math.hypot(s[1] - p.x, s[3] - p.z) < r : false; };
+    const atStop = (s) => (level.busStops || []).some((b) => Math.hypot(b.x - s[1], b.z - s[3]) < 6);
+    const commute = (hour > 6.5 && hour < 9.5) || (hour > 16.8 && hour < 20);
+    const lunch = hour > 11.5 && hour < 14.2, night = hour > 19.5 || hour < 6;
+    const weight = (s) => {
+      let w = 1;
+      if (commute) { if (near(s, 'rodoviaria', 70) || atStop(s)) w += 5; if (near(s, 'esplanada', 160)) w += 2.5; }
+      if (lunch) { if (near(s, 'rodoviaria', 90)) w += 3; if (s[0] === 'vendor') w += 2; }
+      if (night) { if (near(s, 'torre', 60) || near(s, 'rodoviaria', 60)) w += 3; if (s[0] === 'politician') w *= 0.2; }
+      return w;
+    };
+    let tot = 0; for (const s of candidates) tot += weight(s);
+    let pick = Math.random() * tot, chosen = candidates[0];
+    for (const s of candidates) { pick -= weight(s); if (pick <= 0) { chosen = s; break; } }
     const snap = (v) => { const id = nav.nearestNode(v, 4, 3); if (id >= 0) { const nd = nav.nodes[id]; v.set(nd.x, nd.y + 0.05, nd.z); } return v; };
     const c = enemies.spawn(chosen[0], snap(new THREE.Vector3(chosen[1], chosen[2], chosen[3])));
     if (c) c.state = 'hunt';

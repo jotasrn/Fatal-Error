@@ -17,6 +17,7 @@ import { rand } from './core/util.js';
 import { createSurvival } from './game/survival.js';
 import { createBrasiliaEvents } from './game/brasiliaEvents.js';
 import { createDestruction } from './game/destruction.js';
+import { createEnvironment } from './game/environment.js';
 import { createBrasiliaTraffic } from './game/brasiliaTraffic.js';
 import { createPvpCombat } from './game/pvpCombat.js';
 import { createLobbyManager } from './net/lobby.js';
@@ -98,6 +99,8 @@ const missions = ctx.missions = new MissionManager(ctx);
 window.__game = { ctx, game, player, enemies, nav, world, level, hud, effects, input, net, remote, lobby, scores, missions, progression };
 
 const survival = ctx.survival = createSurvival(ctx, { net, online, getCheckpoint: () => 0, setCheckpoint: () => {} });
+const env = ctx.env = createEnvironment(ctx);  // ciclo dia/noite, clima e horário de pico
+window.__game.env = env;
 const crowd = ctx.crowd = () => { if (!online()) return 1; let n = 1; for (const r of remote.values()) if (!r.away) n++; return Math.min(3, 1 + 0.6 * (n - 1)); };
 const snapNav = (v) => { const id = nav.nearestNode(v, 4, 3); if (id >= 0) { const nd = nav.nodes[id]; v.set(nd.x, nd.y + 0.05, nd.z); } return v; };
 const bEvents = ctx.bEvents = createBrasiliaEvents(ctx, {

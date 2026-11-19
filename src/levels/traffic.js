@@ -276,7 +276,10 @@ export function buildGraphTraffic(B, net, opts = {}) {
     spawnT -= dt;
     if (spawnT <= 0) {
       spawnT = 0.22;
-      const free = cars.find((c) => c.hidden);
+      // densidade conforme a hora (horário de pico enche as vias; madrugada esvazia)
+      let shown = 0; for (const c of cars) if (!c.hidden) shown++;
+      const dens = opts.density ? opts.density() : 1;
+      const free = shown < cars.length * dens ? cars.find((c) => c.hidden) : null;
       if (free) {
         let placed = false;
         const pl = players().find((p) => p && p.body);

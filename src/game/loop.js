@@ -332,6 +332,7 @@ export function createGameLoop(ctx, deps) {
     if (game.boss) { if (game.boss.alive) hud.setBoss(game.boss.T.name, game.boss.hp / game.boss.maxHp); else { hud.setBoss(null, null); game.boss = null; } }
     audio.setIntensity(clamp((enemies.alive + game.queue.length + remote.size * 2) / 12, 0, 1) * (game.intermission > 0 ? 0.25 : 1));
     if (minimap) minimap.update(dt, player, enemies.enemies, remote.values(), missions.markers);
+    if (ctx.env) { ctx.env.update(dt); if (hud.setClock) hud.setClock(ctx.env.timeLabel(), ctx.env.rain); }
     R.render(game.time, { hurt: player.hurtFx, flash: player.flashFx, slow: scale < 1 ? 1 : 0, lowHp: player.alive && player.hp < 30 ? 1 - player.hp / 30 : 0 });
   }
 

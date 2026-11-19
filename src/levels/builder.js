@@ -49,13 +49,13 @@ export function createBuilder(scene, world) {
 
   // Registra uma instância de um objeto repetido (árvore, poste, parada, banco, lixeira).
   // protoFn() deve retornar um array de { geo, ink, fill }. Todas as cópias viram um único desenho por peça!
-  function addInstance(kind, protoFn, x, y, z, rotY = 0, sx = 1, sy = 1, sz = 1, colorOverride = null) {
+  function addInstance(kind, protoFn, x, y, z, rotY = 0, sx = 1, sy = 1, sz = 1, colorOverride = null, tag = null) {
     let grp = instGroups.get(kind);
     if (!grp) {
       grp = { parts: protoFn(), items: [] };
       instGroups.set(kind, grp);
     }
-    grp.items.push({ x, y, z, rotY, sx, sy, sz, colorOverride });
+    grp.items.push({ x, y, z, rotY, sx, sy, sz, colorOverride, tag });
   }
 
   const slab = (x1, z1, x2, z2, y, t, o = {}) => box((x1 + x2) / 2, y - t, (z1 + z2) / 2, x2 - x1, t, z2 - z1, o); // top surface at y
@@ -178,32 +178,64 @@ export function createBuilder(scene, world) {
       });
     }
 
-    // 2. Objetos repetidos agrupados (InstancedMesh único por peça: árvores, postes, paradas, bancos)
+    // 2. Objetos repetidos (árvores, postes, paradas, arbustos…): InstancedMesh por BLOCO de 400 u, com
+    //    descarte fora da câmera e nível de detalhe por distância — peça com lod:'near' só aparece perto
+    //    (< ~150 u do bloco), lod:'far' só longe. Peças com material por vértice (aMat) usam um único desenho.
     const dummy = new THREE.Object3D();
     const instMat = makeInkMaterial({ ink: INK.BLACK, side: THREE.DoubleSide });
+    const instMatA = makeInkMaterial({ ink: INK.BLACK, side: THREE.DoubleSide, amat: true });
+    const ITILE = 400, NEAR_R = 130, lodTiles = [];
     for (const grp of instGroups.values()) {
-      const n = grp.items.length;
-      if (!n) continue;
-      for (const part of grp.parts) {
-        const im = new THREE.InstancedMesh(part.geo, instMat, n);
-        im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
-        for (let i = 0; i < n; i++) {
-          const it = grp.items[i];
-          dummy.position.set(it.x, it.y, it.z);
-          dummy.rotation.set(0, it.rotY || 0, 0);
-          dummy.scale.set(it.sx || 1, it.sy || 1, it.sz || 1);
-          dummy.updateMatrix();
-          im.setMatrixAt(i, dummy.matrix);
-          const ink = (part.allowOverride && it.colorOverride != null) ? it.colorOverride : (part.ink ?? INK.BLACK);
-          im.instanceColor.setXYZ(i, ink, part.fill ? 1 : 0, 0);
-        }
-        im.instanceMatrix.needsUpdate = true;
-        im.instanceColor.needsUpdate = true;
-        im.frustumCulled = false;
-        im.matrixAutoUpdate = false;
-        scene.add(im);
-        L.meshes.push(im);
+      if (!grp.items.length) continue;
+      const byTile = new Map();
+      for (const it of grp.items) {
+        const k = Math.floor(it.x / ITILE) + ',' + Math.floor(it.z / ITILE);
+        let a = byTile.get(k); if (!a) byTile.set(k, a = []); a.push(it);
       }
+      for (const [k, items] of byTile) {
+        const [tx, tz] = k.split(',').map(Number), n = items.length;
+        for (const part of grp.parts) {
+          const im = new THREE.InstancedMesh(part.geo, part.geo.attributes.aMat ? instMatA : instMat, n);
+          im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
+          for (let i = 0; i < n; i++) {
+            const it = items[i];
+            dummy.position.set(it.x, it.y, it.z);
+            dummy.rotation.set(0, it.rotY || 0, 0);
+            dummy.scale.set(it.sx || 1, it.sy || 1, it.sz || 1);
+            dummy.updateMatrix();
+            im.setMatrixAt(i, dummy.matrix);
+            const ink = (part.allowOverride && it.colorOverride != null) ? it.colorOverride : (part.ink ?? INK.BLACK);
+            im.instanceColor.setXYZ(i, ink, part.fill ? 1 : 0, (part.tagOverride && it.tag != null) ? it.tag : (part.tag || 0)); // z = etiqueta de material
+          }
+          im.instanceMatrix.needsUpdate = true;
+          im.instanceColor.needsUpdate = true;
+          im.computeBoundingSphere();
+          im.frustumCulled = true;
+          im.matrixAutoUpdate = false;
+          scene.add(im);
+          L.meshes.push(im);
+          if (part.lod) { im.visible = part.lod === 'far'; lodTiles.push({ im, near: part.lod === 'near', x0: tx * ITILE, z0: tz * ITILE, r: part.lodR || NEAR_R }); }
+        }
+      }
+    }
+    if (lodTiles.length) {
+      let lodT = 0;
+      L.animated.push({
+        mesh: null,
+        update: (t) => {
+          if (t - lodT < 0.2) return; lodT = t;
+          const cam = typeof window !== 'undefined' && window.__game && window.__game.ctx && window.__game.ctx.camera;
+          if (!cam) return;
+          const px = cam.position.x, pz = cam.position.z;
+          for (const lt of lodTiles) {
+            // distância da câmera até o bloco (0 dentro dele)
+            const dx = Math.max(lt.x0 - px, 0, px - (lt.x0 + ITILE)), dz = Math.max(lt.z0 - pz, 0, pz - (lt.z0 + ITILE));
+            const isNear = dx * dx + dz * dz < lt.r * lt.r;
+            const vis = lt.near ? isNear : !isNear;
+            if (lt.im.visible !== vis) lt.im.visible = vis;
+          }
+        },
+      });
     }
 
     world.finalize();

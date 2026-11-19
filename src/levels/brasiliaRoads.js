@@ -289,7 +289,7 @@ export function buildBrasiliaRoads(B, { acc, quad }) {
         const paint = (sA, sB, off, w2, ink) => {
           if (sB - sA < 0.05) return;
           const x0 = a[0] + tx * sA - tz * off, z0 = a[2] + tz * sA + tx * off, x1 = a[0] + tx * sB - tz * off, z1 = a[2] + tz * sB + tx * off, y0 = yAt(sA), y1 = yAt(sB);
-          quad(acc('u:' + ink + ':n', x0, z0), [x0 + tz * w2, y0, z0 - tx * w2], [x1 + tz * w2, y1, z1 - tx * w2], [x1 - tz * w2, y1, z1 + tx * w2], [x0 - tz * w2, y0, z0 + tx * w2], UP);
+          quad(acc('u:' + (ink + 3 * 0.0625) + ':n', x0, z0), [x0 + tz * w2, y0, z0 - tx * w2], [x1 + tz * w2, y1, z1 - tx * w2], [x1 - tz * w2, y1, z1 + tx * w2], [x0 - tz * w2, y0, z0 + tx * w2], UP);
         };
         // bordo (contínuo, branco)
         // a pintura para dentro dos cruzamentos: bordo só no lado livre; eixo/tracejado só fora do nó
