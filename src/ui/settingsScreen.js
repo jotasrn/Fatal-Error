@@ -25,7 +25,7 @@ export function createSettingsManager(ctx, deps) {
   R.setQuality(hudPrefs.gfxQuality);
   R.setNotebookMode(false);
 
-  let appVersion = '1.6.0';
+  let appVersion = '1.7.0';
   let updStatus = { state: 'idle', version: null, percent: 0, message: null, waitingForMatch: false };
 
   function updateSettingsText() {
