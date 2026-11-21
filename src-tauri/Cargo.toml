@@ -1,6 +1,6 @@
 [package]
 name = "fatal-error-tauri"
-version = "1.7.0"
+version = "1.7.1"
 description = "Fatal Error — Tauri 2.0 Rust Desktop Backend & P2P LAN/Swarm Bridge"
 authors = ["jotasrn"]
 license = "MIT"
