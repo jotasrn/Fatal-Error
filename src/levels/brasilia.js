@@ -119,6 +119,42 @@ export function buildBrasilia(B, arena = false) {
     house: { body: [BK, PK, OR, GN], trim: [RD] },
   };
   const boxRot = (cx, y, cz, w, h, d, ang, ink, near = false) => { const g = new THREE.BoxGeometry(w, h, d); g.rotateY(-ang); g.translate(cx, y + h / 2, cz); if (near) addNearGeo(g, ink); else addGeo(g, ink); };
+  // Colisão gerada do PRÓPRIO desenho: a planta (polígono) é varrida em faixas de 1 u no eixo mais curto e
+  // cada faixa vira uma caixa com o intervalo exato no centro da faixa (prédio girado ou côncavo fica justo,
+  // erro < 0,2 u). Faixas iguais seguidas se fundem (prédio alinhado = 1 caixa só).
+  const solidFootprint = (poly, yBot, yTop, opts) => {
+    if (yTop - yBot < 0.2) return;
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (const [x, z] of poly) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+    const alongX = (x1 - x0) <= (z1 - z0);                 // fatiar ao longo do eixo mais curto = menos caixas
+    const a0 = alongX ? x0 : z0, a1 = alongX ? x1 : z1, n = Math.max(1, Math.round((a1 - a0) / 1.0)), st = (a1 - a0) / n;
+    const P = alongX ? poly : poly.map(([x, z]) => [z, x]);
+    let open = null;   // faixa em construção { s0, s1, iv }
+    const flush = () => {
+      if (!open) return;
+      for (const [b0, b1] of open.iv) {
+        const cA = (open.s0 + open.s1) / 2, cB = (b0 + b1) / 2, wA = open.s1 - open.s0, wB = b1 - b0;
+        if (wB < 0.05) continue;
+        if (alongX) collider(cA, yBot, cB, wA, yTop - yBot, wB, opts); else collider(cB, yBot, cA, wB, yTop - yBot, wA, opts);
+      }
+      open = null;
+    };
+    for (let i = 0; i < n; i++) {
+      const s0 = a0 + i * st, s1 = s0 + st, sc = (s0 + s1) / 2, hits = [];
+      for (let k = 0; k < P.length; k++) {
+        const [px, pz] = P[k], [qx, qz] = P[(k + 1) % P.length];
+        if ((px > sc) !== (qx > sc)) hits.push(pz + (sc - px) * (qz - pz) / (qx - px));
+      }
+      hits.sort((a, b) => a - b);
+      const iv = []; for (let k = 0; k + 1 < hits.length; k += 2) iv.push([hits[k], hits[k + 1]]);
+      const same = open && open.iv.length === iv.length && open.iv.every((v, k) => Math.abs(v[0] - iv[k][0]) < 0.06 && Math.abs(v[1] - iv[k][1]) < 0.06);
+      if (same) open.s1 = s1; else { flush(); open = { s0, s1, iv }; }
+    }
+    flush();
+  };
+  const rectPoly = (cx, cz, Lg, Dp, ang) => { const ca = Math.cos(ang), sa = Math.sin(ang); return [[-Lg / 2, -Dp / 2], [Lg / 2, -Dp / 2], [Lg / 2, Dp / 2], [-Lg / 2, Dp / 2]].map(([u, v]) => [cx + ca * u - sa * v, cz + sa * u + ca * v]); };
+  // base que encosta no ponto mais baixo do relevo sob a planta (sem prédio flutuando na ladeira)
+  const baseUnder = (poly, cx, cz) => { let m = TH(cx, cz); for (const [x, z] of poly) m = Math.min(m, TH(x, z)); return m - 0.3; };
   let bi = 0;
   const roofs = [];
   const FACADE = 7 * 0.0625;   // etiqueta de material 7 = fachada de prédio
@@ -130,10 +166,15 @@ export function buildBrasilia(B, arena = false) {
       const S = STYLE[st] || STYLE.gen, body = S.body[bi % S.body.length], trim = S.trim[(bi * 7) % S.trim.length];
       const ca = Math.cos(ang), sa = Math.sin(ang);
       const L2 = (u, v) => [cx + ca * u - sa * v, cz + sa * u + ca * v];
-      boxRot(cx, pil + ty, cz, Lg, h - pil, Dp, ang, body + FACADE);   // fachada: janelas/textura no shader
-      if (pil > 0) { // pilotis: colunas e portaria de vidro
-        for (let u = -Lg / 2 + 1; u <= Lg / 2 - 1 + 0.01; u += Math.max(3, (Lg - 2) / 5)) for (const v of [-Dp / 2 + 0.8, Dp / 2 - 0.8]) { const [px, pz] = L2(u, v); box(px, ty, pz, 0.55, pil, 0.55, { ink: BK, noCollide: true }); }
-        boxRot(cx, ty, cz, Math.min(5, Lg * 0.25), pil, Dp * 0.6, ang, BL);
+      const fp = rectPoly(cx, cz, Lg, Dp, ang), yb = baseUnder(fp, cx, cz);
+      const by = pil > 0 ? pil + ty : yb;                            // sem pilotis: o corpo desce até o chão
+      boxRot(cx, by, cz, Lg, h + ty - by, Dp, ang, body + FACADE);   // fachada: janelas/textura no shader
+      solidFootprint(fp, by, h + ty);
+      if (st === 'min') for (const u of [-Lg / 2, Lg / 2]) { const [px, pz] = L2(u, 0); solidFootprint(rectPoly(px, pz, 0.6, Dp + 0.3, ang), ty, h + ty + 0.3); }   // empenas das pontas
+      if (pil > 0) { // pilotis: colunas (sólidas) e portaria de vidro (sólida)
+        for (let u = -Lg / 2 + 1; u <= Lg / 2 - 1 + 0.01; u += Math.max(3, (Lg - 2) / 5)) for (const v of [-Dp / 2 + 0.8, Dp / 2 - 0.8]) { const [px, pz] = L2(u, v); box(px, yb, pz, 0.55, ty + pil - yb, 0.55, { ink: BK }); }
+        boxRot(cx, yb, cz, Math.min(5, Lg * 0.25), ty + pil - yb, Dp * 0.6, ang, BL);
+        solidFootprint(rectPoly(cx, cz, Math.min(5, Lg * 0.25), Dp * 0.6, ang), yb, ty + pil);
       }
       // faixas dos andares / brises (só de perto)
       if (h > 4) for (let y = pil + FLOOR; y < h - 0.4; y += FLOOR) boxRot(cx, y - 0.1 + ty, cz, Lg + 0.25, 0.2, Dp + 0.25, ang, trim, true);
@@ -145,10 +186,10 @@ export function buildBrasilia(B, arena = false) {
       }
       if (st === 'min') { // empenas cegas brancas nas pontas e heliponto
         for (const u of [-Lg / 2, Lg / 2]) { const [px, pz] = L2(u, 0); boxRot(px, ty, pz, 0.6, h + 0.3, Dp + 0.3, ang, BK); }
-        if (bi % 2) { boxRot(cx, h + ty, cz, 6, 0.3, Math.min(6, Dp), ang, BK); boxRot(cx, h + 0.3 + ty, cz, 2.2, 0.05, 0.4, ang, OR, true); }
+        if (bi % 2) { boxRot(cx, h + ty, cz, 6, 0.3, Math.min(6, Dp), ang, BK); boxRot(cx, h + 0.3 + ty, cz, 2.2, 0.05, 0.4, ang, OR, true); solidFootprint(rectPoly(cx, cz, 6, Math.min(6, Dp), ang), h + ty, h + ty + 0.3); }
       }
       if (st === 'cn') for (let u = -Lg / 2 + 2; u < Lg / 2 - 1; u += 3.6) for (let y = 3; y < h - 1; y += 2.6) { const [px, pz] = L2(u, Dp / 2 + 0.2); const g = new THREE.BoxGeometry(3.1, 2.1, 0.3); g.rotateY(-ang); g.translate(px, y + 1 + ty, pz); addGeoFill(g, [RD, OR, GN, BL, PK][Math.floor(u + y) % 5 >>> 0]); }
-      if (st === 'res' && h > 8) { const [px, pz] = L2(Lg * 0.25, 0); boxRot(px, h + ty, pz, 3.2, 1.8, Math.min(3, Dp), ang, BK); } // caixa d'água
+      if (st === 'res' && h > 8) { const [px, pz] = L2(Lg * 0.25, 0); boxRot(px, h + ty, pz, 3.2, 1.8, Math.min(3, Dp), ang, BK); solidFootprint(rectPoly(px, pz, 3.2, Math.min(3, Dp), ang), h + ty, h + ty + 1.8); } // caixa d'água
       if (st === 'house') { const g = new THREE.ConeGeometry(Math.hypot(Lg, Dp) / 2 * 1.02, 1.6, 4); g.rotateY(Math.PI / 4 - ang); g.scale(Lg / Math.hypot(Lg, Dp) * 1.42, 1, Dp / Math.hypot(Lg, Dp) * 1.42); g.translate(cx, h + 0.8 + ty, cz); addGeo(g, RD); }
       if (h > 12) roofs.push([cx, h + ty, cz]);
     } else {
@@ -158,19 +199,18 @@ export function buildBrasilia(B, arena = false) {
       if (THREE.ShapeUtils.isClockWise(pts)) pts.reverse();
       const n = pts.length; let cx = 0, cz = 0; for (const p of pts) { cx += p.x / n; cz += p.y / n; }
       const ty = TH(cx, cz);                                         // base do prédio sobre o relevo real
+      const fp = pts.map((p) => [p.x, p.y]), yb = baseUnder(fp, cx, cz);
       const a = acc('u:' + (body + FACADE), cx, cz);
-      for (let i = 0; i < n; i++) { const p = pts[i], q = pts[(i + 1) % n]; quad(a, [p.x, ty, p.y], [q.x, ty, q.y], [q.x, h + ty, q.y], [p.x, h + ty, p.y], [q.y - p.y, 0, -(q.x - p.x)]); }
+      for (let i = 0; i < n; i++) { const p = pts[i], q = pts[(i + 1) % n]; quad(a, [p.x, yb, p.y], [q.x, yb, q.y], [q.x, h + ty, q.y], [p.x, h + ty, p.y], [q.y - p.y, 0, -(q.x - p.x)]); }
+      solidFootprint(fp, yb, h + ty);
       const tris = THREE.ShapeUtils.triangulateShape(pts, []);
       for (const [i0, i1, i2] of tris) { const base = a.pos.length / 3; for (const k of [i0, i2, i1]) a.pos.push(pts[k].x, h + ty, pts[k].y); a.idx.push(base, base + 1, base + 2); }
       if (h > 4) { const an = acc('u:' + trim + ':n', cx, cz); for (let y = FLOOR; y < h - 0.4; y += FLOOR) for (let i = 0; i < n; i++) { const p = pts[i], q = pts[(i + 1) % n]; const ox = (q.y - p.y), oz = -(q.x - p.x), ol = Math.hypot(ox, oz) || 1; const ex = ox / ol * 0.12, ez = oz / ol * 0.12; quad(an, [p.x + ex, y - 0.1 + ty, p.y + ez], [q.x + ex, y - 0.1 + ty, q.y + ez], [q.x + ex, y + 0.1 + ty, q.y + ez], [p.x + ex, y + 0.1 + ty, p.y + ez], [ox, 0, oz]); } }
       if (h > 12) roofs.push([cx, h + ty, cz]);
     }
   }
-  for (const [x1, z1, x2, z2, y0, h] of D.bcol) {
-    if (y0 < 2.2 && boxHitsRoad(x1, z1, x2, z2, 0.35)) continue;
-    const bty = TH((x1 + x2) / 2, (z1 + z2) / 2);
-    collider((x1 + x2) / 2, y0 + bty, (z1 + z2) / 2, x2 - x1, h - y0, z2 - z1);
-  }
+  // (D.bcol, a colisão pré-calculada antiga, saiu: tinha caixas sem prédio, deslocadas na ladeira e
+  //  descartava prédios inteiros encostados em via — agora a colisão vem do desenho, acima)
   const inNav = (x, z, pad = 0) => x > D.nav.minX + pad && x < D.nav.maxX - pad && z > D.nav.minZ + pad && z < D.nav.maxZ - pad;
   let ri = 0; for (const [x, h, z] of roofs) if (inNav(x, z, 10)) { if (ri % 3 === 0) ring(x, h + 6, z, 'y'); if (ri % 4 === 0) sniper(x, h, z); ri++; }
 
@@ -251,7 +291,7 @@ export function buildBrasilia(B, arena = false) {
     else { sp = 'cerrado'; s = 0.9 + hsh(x, z, 1) * 0.45; }
     const protos = SPECIES[sp], pv = protos[Math.min(protos.length - 1, v)];
     addInstance('tree_' + sp + '_' + (protos.length > 1 ? v : 0), pv, x, tty, z, h * TAU * 7, s, s * (0.9 + hsh(x, z, 2) * 0.25), s, ink);
-    if (inNav(x, z) && !inSegList(allRoadSegs, x, z, 0.85)) collider(x, tty, z, 0.6, 3, 0.6, { noNav: false });
+    if (!inSegList(allRoadSegs, x, z, 0.4)) collider(x, tty, z, sp === 'manga' ? 0.62 : 0.36, sp === 'palm' ? 8 : 3.4, sp === 'manga' ? 0.62 : 0.36, { noNav: false });   // tronco sólido
     // moita ou canteiro florido perto de algumas árvores
     const g = hsh(x, z, 3);
     if (g < 0.42) {
@@ -272,6 +312,7 @@ export function buildBrasilia(B, arena = false) {
   for (const [x, z, a] of D.lamps) {
     const ly = TH(x, z), th = a + Math.PI;
     addInstance('lamp', lampP, x, ly, z, th, 1, 1, 1);
+    collider(x, ly, z, 0.3, 7.4, 0.3, { noNav: true });   // haste do poste é sólida
     L.lampHeads.push(new THREE.Vector3(x + P.LAMP_HEAD[2] * Math.sin(th), ly + P.LAMP_HEAD[1] - 0.6, z + P.LAMP_HEAD[2] * Math.cos(th)));
   }
   // semáforos: só nos cruzamentos da W3 e da L2 (o resto do Plano é tesourinha e balão, sem sinal)

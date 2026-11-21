@@ -146,6 +146,7 @@ export function createBrasiliaEvents(ctx, deps) {
 
   // ---------------- 8 de Janeiro (host) ----------------
   function start8jan() {
+    if (enemies.enemies.length >= 140) return;
     const k = deps.crowd ? deps.crowd() : 1;
     const n = Math.round(12 * Math.min(2.4, k));
     const pr = lm('praca3p') || new THREE.Vector3(0, 0, 222), cg = lm('congresso') || new THREE.Vector3(0, 0, 173);
@@ -162,6 +163,7 @@ export function createBrasiliaEvents(ctx, deps) {
 
   // ---------------- 7 de Setembro (host) ----------------
   function start7set() {
+    if (enemies.enemies.length >= 140) { say7set(); startShow(); if (net.active && net.isHost) net.send('bevent', { k: '7set' }); return; }
     const k = deps.crowd ? deps.crowd() : 1;
     const n = Math.round(12 * Math.min(2, k));
     const es = lm('esplanada'), ex = es ? es.x : 0, ez = es ? es.z : 0, hw = es ? 50 : 44, span = es ? 130 : 75;

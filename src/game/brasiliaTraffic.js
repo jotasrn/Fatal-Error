@@ -132,8 +132,29 @@ export function createBrasiliaTraffic(ctx, deps) {
     // horário de pico: mais gente e nascendo mais rápido; de madrugada a cidade esvazia
     const env = ctx.env, rush = env ? env.rush : 0.5, hour = env ? env.hour : 12;
     pedTimer = 4.2 - 3.0 * rush;
+    // recicla pedestres ambientes muito distantes (> 165m de todos os jogadores) para manter a cidade viva sem desperdício
+    const anchors = ctx.targets().filter((t) => t && t.alive && t.body);
+    if (anchors.length) {
+      for (let i = enemies.enemies.length - 1; i >= 0; i--) {
+        const e = enemies.enemies[i];
+        if (!e.alive || !(e.T.isCivilian || e.T.isVendor || e.T.isPolitician)) continue;
+        let nearAny = false;
+        for (const a of anchors) {
+          const dx = e.body.pos.x - a.body.pos.x, dz = e.body.pos.z - a.body.pos.z;
+          if (dx * dx + dz * dz < 165 * 165) { nearAny = true; break; }
+        }
+        if (!nearAny) {
+          e.alive = false; e.deadT = 99;
+          enemies._removeLaser(e);
+          if (!e.rootDetached && e.root) ctx.scene.remove(e.root);
+          enemies._disposeMesh(e.root);
+          enemies.byId.delete(e.id);
+          enemies.enemies.splice(i, 1);
+        }
+      }
+    }
     const aliveCivs = enemies.enemies.filter((e) => e.alive && (e.T.isCivilian || e.T.isVendor || e.T.isPolitician)).length;
-    if (aliveCivs >= Math.round(10 + 40 * rush)) return;
+    if (enemies.enemies.length >= 130 || aliveCivs >= Math.round(16 + 44 * rush)) return;
     const civSpots = level.civSpots;
     if (!civSpots || !civSpots.length || !player || !player.body) return;
     const px = player.body.pos.x, pz = player.body.pos.z;

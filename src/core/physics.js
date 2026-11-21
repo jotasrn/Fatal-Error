@@ -24,7 +24,25 @@ export class World {
     this.boxes.push(b); return b;
   }
   finalize() { this.grid.clear(); this.flat.rebuildFrom(this.boxes); for (const b of this.boxes) this._insert(b); }
-  removeBox(b) { const i = this.boxes.indexOf(b); if (i < 0) return; this.boxes.splice(i, 1); this.finalize(); }
+  _removeFromGrid(b) {
+    const c = this.cell;
+    const x0 = Math.floor(b.min.x / c), x1 = Math.floor(b.max.x / c), z0 = Math.floor(b.min.z / c), z1 = Math.floor(b.max.z / c);
+    for (let ix = x0; ix <= x1; ix++) for (let iz = z0; iz <= z1; iz++) {
+      const arr = this.grid.get(this._key(ix, iz));
+      if (!arr) continue;
+      const idx = arr.indexOf(b);
+      if (idx >= 0) { arr[idx] = arr[arr.length - 1]; arr.pop(); }
+    }
+  }
+  removeBox(b) {
+    if (!b || b._removed) return;
+    const i = b.id >= 0 && this.boxes[b.id] === b ? b.id : this.boxes.indexOf(b);
+    if (i < 0) return;
+    b._removed = true;
+    const last = this.boxes.pop();
+    if (i < this.boxes.length) { this.boxes[i] = last; last.id = i; }
+    this._removeFromGrid(b);
+  }
   _key(ix, iz) { return (ix + 4096) * 8192 + (iz + 4096); }
   _insert(b) {
     const c = this.cell;

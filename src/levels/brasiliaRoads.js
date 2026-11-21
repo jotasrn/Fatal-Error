@@ -98,6 +98,20 @@ export function buildBrasiliaRoads(B, { acc, quad }) {
     }
     return false;
   }
+  // existe via (de qualquer tipo) passando em (x,z) com a superfície perto da altura y?
+  function roadAtLevel(x, z, y, pad = 1.0, tol = 0.8) {
+    const cand = nearSegs(x - pad - 12, z - pad - 12, x + pad + 12, z + pad + 12);
+    for (let i = 0; i < cand.length; i++) {
+      const sg = cand[i], ax = sg[0], az = sg[1], bx = sg[2], bz = sg[3], dx = bx - ax, dz = bz - az, len = Math.hypot(dx, dz);
+      if (len < 1e-4) continue;
+      const u = ((x - ax) * dx + (z - az) * dz) / len;
+      if (u < -0.35 || u > len + 0.35) continue;
+      if (Math.abs(-(x - ax) * dz + (z - az) * dx) / len > sg[4] + pad) continue;
+      const t = Math.min(1, Math.max(0, u / len)), yy = sg[5] + (sg[6] - sg[5]) * t;
+      if (Math.abs(yy - y) < tol) return true;
+    }
+    return false;
+  }
   function obstructsLowerRoad(x, z, h, boxS = 1.24, slabH = 0.28, exA = null, exB = null) {
     const half = boxS * 0.5 + 0.48;
     const maxDiff = 2.12 + slabH;
@@ -125,10 +139,17 @@ export function buildBrasiliaRoads(B, { acc, quad }) {
   // flutuava nas baixas, passava por baixo das vias e, na emenda entre blocos de alturas diferentes, batia
   // numa parede invisível. Agora a física consulta a altura real do terreno em qualquer ponto; uma máscara
   // (1 u) diz onde existe chão — os retângulos do mapa, com as trincheiras e rampas que descem recortadas.
+  // Elevação da pista/calçada sobre o relevo (grade 1 u): o chão físico sobe junto com o asfalto (+yo) e a
+  // calçada (+meio-fio) — antes o pé afundava até 0,45 no meio-fio e tiros atravessavam a calçada.
+  let liftAt = null;
   {
     const MR = 1.0, mX = Bd.minX - 2, mZ = Bd.minZ - 2;
     const mNX = Math.ceil((Bd.maxX - Bd.minX + 4) / MR), mNZ = Math.ceil((Bd.maxZ - Bd.minZ + 4) / MR);
-    const mask = new Uint8Array(mNX * mNZ);
+    const mask = new Uint8Array(mNX * mNZ), lift = new Float32Array(mNX * mNZ);
+    liftAt = (x, z, v) => {
+      const ix = Math.floor((x - mX) / MR), iz = Math.floor((z - mZ) / MR);
+      if (ix < 0 || iz < 0 || ix >= mNX || iz >= mNZ) return; const k = iz * mNX + ix; if (v > lift[k]) lift[k] = v;
+    };
     for (const [x1, z1, x2, z2] of D.ground) {
       const ix0 = Math.max(0, Math.floor((x1 - mX) / MR)), ix1 = Math.min(mNX, Math.ceil((x2 - mX) / MR));
       const iz0 = Math.max(0, Math.floor((z1 - mZ) / MR)), iz1 = Math.min(mNZ, Math.ceil((z2 - mZ) / MR));
@@ -152,7 +173,7 @@ export function buildBrasiliaRoads(B, { acc, quad }) {
       at(x, z) {
         const ix = Math.floor((x - mX) / MR), iz = Math.floor((z - mZ) / MR);
         if (ix < 0 || iz < 0 || ix >= mNX || iz >= mNZ || !mask[iz * mNX + ix]) return NaN;
-        return TH(x, z) - 0.04;
+        return TH(x, z) + lift[iz * mNX + ix] - 0.04;
       },
     });
   }
@@ -257,13 +278,31 @@ export function buildBrasiliaRoads(B, { acc, quad }) {
         quad(acc('u:' + BK, cxm, czm), RiO, [RiO[0], RiO[1] - cb, RiO[2]], [RjO[0], RjO[1] - cb, RjO[2]], RjO, inL); // face externa
         }
       }
-      if (up) {
-        // laterais (viaduto: viga de 0,9 m; aterro/rampa: muro até o chão) e guarda-corpo
+      if (!tunnel && !down && Math.max(hA, hB) <= 0.6 && Math.min(hA, hB) > -0.08) {
+        const SWc = 1.6, LIFTc = 0.16, ext = hw + ((curbL || curbR) ? SWc : 0) + 0.5;
+        const ddx = b[0] - a[0], ddz = b[2] - a[2], L2s = ddx * ddx + ddz * ddz;
+        if (L2s > 1e-6) {
+          const Ls = Math.sqrt(L2s), x0 = Math.min(a[0], b[0]) - ext, x1 = Math.max(a[0], b[0]) + ext, z0 = Math.min(a[2], b[2]) - ext, z1 = Math.max(a[2], b[2]) + ext;
+          for (let zz = Math.floor(z0) + 0.5; zz < z1; zz += 1) for (let xx = Math.floor(x0) + 0.5; xx < x1; xx += 1) {
+            const t = ((xx - a[0]) * ddx + (zz - a[2]) * ddz) / L2s; if (t < -0.02 || t > 1.02) continue;
+            const side = (-(xx - a[0]) * ddz + (zz - a[2]) * ddx) / Ls;     // >0 = lado esquerdo (na)
+            const dd = Math.abs(side), hh = hA + (hB - hA) * Math.min(1, Math.max(0, t));
+            if (dd < hw) liftAt(xx, zz, Math.max(0, hh) + yo);
+            else if (dd < hw + SWc && ((side > 0 && curbL) || (side < 0 && curbR))) liftAt(xx, zz, Math.max(0, hh) + yo + LIFTc);
+          }
+        }
+      }
+      if (up || (Math.max(hA, hB) > 0.04 && !tunnel && !down)) {
+        // laterais (viaduto: viga de 0,9 m; aterro/rampa: muro até o chão) e guarda-corpo — também nas pontas
+        // baixas das rampas (antes a pista ficava uma "folha" solta acima da grama, sem lateral)
         const bot = (h) => bridge ? h - 0.9 : 0;
         for (const [p0, p1, side] of [[La, Lb, 1], [Ra, Rb, -1]]) {
           const out = [side * (na[0] + nb[0]) / 2, 0, side * (na[1] + nb[1]) / 2];
           quad(acc('u:' + BK, cxm, czm), [p0[0], bot(hA) + ta, p0[2]], [p1[0], bot(hB) + tb, p1[2]], [p1[0], p1[1], p1[2]], [p0[0], p0[1], p0[2]], out);
-          if (!nearJunction(cxm, czm) && Math.min(hA, hB) > 0.6) quad(acc('f:' + BK, cxm, czm), [p0[0], p0[1], p0[2]], [p1[0], p1[1], p1[2]], [p1[0], p1[1] + 1.0, p1[2]], [p0[0], p0[1] + 1.0, p0[2]], out);
+          if (!nearJunction(cxm, czm) && Math.min(hA, hB) > 0.6) {   // guarda-corpo: as duas faces (antes só se via de fora)
+            quad(acc('f:' + BK, cxm, czm), [p0[0], p0[1], p0[2]], [p1[0], p1[1], p1[2]], [p1[0], p1[1] + 1.0, p1[2]], [p0[0], p0[1] + 1.0, p0[2]], out);
+            quad(acc('f:' + BK, cxm, czm), [p0[0], p0[1], p0[2]], [p1[0], p1[1], p1[2]], [p1[0], p1[1] + 1.0, p1[2]], [p0[0], p0[1] + 1.0, p0[2]], [-out[0], 0, -out[2]]);
+          }
         }
         if (bridge) quad(acc('u:' + BK, cxm, czm), [La[0], hA - 0.9 + ta, La[2]], [Lb[0], hB - 0.9 + tb, Lb[2]], [Rb[0], hB - 0.9 + tb, Rb[2]], [Ra[0], hA - 0.9 + ta, Ra[2]], DOWN);
       }
@@ -324,10 +363,13 @@ export function buildBrasiliaRoads(B, { acc, quad }) {
         const stepL = steep ? 0.45 : sloped ? 0.65 : 1.2;
         const kL = Math.max(1, Math.ceil(segL / stepL), Math.ceil(dh / 0.14));
         const boxS = steep ? 0.95 : sloped ? 1.24 : 1.7;
-        const effHw = Math.max(0.15, hw - (up ? boxS * 0.35 : 0.02));
+        // caixas alinhadas aos eixos numa via diagonal: recuo pela meia-diagonal projetada, para não saírem da borda
+        const effHw = Math.max(0.15, up ? hw - (boxS / 2) * (Math.abs(tx) + Math.abs(tz)) + 0.08 : hw - 0.02);
         const stepW = steep ? 0.55 : 0.78;
         const kW = Math.max(1, Math.round((effHw * 2) / stepW));
-        const slabH = 0.28;
+        // laje da pista: viaduto = viga de 0,9 (como o desenho); aterro/rampa = MACIÇO até o chão (o desenho
+        // é um muro do chão até a pista — antes era oco e dava para entrar/passar por baixo da via)
+        const slabH = up && bridge ? 0.9 : 0.28, fillDown = up && !bridge;
         for (let j = slabJ0; j <= kL; j++) {
           const t = j / kL, cx = a[0] + (b[0] - a[0]) * t, cz = a[2] + (b[2] - a[2]) * t, h = a[1] + (b[1] - a[1]) * t, habs = h + ta + (tb - ta) * t;
           if (!down && !hasCutBelow && h <= 0.08) continue;
@@ -336,7 +378,16 @@ export function buildBrasiliaRoads(B, { acc, quad }) {
             const u = -effHw + (iw / kW) * (effHw * 2);
             const px = cx + nx * u, pz = cz + nz * u;
             if (obstructsLowerRoad(px, pz, habs, boxS, slabH, aAbs, bAbs)) continue;
-            collider(px, habs - slabH, pz, boxS, slabH, boxS, { noNav: false });
+            if (fillDown) { const yb = Math.min(habs - slabH, TH(px, pz) - 0.3); collider(px, yb, pz, boxS, habs - yb, boxS, { noNav: false }); }
+            else collider(px, habs - slabH, pz, boxS, slabH, boxS, { noNav: false });
+          }
+        }
+        if (up && Math.min(hA, hB) > 0.6 && !nearJunction(cxm, czm)) {   // guarda-corpo (1,0) sólido nos dois lados
+          const kP = Math.max(1, Math.ceil(segL / 0.9)), st = segL / kP;
+          for (let j = 0; j < kP; j++) {
+            const t = (j + 0.5) / kP, x = a[0] + (b[0] - a[0]) * t, z = a[2] + (b[2] - a[2]) * t, habs = a[1] + (b[1] - a[1]) * t + ta + (tb - ta) * t;
+            const mx = na[0] + (nb[0] - na[0]) * t, mz = na[1] + (nb[1] - na[1]) * t;
+            for (const sd of [1, -1]) collider(x + mx * hw * sd, habs, z + mz * hw * sd, Math.abs(tx) * st + 0.3, 1.0, Math.abs(tz) * st + 0.3, { noNav: true });
           }
         }
         if (tunnel) for (let j = 0; j <= Math.ceil(segL / 1.4); j++) { // paredes laterais do túnel
@@ -345,7 +396,7 @@ export function buildBrasiliaRoads(B, { acc, quad }) {
           const mx = na[0] + (nb[0] - na[0]) * t, mz = na[1] + (nb[1] - na[1]) * t;
           for (const s of [1, -1]) {
             const wx = x + mx * (hw + 1.8) * s, wz = z + mz * (hw + 1.8) * s;
-            if (!nearJunction(wx, wz) && !inSegList(allRoadSegs, wx, wz, 1.45, 1.45)) {
+            if (!nearJunction(wx, wz) && !roadAtLevel(wx, wz, habs, 0, 1.2)) {   // só some se cair EM CIMA de outra pista no mesmo nível
               collider(wx, habs, wz, 1.1, Math.max(0.5, -0.85 - h), 1.1, { noNav: true });
             }
           }
@@ -381,13 +432,20 @@ export function buildBrasiliaRoads(B, { acc, quad }) {
     for (let i = 0; i + 5 < w.length; i += 3) {
       const ax = w[i], az = w[i + 1], ah = w[i + 2], bx = w[i + 3], bz = w[i + 4], bh = w[i + 5];
       const taw = TH(ax, az), tbw = TH(bx, bz);
-      quad(acc('u:' + BK, ax, az), [ax, Math.min(ah, bh) - 0.4 + taw, az], [bx, Math.min(ah, bh) - 0.4 + tbw, bz], [bx, 1.0 + tbw, bz], [ax, 1.0 + taw, az], null);
-      quad(acc('u:' + BK, ax, az), [ax, 1.0 + taw, az], [bx, 1.0 + tbw, bz], [bx, 1.0 + tbw, bz], [ax, 1.0 + taw, az], UP);
-    }
-    for (let i = 0; i < w.length; i += 3) {
-      if (!inSegList(allRoadSegs, w[i], w[i + 1], 1.45, 1.45)) {
-        const twc = TH(w[i], w[i + 1]);
-        collider(w[i], w[i + 2] + twc, w[i + 1], 1.1, 1.0 - w[i + 2], 1.1, { noNav: true });
+      // via cruzando por cima no nível do chão: o muro para no chão (antes ficava um muro "fantasma" na pista)
+      const cross = [0, 0.5, 1].some((f) => { const x = ax + (bx - ax) * f, z = az + (bz - az) * f; return roadAtLevel(x, z, TH(x, z), 0.6, 0.7); });
+      const topA = cross ? taw - 0.02 : 1.0 + taw, topB = cross ? tbw - 0.02 : 1.0 + tbw;
+      const wq = [[ax, Math.min(ah, bh) - 0.4 + taw, az], [bx, Math.min(ah, bh) - 0.4 + tbw, bz], [bx, topB, bz], [ax, topA, az]];
+      const wn = [bz - az, 0, -(bx - ax)];
+      quad(acc('u:' + BK, ax, az), ...wq, wn); quad(acc('u:' + BK, ax, az), ...wq, [-wn[0], 0, -wn[2]]);   // as duas faces (de dentro da trincheira o muro sumia)
+      if (!cross) quad(acc('u:' + BK, ax, az), [ax, topA, az], [bx, topB, bz], [bx, topB, bz], [ax, topA, az], UP);
+      // colisão contínua ao longo do muro (antes: só blocos nos vértices, com vãos entre eles)
+      const L = Math.hypot(bx - ax, bz - az); if (L < 0.05) continue;
+      const k = Math.max(1, Math.ceil(L / 0.9)), st = L / k, ux = (bx - ax) / L, uz = (bz - az) / L;
+      for (let j = 0; j < k; j++) {
+        const f = (j + 0.5) / k, x = ax + (bx - ax) * f, z = az + (bz - az) * f, tw = taw + (tbw - taw) * f;
+        const bot = ah + (bh - ah) * f + tw, top = topA + (topB - topA) * f;
+        if (top - bot > 0.1) collider(x, bot, z, Math.abs(ux) * st + 0.5, top - bot, Math.abs(uz) * st + 0.5, { noNav: true });
       }
     }
   }

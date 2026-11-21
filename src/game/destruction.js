@@ -67,19 +67,16 @@ export function createDestruction(ctx, deps) {
     const qMin = new THREE.Vector3(c.x - rad, c.y - 1.5, c.z - rad);
     const qMax = new THREE.Vector3(c.x + rad, c.y + 12, c.z + rad);
     const candidates = world.query(qMin, qMax, []);
-    let removedAny = false;
     for (let i = 0; i < candidates.length; i++) {
       const b = candidates[i];
-      if (!b || b.data.indestructible) continue;
+      if (!b || b._removed || b.data.indestructible) continue;
       const bw = b.max.x - b.min.x, bh = b.max.y - b.min.y, bd = b.max.z - b.min.z;
       const gT = world.terrainAt ? world.terrainAt((b.min.x + b.max.x) * 0.5, (b.min.z + b.max.z) * 0.5) : NaN;
       if (bh <= 0.48 || bw > 11.5 || bd > 11.5 || bh > 20 || b.min.y < (gT === gT ? gT : 0) - 1.2) continue; // nada enterrado (relativo ao relevo)
       const bx = (b.min.x + b.max.x) * 0.5, by = (b.min.y + b.max.y) * 0.5, bz = (b.min.z + b.max.z) * 0.5;
       if (Math.hypot(bx - c.x, bz - c.z) > rad + Math.max(bw, bd) * 0.4) continue;
-      const idx = world.boxes.indexOf(b);
-      if (idx >= 0) {
-        world.boxes.splice(idx, 1);
-        removedAny = true;
+      world.removeBox(b);
+      if (true) {
         const bPos = new THREE.Vector3(bx, by, bz);
         const isTreeLike = bw < 2.4 && bd < 2.4 && bh > 2.2;
         for (let k = 0; k < 3; k++) {
@@ -98,7 +95,6 @@ export function createDestruction(ctx, deps) {
         audio.smash(bPos, true);
       }
     }
-    if (removedAny) world.finalize();
   }
 
   return { breakProp, destroyEnvironmentAt };

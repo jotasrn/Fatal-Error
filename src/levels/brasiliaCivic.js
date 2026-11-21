@@ -16,7 +16,8 @@ export function teatroNacional(B, x, z, W, D) {
   const A = shifted(B, x, z); const { box, collider, deco, ring, sniper, spawn, pickup } = A;
   const H = 17;
   const g = new THREE.CylinderGeometry(0.55, 1, 1, 4); g.rotateY(Math.PI / 4); g.scale(W / Math.SQRT2, H, D / Math.SQRT2); g.translate(0, H / 2, 0); deco(g, BL);
-  for (let i = 0; i < 4; i++) { const k = 1 - 0.45 * (i + 0.5) / 4; collider(0, i * H / 4, 0, W * k, H / 4, D * k); }
+  // colisão em 16 degraus finos que ficam rentes à fachada inclinada (com 4 degraus sobravam beirais invisíveis de ~1,4)
+  for (let i = 0; i < 16; i++) { const k = 1 - 0.45 * (i + 0.75) / 16; collider(0, i * H / 16, 0, W * k, H / 16, D * k, { noNav: i < 15 }); }
   let seed = 3; const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
   for (let i = 0; i < 60; i++) { const f = 0.08 + rnd() * 0.78, y = f * H, k = 1 - 0.45 * f; const s = rnd() < 0.5 ? -1 : 1; B.nearBox(x + s * (W * k / 2 + 0.25), y, z + (rnd() - 0.5) * (D * k - 4), 1.3, 1.3, 1.3 + rnd() * 2.2, { ink: BK }); }
   box(W / 2 - 1, 0, 0, 2, 3.2, 14, { ink: BK });
@@ -45,7 +46,9 @@ export function palacioDeArcos(B, x, z, W, kind) {
 // Palácio do Planalto (longo, paralelo ao Eixo) e STF: colunas "em lâmina" curvas, rampa do Planalto
 export function palacioColunas(B, x, z, Lz, Dx, FY, RY, rampSide, stairSide = -1) {
   const A = shifted(B, x, z); const { box, slab, collider, deco, ring, sniper, spawn, stairs, rail, facade } = A;
-  slab(-Dx / 2, -Lz / 2, Dx / 2, Lz / 2, FY, 0.5); collider(0, 0, 0, Dx, FY - 0.5, Lz);
+  slab(-Dx / 2, -Lz / 2, Dx / 2, Lz / 2, FY, 0.5);
+  // térreo envidraçado recuado sob o piso (antes era um pódio sólido sem desenho = parede invisível em volta)
+  if (FY > 1.6) box(0, 0, 0, Dx - 4, FY - 0.5, Lz - 4, { ink: BL }); else collider(0, 0, 0, Dx, FY - 0.5, Lz);
   box(0, FY, 0, Dx - 5, RY - FY - 0.6, Lz - 6, { ink: BL }); facade(0, 0, Dx - 5, Lz - 6, RY - FY - 0.6, 3, BK, 2);
   slab(-Dx / 2 - 1, -Lz / 2 - 1, Dx / 2 + 1, Lz / 2 + 1, RY, 0.6);
   for (let zz = -Lz / 2 + 2; zz <= Lz / 2 - 2; zz += 5.5) for (const xs of [-1, 1]) {

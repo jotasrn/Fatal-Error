@@ -56,8 +56,8 @@ export class EnemyManager {
       if (child.isMesh) {
         if (child.geometry && !child.geometry.userData.shared) try { child.geometry.dispose(); } catch (e) {}
         if (child.material) {
-          if (Array.isArray(child.material)) child.material.forEach((m) => { try { m.dispose(); } catch (e) {} });
-          else try { child.material.dispose(); } catch (e) {}
+          if (Array.isArray(child.material)) child.material.forEach((m) => { if (!m.userData?.shared) try { m.dispose(); } catch (e) {} });
+          else if (!child.material.userData?.shared) try { child.material.dispose(); } catch (e) {}
         }
       }
     });
@@ -145,7 +145,14 @@ export class EnemyManager {
 
     const ink = T.ink ?? INK.RED;
     const mat = makeInkMaterial({ ink, shadeScale: 0, shadeBias: 1 });
-    const solid = makeInkMaterial({ ink: T.ink === INK.BLACK ? INK.RED : INK.BLACK, fill: true, side: THREE.DoubleSide });
+    const solidInk = T.ink === INK.BLACK ? INK.RED : INK.BLACK;
+    this._solidCache = this._solidCache || new Map();
+    let solid = this._solidCache.get(solidInk);
+    if (!solid) {
+      solid = makeInkMaterial({ ink: solidInk, fill: true, side: THREE.DoubleSide });
+      solid.userData.shared = true;
+      this._solidCache.set(solidInk, solid);
+    }
     const tpl = buildCached(type, baseT, modelBuilder(baseT));
     const model = cloneModel(tpl, mat, solid);
     const hw = T.flying ? 0.45 : T.isTank ? 1.35 : Math.min(0.35 * T.scale, 1.25);
@@ -212,10 +219,18 @@ export class EnemyManager {
       }
       if (e.elite === 'berserker') e.auraSpeed *= (1 + (1 - clamp(e.hp / e.maxHp, 0, 1)) * 0.45);
 
-      const target = this._pickTarget(e, dt), peaceful = !target && (e.T.isPolice || e.T.isProtester);
+      const ldx = e.body.pos.x - lp.x, ldz = e.body.pos.z - lp.z, d2Player = ldx * ldx + ldz * ldz;
+      const farPhysics = d2Player > 95 * 95 && !e.T.boss && !e.T.isTank && !e.T.isPet;
+      if (farPhysics && ((e.id + this._lodTick) % 3) !== 0) {
+        e.center.set(e.body.pos.x, e.body.pos.y + 1.0 * e.T.scale, e.body.pos.z);
+        continue;
+      }
+      const simDt = farPhysics ? Math.min(0.12, dt * 3) : dt;
+
+      const target = this._pickTarget(e, simDt), peaceful = !target && (e.T.isPolice || e.T.isProtester);
       const P = target || ctx.player, pp = P.body.pos, pc = P.center;
-      if (e.flashT > 0) { e.flashT -= dt; if (e.flashT <= 0 && e.flashOn) { setFill(e.mat, false); e.flashOn = false; } }
-      e.flinch = damp(e.flinch, 0, 9, dt);
+      if (e.flashT > 0) { e.flashT -= simDt; if (e.flashT <= 0 && e.flashOn) { setFill(e.mat, false); e.flashOn = false; } }
+      e.flinch = damp(e.flinch, 0, 9, simDt);
       if (e.state === 'spawn') {
         const f = clamp(e.t / 0.6, 0, 1); e.root.scale.setScalar(Math.max(0.001, f * e.T.scale * (1 + Math.sin(e.t * 60) * 0.12 * (1 - f))));
         e.root.position.copy(e.body.pos); e.root.rotation.y = e.yaw; this._syncHit(e);
@@ -224,22 +239,22 @@ export class EnemyManager {
       }
       if (e.root.scale.x !== e.T.scale && e.stealthT <= 0) e.root.scale.setScalar(e.T.scale);
       if (e.state === 'stunned' && e.laser) this._hideLaser(e);
-      if (e.T.flying) { this._thinkFlyer(e, dt, pc, P); world.moveBody(e.body, dt); }
+      if (e.T.flying) { this._thinkFlyer(e, simDt, pc, P); world.moveBody(e.body, simDt); }
       else {
         if (e.state === 'stunned') { if (e.t > e.stunDur) e.state = 'hunt'; }
-        else if (peaceful) this._patrolPeaceful(e, dt);
+        else if (peaceful) this._patrolPeaceful(e, simDt);
         else if (P.alive) {
-          const fx = pp.x - e.body.pos.x, fz = pp.z - e.body.pos.z; e.thinkAcc = (e.thinkAcc || 0) + dt;
+          const fx = pp.x - e.body.pos.x, fz = pp.z - e.body.pos.z; e.thinkAcc = (e.thinkAcc || 0) + simDt;
           if (fx * fx + fz * fz > 65 * 65 && !e.los && !e.T.boss && !e.T.isTank) { if (e.thinkAcc >= 0.16) { this._think(e, e.thinkAcc, pp, pc, P); e.thinkAcc = 0; } }
           else { this._think(e, e.thinkAcc, pp, pc, P); e.thinkAcc = 0; }
-        } else this._wander(e, dt);
-        e.body.vel.y -= 24 * dt; world.moveBody(e.body, dt);
+        } else this._wander(e, simDt);
+        e.body.vel.y -= 24 * simDt; world.moveBody(e.body, simDt);
       }
       if (e.body.pos.y < (ctx.level && ctx.level.killY != null ? ctx.level.killY : -6)) {
         if (e.T.isPet) { const tp = this.nearestTarget(e.body.pos) || ctx.player; e.body.pos.copy(tp.body.pos); e.body.pos.y += 0.5; e.body.vel.set(0, 0, 0); }
         else { this.kill(e, { source: 'fall', dir: _up.clone() }); continue; }
       }
-      e.yaw = angleLerp(e.yaw, e.yawT, 1 - Math.exp(-10 * dt));
+      e.yaw = angleLerp(e.yaw, e.yawT, 1 - Math.exp(-10 * simDt));
       e.root.position.copy(e.body.pos); e.root.rotation.y = e.yaw;
       if (!e.T.flying) {
         const pr = 0.36 + e.body.halfW + 0.12, ox = e.body.pos.x - pp.x, oz = e.body.pos.z - pp.z, o2 = ox * ox + oz * oz;
@@ -249,9 +264,9 @@ export class EnemyManager {
           if (world.overlapsBody(e.body)) { e.body.pos.x -= ox / od * push; e.body.pos.z -= oz / od * push; }
         }
       }
-      const ldx = e.body.pos.x - lp.x, ldz = e.body.pos.z - lp.z, farBot = ldx * ldx + ldz * ldz > 58 * 58;
+      const farBot = d2Player > 58 * 58;
       if (!farBot || ((e.id + this._lodTick) % 3) === 0) {
-        const animDt = farBot ? dt * 3 : dt;
+        const animDt = farBot ? Math.min(0.12, dt * 3) : dt;
         if (e.T.flying) this._animateFlyer(e, animDt); else this._animate(e, animDt, pc);
         this._syncHit(e);
       } else e.center.set(e.body.pos.x, e.body.pos.y + 1.0 * e.T.scale, e.body.pos.z);
@@ -267,13 +282,34 @@ export class EnemyManager {
     e.root.rotation.y = e.yaw;
   }
   _separate(dt) {
-    this._sepT -= dt; if (this._sepT > 0) return; this._sepT = 0.05; const es = this.enemies;
-    for (let i = 0; i < es.length; i++) { const a = es[i]; if (!a.alive || a.T.flying) continue;
-      for (let j = i + 1; j < es.length; j++) { const b = es[j]; if (!b.alive || b.T.flying) continue;
-        const dx = b.body.pos.x - a.body.pos.x, dz = b.body.pos.z - a.body.pos.z, maxSep = a.body.halfW + b.body.halfW + 0.85;
-        if (dx > maxSep || dx < -maxSep || dz > maxSep || dz < -maxSep) continue;
-        const d2 = dx * dx + dz * dz; if (d2 > maxSep * maxSep || d2 < 1e-6 || Math.abs(b.body.pos.y - a.body.pos.y) > 2.2) continue;
-        const d = Math.sqrt(d2), push = (maxSep - d) * 9; a.body.vel.x -= dx / d * push; a.body.vel.z -= dz / d * push; b.body.vel.x += dx / d * push; b.body.vel.z += dz / d * push; } }
+    this._sepT -= dt; if (this._sepT > 0) return; this._sepT = 0.05;
+    const es = this.enemies, CELL = 4, grid = this._sepGrid || (this._sepGrid = new Map());
+    grid.clear();
+    for (let i = 0; i < es.length; i++) {
+      const a = es[i]; if (!a.alive || a.T.flying) continue;
+      const cx = Math.floor(a.body.pos.x / CELL), cz = Math.floor(a.body.pos.z / CELL);
+      const k = (cx + 2048) * 4096 + (cz + 2048);
+      let arr = grid.get(k); if (!arr) { arr = []; grid.set(k, arr); }
+      arr.push(i);
+    }
+    for (let i = 0; i < es.length; i++) {
+      const a = es[i]; if (!a.alive || a.T.flying) continue;
+      const cx = Math.floor(a.body.pos.x / CELL), cz = Math.floor(a.body.pos.z / CELL);
+      for (let ox = -1; ox <= 1; ox++) for (let oz = -1; oz <= 1; oz++) {
+        const arr = grid.get((cx + ox + 2048) * 4096 + (cz + oz + 2048));
+        if (!arr) continue;
+        for (let m = 0; m < arr.length; m++) {
+          const j = arr[m]; if (j <= i) continue;
+          const b = es[j];
+          const dx = b.body.pos.x - a.body.pos.x, dz = b.body.pos.z - a.body.pos.z, maxSep = a.body.halfW + b.body.halfW + 0.85;
+          if (dx > maxSep || dx < -maxSep || dz > maxSep || dz < -maxSep) continue;
+          const d2 = dx * dx + dz * dz; if (d2 > maxSep * maxSep || d2 < 1e-6 || Math.abs(b.body.pos.y - a.body.pos.y) > 2.2) continue;
+          const d = Math.sqrt(d2), push = (maxSep - d) * 9;
+          a.body.vel.x -= dx / d * push; a.body.vel.z -= dz / d * push;
+          b.body.vel.x += dx / d * push; b.body.vel.z += dz / d * push;
+        }
+      }
+    }
   }
 }
 

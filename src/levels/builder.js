@@ -52,7 +52,7 @@ export function createBuilder(scene, world) {
   function addInstance(kind, protoFn, x, y, z, rotY = 0, sx = 1, sy = 1, sz = 1, colorOverride = null, tag = null) {
     let grp = instGroups.get(kind);
     if (!grp) {
-      grp = { parts: protoFn(), items: [] };
+      grp = { kind, parts: protoFn(), items: [] };
       instGroups.set(kind, grp);
     }
     grp.items.push({ x, y, z, rotY, sx, sy, sz, colorOverride, tag });
@@ -212,6 +212,7 @@ export function createBuilder(scene, world) {
           im.computeBoundingSphere();
           im.frustumCulled = true;
           im.matrixAutoUpdate = false;
+          im.userData.lod = part.lod || null; im.userData.kind = grp.kind || null;
           scene.add(im);
           L.meshes.push(im);
           if (part.lod) { im.visible = part.lod === 'far'; lodTiles.push({ im, near: part.lod === 'near', x0: tx * ITILE, z0: tz * ITILE, r: part.lodR || NEAR_R }); }

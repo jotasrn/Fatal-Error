@@ -98,7 +98,8 @@ export function torreDeTV(B, x, z) {
       const mx = tx + Math.cos(a) * 4.5, mz = tz + Math.sin(a) * 4.5;
       const leg = new THREE.QuadraticBezierCurve3(new THREE.Vector3(bx, 0, bz), new THREE.Vector3((bx + mx) / 2, MY * 0.5, (bz + mz) / 2), new THREE.Vector3(mx, MY, mz));
       deco(new THREE.TubeGeometry(leg, 8, 1.15, 6, false), BK);
-      collider(bx * 0.85, 0, tz + (bz - tz) * 0.85, 2.4, 5, 2.4);
+      // colisão acompanhando a curva do pilar (antes: um cubo a 85% do raio — o pé do pilar ficava oco)
+      for (let k = 0; k < 14; k++) { const p = leg.getPoint((k + 0.5) / 14); collider(p.x, p.y - 0.9, p.z, 2.1, 1.8, 2.1, { noNav: true }); }
     }
     // Escadaria panorâmica externa (livre de teto!) com patamar intermediário (Y = 10) até o Mirante (Y = 20)
     stairs(-12.2, 0, tz + 10, '-z', 20, 3.2, { rise: 0.5, run: 0.55 });

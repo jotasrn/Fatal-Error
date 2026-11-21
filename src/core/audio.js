@@ -241,7 +241,8 @@ class Sfx {
     const bpm = 156, step = 60 / bpm / 4; const midi = (n) => 440 * Math.pow(2, (n - 69) / 12);
     // a throttled tab can fall far behind; skip forward rather than replaying every missed note
     if (m.next < ctx.currentTime - 0.8) m.next = ctx.currentTime + 0.05;
-    while (m.next < ctx.currentTime + 0.7) {
+    let guard = 0;
+    while (m.next < ctx.currentTime + 0.7 && ++guard < 32) {
       const t = m.next, i = m.step % SONG.length, bar = Math.floor(i / 16), s16 = i % 16;
       const sec = SONG.section[bar], chord = SONG.chord[bar], root = chord[0];
       const firstBar = SONG.firstBar[bar], lastBar = SONG.lastBar[bar];

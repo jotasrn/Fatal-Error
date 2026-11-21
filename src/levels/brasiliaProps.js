@@ -55,7 +55,7 @@ function blob(x, y, z, rx, ry, rz, r, ws = 9, hs = 6) {
 export function treeCerrado(seed) {
   return () => {
     const r = rng(seed), bark = [], leaf = [];
-    const lean = (r() - 0.5) * 0.9, lz = (r() - 0.5) * 0.6;
+    const lean = (r() - 0.5) * 0.45, lz = (r() - 0.5) * 0.3;   // inclinação contida: o tronco fica dentro da colisão
     const k1 = [lean * 0.6, 1.4, lz * 0.5], k2 = [lean, 2.4, lz];
     bark.push(limb(0, 0, 0, ...k1, 0.26, 0.21, 7), limb(...k1, ...k2, 0.21, 0.17, 7));
     const nb = 3 + Math.floor(r() * 2);
