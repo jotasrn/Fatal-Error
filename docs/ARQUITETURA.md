@@ -85,54 +85,45 @@ Para suportar o mapa expandido de **Brasília (~770 m)** com dezenas de bots, pr
 | `electron/updater.cjs` | Orquestrador do `electron-updater`: checagem periódica no GitHub Releases, download silencioso e bloqueio de reinício durante partidas (`emPartida`). |
 | `electron/afterPack.cjs` | Hook do `electron-builder` que grava os `@electron/fuses` de segurança no executável `Fatal Error.exe`. |
 
-### `src/` — Núcleo do Jogo (Renderer)
-| Arquivo | Responsabilidade |
+### `src/` — Núcleo Modular do Jogo (Renderer)
+| Módulo / Arquivo | Responsabilidade |
 | --- | --- |
-| `src/main.js` | Orquestrador principal: menus, seleção de mapas/rede, loop de simulação, câmera de morte, placar multiplayer, governador de FPS e banner de update. |
-| `src/render.js` | Motor gráfico Three.js, materiais de tinta esferográfica e shader pós-processado de folha de caderno. |
-| `src/physics.js` | Colisores AABB/cilíndricos do mundo, rampas, plataformas móveis, degraus e raycasting de tiros. |
-| `src/nav.js` | Grade de navegação espacial (`NavGrid`) para movimentação, desvio de obstáculos e flanqueamento dos bots. |
-| `src/input.js` | Entrada unificada de Teclado + Mouse (Pointer Lock 360°) e Controle (DualSense/Xbox com vibração *dual-rumble*). |
-| `src/audio.js` | Sintetizador procedural Web Audio API: efeitos sonoros de tiro/impacto/katana e trilhas musicais 8-bit exclusivas por mapa. |
-| `src/hud.js` | Interface DOM estilo *Cartoon Arcade*: vida, blindagem, dinheiro, ondas, mira telescópica, medidor de Foco, *killfeed* e Loja (`[B]`). |
-| `src/minimap.js` | Minimapa tático em tempo real exibindo geometria próxima, aliados, inimigos e eventos. |
-| `src/effects.js` | Partículas de tinta, faíscas de deflexão, explosões, trilhas de projéteis e *screen shake*. |
-| `src/net.js` | Protocolo multiplayer: salas públicas/privadas, modo Global (Hyperswarm) e Corporativo, autoridade de Host e migração automática. |
-| `src/players.js` | Avatares 3D, interpolação de movimento, animações e barras de identificação dos jogadores remotos. |
-| `src/security.js` | Sanitização no cliente/Host: escape HTML (`escHtml`), limites numéricos (`clampNum`), validação de vetores/tiros e listas de permissão de pacotes. |
-| `src/util.js` | Funções matemáticas utilitárias, PRNG determinístico e molas físicas amortecidas (`Spring`) para recuo de câmera. |
+| `src/main.js` | Bootstrap do jogo: inicialização dos sistemas centrais, registro dos mapas e conexão entre módulos. |
+| `src/core/render.js` e `postFrag.glsl.js` | Motor gráfico Three.js cel-shaded, G-buffer, contornos de tinta, oclusão de contato, ciclo dia/noite, clima/chuva e resolução dinâmica. |
+| `src/core/physics.js` e `src/wasm/core.js` | Colisores AABB/cilíndricos do mundo (`FlatBoxStore`), rampas, terreno contínuo e raycasting de tiros. |
+| `src/core/nav.js` | Grade de navegação espacial (`NavGrid`) para movimentação, desvio de obstáculos e flanqueamento dos bots. |
+| `src/core/input.js` | Entrada unificada de Teclado + Mouse (Pointer Lock 360°) e Controle (DualSense/Xbox com vibração *dual-rumble*). |
+| `src/core/audio.js` | Sintetizador procedural Web Audio API com limite de polifonia, espacialização 3D, volumes separados (Geral/SFX/Música) e trilha 8-bit. |
+| `src/core/effects.js` | Pools instanciados de partículas de tinta, decalques, faíscas de deflexão, explosões e *screen shake*. |
+| `src/core/security.js` e `util.js` | Sanitização (`escHtml`), limites numéricos (`clampNum`), validação de pacotes e molas físicas (`Spring`). |
+| `src/net/` (`net.js`, `lobby.js`, `peerNet.js`, `bridgeNet.js`, `hybridNet.js`) | Protocolo multiplayer híbrido (Global P2P Hyperswarm, LAN TCP/UDP e WebRTC), autoridade de Host e migração automática. |
+| `src/ui/` (`hud.js`, `minimap.js`, `screens.js`, `settingsScreen.js`) | HUD tática, minimapa em tempo real, Mapa Tático `[M]` com cache estático, telas de menu/lobby e configurações. |
 
-### `src/levels/` — Construtor e Mapas Procedurais
+### `src/levels/` — Construtor, Tráfego e Mapas Procedurais
 | Arquivo | Responsabilidade |
 | --- | --- |
-| `src/levels/builder.js` | DSL geométrica procedural para erguer prédios, escadas, rampas, arcos, cúpulas, árvores e pontos de cobertura/spawn. |
-| `src/levels/index.js` | Registro oficial dos 6 mapas e despacho de construção (`buildLevel`). |
-| `src/levels/brasilia.js` | Mega-mapa **Brasília · Eixo Monumental (~770 m)**: Mané Garrincha, Torre de TV escalável, Ulysses, Pátio Brasil, Conjunto Nacional, Rodoviária, Catedral, Esplanada, Congresso e Três Poderes. |
-| `src/levels/district.js` | Mapa urbano **Distrito Central** com prédios, becos e telhados. |
-| `src/levels/mexico.js` | Mapa **Pueblo México** com praça central, arcos, fonte e piñatas destrutíveis. |
-| `src/levels/desk.js` | Mapa **Mesa de Estudos** em escala gigante com livros, réguas e material escolar. |
-| `src/levels/clocktower.js` | Mapa vertical **Torre do Relógio** com pátio gótico e campanário. |
-| `src/levels/peak.js` | Mapa aéreo **Pico** com torres em níveis e passarelas suspensas. |
+| `src/levels/builder.js` | DSL geométrica procedural com mesclagem por blocos e *LOD* por distância (`nearTiles` e `lodTiles`). |
+| `src/levels/index.js` | Registro oficial dos mapas e despacho de construção (`buildLevel`). |
+| `src/levels/brasilia*.js` e `data/` | Mega-mapa **Brasília · Eixo Monumental (~770 m)** com vias, monumentos, elevações e props urbanos. |
+| `src/levels/traffic.js` e `trafficModels.js` | Sistema de tráfego em grafo com `InstancedMesh`, semáforos, paradas de ônibus e desobstrução automática. |
+| `src/levels/desk.js`, `clocktower.js`, `peak.js` | Mapas **Mesa de Estudos**, **Torre do Relógio** e **Pico**. |
 
 ### `src/player/` & `src/weapons/` — Jogador e Arsenal
 | Arquivo | Responsabilidade |
 | --- | --- |
-| `src/player/player.js` | Corpo em 1ª pessoa: corrida, *slide*, *wall-jump*, pulo duplo, *mantle*, *air dash*, vida/blindagem, deflexão e troca entre os 8 slots. |
-| `src/player/shop.js` | Mixin da Loja (`[B]`): carteira de dinheiro, compra de armas (`$600`–`$1800`), coletes e munições. |
-| `src/player/grapple.js` | Mecânica física do Gancho (`Q`/`E`) com fôlego, pêndulo e impulso de saída. |
-| `src/player/grenades.js` | Carga de arremesso, arco preditivo, quique físico e explosão em área das granadas (`G`). |
-| `src/player/rockets.js` | Simulação dos foguetes da Bazuca, dano explosivo radial e impulso de *Rocket Jump*. |
-| `src/weapons/*.js` | Modelos 3D em 1ª pessoa, animações procedurais e lógica de disparo de `revolver`, `shotgun`, `smg`, `rifle`, `sniper`, `laser`, `bazooka` e `katana`. |
+| `src/player/player.js` e `remotePlayer.js` | Corpo em 1ª pessoa (*slide*, *wall-jump*, pulo duplo, *mantle*, *air dash*) e avatares/interpolação de jogadores remotos. |
+| `src/player/shop.js` | Mixin da Loja (`[B]`): carteira de dinheiro, compra de armas, coletes e munições. |
+| `src/player/grapple.js`, `grenades.js`, `rockets.js` | Mecânica física do Gancho (`Q`/`E`), granadas (`G`) e foguetes/Rocket Jump da Bazuca. |
+| `src/weapons/*.js` | Modelos 3D em 1ª pessoa, animações procedurais e disparo das 12 armas (`revolver`, `pistol9mm`, `punisher`, `deagle`, `requiem`, `shotgun`, `smg`, `rifle`, `sniper`, `laser`, `bazooka` e `katana`). |
 
-### `src/enemies/` & `src/game/` — Inteligência Artificial e Regras
+### `src/enemies/`, `src/game/` e `src-tauri/` — IA, Regras e Runtime Nativo
 | Arquivo | Responsabilidade |
 | --- | --- |
-| `src/enemies/types.js` | Tabela completa de atributos dos 22 tipos de bots (incluindo PMDF/GSI/BOPE, Manifestantes e Civis) e dos 3 Chefes. |
-| `src/enemies/manager.js` | Spawns, máquina de estados de IA, lógica de neutralidade policial vs manifestantes, combate entre facções e sincronização de rede. |
-| `src/enemies/batch.js` | Renderizador instanciado (`BotBatcher`) de alta performance para todos os bots humanoides. |
-| `src/enemies/models.js` | Construção procedural das malhas de chefes, criaturas voadoras, aranhas, lobos e acessórios. |
-| `src/enemies/projectiles.js` | Pool de projéteis inimigos com colisão, deflexão por Katana e trilhas visuais. |
-| `src/game/survival.js` | Diretor de ondas Solo, progressão de dificuldade, chefes a cada 5 ondas, *pickups* de munição/armas caídas e spawns de facções em Brasília. |
+| `src/enemies/types.js`, `manager.js` e `ai/*.js` | Tabela de atributos e máquinas de estado de IA (tática, chefes, veículos, civis/facções de Brasília). |
+| `src/enemies/batch.js` e `models/*.js` | Renderizador instanciado (`BotBatcher`) com sombras de contato em *draw call* única e malhas procedurais. |
+| `src/enemies/projectiles.js`, `combat.js`, `anim.js`, `netSync.js` | Projéteis, combate, animações e sincronização de snapshots de bots na rede. |
+| `src/game/` (`loop.js`, `survival.js`, `environment.js`, `missions.js`, `brasilia*.js`, `pvpCombat.js`) | Loop principal, diretor de ondas, ciclo dia/noite/clima, missões, tráfego/eventos de Brasília e combate PvP. |
+| `src-tauri/` e `rust-core/` | Shell alternativo Tauri 2.0 (LAN TCP/UDP compatível com portas `41230–41237` do Electron) e núcleo espacial WASM em Rust. |
 
 ### `scripts/`, `tests/` e `.github/` — Qualidade e CI/CD
 | Arquivo | Responsabilidade |

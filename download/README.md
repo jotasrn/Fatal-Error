@@ -113,6 +113,7 @@ Para remover também logs e configurações locais, apague a pasta `%APPDATA%\fa
 | **"O Windows protegeu o computador" (SmartScreen)** | Clique em **Mais informações** → **Executar assim mesmo**. |
 | **Antivírus colocou o instalador em quarentena** | Falso-positivo comum em executáveis sem assinatura EV paga. Confira o hash no `SHA256SUMS.txt` e permita o arquivo, ou baixe o `Fatal-Error-Portable.zip`. |
 | **Não encontra a sala do colega no modo Global** | Verifique se ambos permitiram o `Fatal Error` no Firewall do Windows e estão na mesma versão. Se estiverem em rede empresarial restrita, mudem para o modo **Rede Interna / Corporativa**. |
-| **Queda de FPS em notebooks com vídeo integrado** | O jogo já possui ajuste automático de resolução; feche abas pesadas do navegador em segundo plano para liberar memória de vídeo (VRAM). |
+| **Queda de FPS em notebooks com vídeo integrado** | Em **Configurações → Gráficos**, selecione **Automática · FPS Dinâmico** ou **Desempenho · FPS Máximo**; feche abas pesadas do navegador em segundo plano para liberar memória de vídeo (VRAM). |
+| **Ajustar volume de música vs efeitos** | Em **Configurações → Controles e som**, use os controles separados de **Volume Geral**, **Efeitos Sonoros (SFX)** e **Volume da Música**. |
 | **O jogo não abre ou apresenta erro inesperado** | Anexe o arquivo `%APPDATA%\fatal-error\fatal-error.log` ao abrir uma [Issue no GitHub](https://github.com/jotasrn/Fatal-Error/issues). |
 

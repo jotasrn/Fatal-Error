@@ -198,7 +198,13 @@ export class InkRenderer {
     const dpr = window.devicePixelRatio || 1;
     // Keep pixelRatio fixed per preset so Chromium never reallocates the D3D11 swapchain mid-combat
     this.autoRes = false;
-    if (this.quality === 'high') {
+    if (this.quality === 'auto') {
+      this.autoRes = true;
+      this.maxRatio = Math.min(Math.max(dpr, 1.0), 1.5);
+      this.minRatio = 0.8;
+      this.post.uniforms.uFastEdge.value = 0;
+      this.post.uniforms.uDetail.value = 1;
+    } else if (this.quality === 'high') {
       this.maxRatio = Math.min(Math.max(dpr, 1.25), 1.75);
       this.minRatio = this.maxRatio;
       this.post.uniforms.uFastEdge.value = 0;

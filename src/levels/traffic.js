@@ -268,7 +268,7 @@ export function buildGraphTraffic(B, net, opts = {}) {
       im.frustumCulled = false; scene.add(im); L.meshes.push(im); pools.push({ im, list });
     }
   }
-  const heads = [];
+  const heads = [], _nearby = [];
   let lastT = 0, spawnT = 0;
   function update(t) {
     const dt = lastT ? Math.min(0.05, Math.max(0, t - lastT)) : 0.016; lastT = t;
@@ -285,14 +285,16 @@ export function buildGraphTraffic(B, net, opts = {}) {
         const pl = players().find((p) => p && p.body);
         if (pl && Math.random() < 0.8) {
           const px = pl.body.pos.x, pz = pl.body.pos.z;
-          const nearbyEdges = edges.filter((e) => {
-            if (e.len < 25) return false;
+          _nearby.length = 0;
+          for (let ei = 0; ei < edges.length; ei++) {
+            const e = edges[ei];
+            if (e.len < 25) continue;
             const p0 = e.lanes[0].pts;
-            const d = Math.hypot(p0[0] - px, p0[2] - pz);
-            return d > 45 && d < 180;
-          });
-          if (nearbyEdges.length) {
-            const e = nearbyEdges[Math.floor(Math.random() * nearbyEdges.length)];
+            const d2 = (p0[0] - px) ** 2 + (p0[2] - pz) ** 2;
+            if (d2 > 45 * 45 && d2 < 180 * 180) _nearby.push(e);
+          }
+          if (_nearby.length) {
+            const e = _nearby[Math.floor(Math.random() * _nearby.length)];
             const li = laneFor(free, e);
             if (laneHeadroom(e, li) > free.d + 5) {
               place(free, e, li, 2);
@@ -381,7 +383,19 @@ export function buildGraphTraffic(B, net, opts = {}) {
     }
     // atualiza posição suavizada (troca de via sem "teleporte") e as instâncias
     for (const c of cars) {
-      if (c.hidden) { c.group.position.set(0, -80, 0); c.group.updateMatrix(); c.x = 0; c.y = -80; c.z = 0; c.speed = 0; c.vel.set(0, 0, 0); for (const a of c.anchors) a.obj.position.set(0, -80, 0); continue; }
+      if (c.hidden) {
+        if (!c._hiddenSynced) {
+          c._hiddenSynced = true;
+          c.group.position.set(0, -80, 0); c.group.updateMatrix();
+          c.x = 0; c.y = -80; c.z = 0; c.speed = 0; c.vel.set(0, 0, 0);
+          for (const a of c.anchors) a.obj.position.set(0, -80, 0);
+          c._dirtyMat = true;
+        } else {
+          c._dirtyMat = false;
+        }
+        continue;
+      }
+      c._hiddenSynced = false; c._dirtyMat = true;
       posAt(c);
       if (c.rx === null) { c.rx = c.px; c.ry = c.py; c.rz = c.pz; c.ryaw = c.hd; }
       const k2 = 1 - Math.exp(-14 * dt);
@@ -393,7 +407,14 @@ export function buildGraphTraffic(B, net, opts = {}) {
       const sy = Math.sin(c.yaw), cy = Math.cos(c.yaw);
       for (const a of c.anchors) a.obj.position.set(c.x + sy * a.off, c.y + c.h + 0.35, c.z + cy * a.off);
     }
-    for (const p of pools) { p.list.forEach((c, i) => p.im.setMatrixAt(i, c.group.matrix)); p.im.instanceMatrix.needsUpdate = true; }
+    for (const p of pools) {
+      let dirty = false;
+      for (let i = 0; i < p.list.length; i++) {
+        const c = p.list[i];
+        if (c._dirtyMat) { p.im.setMatrixAt(i, c.group.matrix); dirty = true; }
+      }
+      if (dirty) p.im.instanceMatrix.needsUpdate = true;
+    }
   }
   update(0.016);
   return { cars, update, edges, heads };

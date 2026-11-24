@@ -325,16 +325,18 @@ ipcMain.on('update:match-active', (event, active) => {
   noteMatchActive(!!active);
 });
 
+let _savedBounds = null;
 function toggleFullscreen() {
   if (!win || win.isDestroyed()) return;
   if (win.isFullScreen()) {
     win.setFullScreen(false);
     win.setMenuBarVisibility(false);
     if (!win.isMaximized()) {
-      win.setSize(1280, 720);
-      win.center();
+      if (_savedBounds) win.setBounds(_savedBounds);
+      else { win.setSize(1280, 720); win.center(); }
     }
   } else {
+    if (!win.isFullScreen() && !win.isMaximized()) _savedBounds = win.getBounds();
     win.setFullScreen(true);
   }
 }
@@ -380,7 +382,7 @@ function createWindow() {
     height: 720,
     minWidth: 960,
     minHeight: 540,
-    fullscreen: true,
+    show: false,
     autoHideMenuBar: true,
     backgroundColor: '#0b0c10',
     title: 'Fatal Error',
@@ -452,10 +454,12 @@ function createWindow() {
     }
   });
 
+  let _crashReloads = 0;
   win.webContents.on('render-process-gone', (_e, d) => {
     logLine('render-process-gone ' + JSON.stringify(d));
-    if (win && !win.isDestroyed()) {
-      setTimeout(() => win && !win.isDestroyed() && win.reload(), 500);
+    if (win && !win.isDestroyed() && _crashReloads < 2) {
+      _crashReloads++;
+      setTimeout(() => win && !win.isDestroyed() && win.reload(), 600);
     }
   });
   win.webContents.on('unresponsive', () => logLine('window unresponsive'));
@@ -465,7 +469,11 @@ function createWindow() {
   });
 
   win.setMenuBarVisibility(false);
-  win.setFullScreen(true);
+  win.once('ready-to-show', () => {
+    if (!win || win.isDestroyed()) return;
+    win.setFullScreen(true);
+    win.show();
+  });
   win.loadFile(APP_HTML_PATH);
   win.on('closed', () => { win = null; });
 }

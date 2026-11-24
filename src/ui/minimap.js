@@ -31,9 +31,10 @@ export class Minimap {
     if (this.onToggleFullMap) this.onToggleFullMap(this.fullmapOpen);
     return this.fullmapOpen;
   }
-  setEnabled(on) { this.enabled = on; this.canvas.hidden = !on; try { localStorage.getItem('fatal_minimap'); localStorage.setItem('fatal_minimap', on ? '1' : '0'); } catch (e) { /* ignore */ } }
+  setEnabled(on) { this.enabled = on; this.canvas.hidden = !on; try { localStorage.setItem('fatal_minimap', on ? '1' : '0'); } catch (e) { /* ignore */ } }
   setLevel(level, world) {
     this.level = level;
+    this._fmStatic = null;
     const b = level.bounds; this.b = b;
     const w = b.maxX - b.minX, h = b.maxZ - b.minZ; this.k = Math.min(1.6, 1024 / Math.max(w, h));
     const c = document.createElement('canvas'); c.width = Math.ceil(w * this.k); c.height = Math.ceil(h * this.k);
@@ -101,16 +102,11 @@ export class Minimap {
     if (this.fullmapOpen) this.renderFullMap(player, enemies, remotes, markers);
   }
 
-  renderFullMap(player, enemies, remotes, markers) {
-    if (!this.fmCtx || !this.layer || !this.b) return;
-    const ctx = this.fmCtx, cv = this.fmCanvas, b = this.b;
-    const cw = cv.width, ch = cv.height;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, cw, ch);
+  _buildFullMapStatic(cw, ch) {
+    const c = document.createElement('canvas'); c.width = cw; c.height = ch;
+    const ctx = c.getContext('2d'), b = this.b;
     ctx.fillStyle = '#181f28';
     ctx.fillRect(0, 0, cw, ch);
-
-    // Grid tático de fundo
     ctx.strokeStyle = '#263242';
     ctx.lineWidth = 1;
     for (let x = 0; x < cw; x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ch); ctx.stroke(); }
@@ -121,22 +117,17 @@ export class Minimap {
     const ox = (cw - this.layer.width * scale) / 2;
     const oy = (ch - this.layer.height * scale) / 2;
 
-    // Desenha o mapa da cidade com todas as vias, edifícios e água
     ctx.drawImage(this.layer, ox, oy, this.layer.width * scale, this.layer.height * scale);
     ctx.strokeStyle = '#3e4f66';
     ctx.lineWidth = 2;
     ctx.strokeRect(ox, oy, this.layer.width * scale, this.layer.height * scale);
 
-    const worldToMap = (wx, wz) => [ox + (wx - b.minX) * this.k * scale, oy + (wz - b.minZ) * this.k * scale];
-
-    // Marcos e pontos de interesse com ícones e rótulos
     const ICONS = {
       rodoviaria: '🚌 Rodoviária', torre: '🗼 Torre de TV', congresso: '🏛️ Congresso Nacional',
       catedral: '⛪ Catedral', museu: '🎨 Museu Nacional', esplanada: '🏢 Esplanada',
       praca3p: '⚖️ Praça 3 Poderes', asaNorte: '✈️ Asa Norte', asaSul: '✈️ Asa Sul',
       itamaraty: '🏛️ Itamaraty', justica: '⚖️ Min. Justiça', teatro: '🎭 Teatro Nacional'
     };
-
     if (this.level && this.level.landmarks) {
       ctx.font = 'bold 11px sans-serif';
       ctx.textAlign = 'center';
@@ -144,7 +135,8 @@ export class Minimap {
       for (const key in this.level.landmarks) {
         const lm = this.level.landmarks[key];
         if (!lm || !lm.pos) continue;
-        const [mx, my] = worldToMap(lm.pos.x, lm.pos.z);
+        const mx = ox + (lm.pos.x - b.minX) * this.k * scale;
+        const my = oy + (lm.pos.z - b.minZ) * this.k * scale;
         if (mx < ox || mx > ox + this.layer.width * scale || my < oy || my > oy + this.layer.height * scale) continue;
         const label = ICONS[key] || lm.name;
         if (!label) continue;
@@ -154,6 +146,42 @@ export class Minimap {
         ctx.fillRect(mx - tw / 2, my - 19, tw, 15);
         ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 1; ctx.strokeRect(mx - tw / 2, my - 19, tw, 15);
         ctx.fillStyle = '#f8fafc'; ctx.fillText(label, mx, my - 7);
+      }
+    }
+    this._fmStatic = { canvas: c, cw, ch, ox, oy, scale };
+  }
+
+  renderFullMap(player, enemies, remotes, markers) {
+    if (!this.fmCtx || !this.layer || !this.b) return;
+    const ctx = this.fmCtx, cv = this.fmCanvas, b = this.b;
+    const cw = cv.width, ch = cv.height;
+    if (!this._fmStatic || this._fmStatic.cw !== cw || this._fmStatic.ch !== ch) this._buildFullMapStatic(cw, ch);
+    const { canvas: bg, ox, oy, scale } = this._fmStatic;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(bg, 0, 0);
+
+    const worldToMap = (wx, wz) => [ox + (wx - b.minX) * this.k * scale, oy + (wz - b.minZ) * this.k * scale];
+
+    // Civis, inimigos, chefes e jogadores remotos
+    if (enemies) {
+      for (const e of enemies) {
+        if (!e.alive || !e.body) continue;
+        const [mx, my] = worldToMap(e.body.pos.x, e.body.pos.z);
+        const T = e.T;
+        const col = T.isPet ? '#f0a020' : T.isPolice ? '#2f6fe0' : T.isCivilian ? '#94a3b8' : T.isProtester ? '#ff5a3c' : '#ef4444';
+        const r = T.boss ? 6 : T.isCivilian ? 2.5 : 3.4;
+        ctx.beginPath(); ctx.arc(mx, my, r, 0, Math.PI * 2);
+        ctx.fillStyle = col; ctx.fill();
+        ctx.lineWidth = 1.2; ctx.strokeStyle = '#0f172a'; ctx.stroke();
+      }
+    }
+    if (remotes) {
+      for (const r of remotes) {
+        if (!r.alive || !r.root || r.away || !r.body) continue;
+        const [mx, my] = worldToMap(r.body.pos.x, r.body.pos.z);
+        ctx.beginPath(); ctx.arc(mx, my, 4.5, 0, Math.PI * 2);
+        ctx.fillStyle = '#a855f7'; ctx.fill();
+        ctx.lineWidth = 1.5; ctx.strokeStyle = '#0f172a'; ctx.stroke();
       }
     }
 

@@ -8,6 +8,9 @@ export function createSettingsManager(ctx, deps) {
   const settings = {
     sens: Number(localStorage.getItem('fatal_sens') || 100),
     invert: localStorage.getItem('fatal_invert') === '1',
+    vol: Number(localStorage.getItem('fatal_vol') ?? 55),
+    sfxVol: Number(localStorage.getItem('fatal_sfx_vol') ?? 100),
+    musVol: Number(localStorage.getItem('fatal_mus_vol') ?? 100),
   };
 
   const hudPrefs = {
@@ -130,8 +133,14 @@ export function createSettingsManager(ctx, deps) {
     input.padSensX = 3.4 * settings.sens / 100;
     input.padSensY = 2.6 * settings.sens / 100;
     input.invertY = settings.invert;
+    audio.setVolume(settings.vol / 100);
+    audio.setSfxVolume(settings.sfxVol / 100);
+    audio.setMusicVolume(settings.musVol / 100);
     localStorage.setItem('fatal_sens', String(settings.sens));
     localStorage.setItem('fatal_invert', settings.invert ? '1' : '0');
+    localStorage.setItem('fatal_vol', String(settings.vol));
+    localStorage.setItem('fatal_sfx_vol', String(settings.sfxVol));
+    localStorage.setItem('fatal_mus_vol', String(settings.musVol));
     applyHudSettings();
   }
 
@@ -146,7 +155,7 @@ export function createSettingsManager(ctx, deps) {
       { name: 'Preto Nanquim', hex: '#111111' },
     ];
     const colorSwatches = PRESET_COLORS.map((c) =>
-      `<span class="ch-swatch${hudPrefs.chColor.toLowerCase() === c.hex.toLowerCase() ? ' active' : ''}" data-color="${c.hex}" title="${c.name}" style="background:${c.hex}"></span>`
+      `<button type="button" class="ch-swatch${hudPrefs.chColor.toLowerCase() === c.hex.toLowerCase() ? ' active' : ''}" data-color="${c.hex}" title="${c.name}" aria-label="${c.name}" style="background:${c.hex}"></button>`
     ).join('');
 
     return `<div class="settings" id="settings">
@@ -164,6 +173,7 @@ export function createSettingsManager(ctx, deps) {
           <select id="setGfxQ">
             <option value="high" ${hudPrefs.gfxQuality === 'high' ? 'selected' : ''}>Alta · Ultra Nítido HD</option>
             <option value="medium" ${hudPrefs.gfxQuality === 'medium' ? 'selected' : ''}>Equilibrada · Nativo HD</option>
+            <option value="auto" ${hudPrefs.gfxQuality === 'auto' ? 'selected' : ''}>Automática · FPS Dinâmico</option>
             <option value="low" ${hudPrefs.gfxQuality === 'low' ? 'selected' : ''}>Desempenho · FPS Máximo</option>
           </select>
         </label>
@@ -172,10 +182,13 @@ export function createSettingsManager(ctx, deps) {
       <div class="settings-section-title">Controles e som</div>
       <div class="settings-grid">
         <label class="settings-row">Sensibilidade do Mouse <input type="range" id="setSens" min="25" max="250" step="5" value="${settings.sens}"><b id="setSensV">${settings.sens}%</b></label>
+        <label class="settings-row">Volume Geral <input type="range" id="setVol" min="0" max="100" step="5" value="${settings.vol}"><b id="setVolV">${settings.vol}%</b></label>
+        <label class="settings-row">Efeitos Sonoros (SFX) <input type="range" id="setSfxVol" min="0" max="100" step="5" value="${settings.sfxVol}"><b id="setSfxVolV">${settings.sfxVol}%</b></label>
+        <label class="settings-row">Volume da Música <input type="range" id="setMusVol" min="0" max="100" step="5" value="${settings.musVol}"><b id="setMusVolV">${settings.musVol}%</b></label>
         <label class="settings-row"><input type="checkbox" id="setInv" ${settings.invert ? 'checked' : ''}> Inverter Eixo Y</label>
         <label class="settings-row"><input type="checkbox" id="setFps" ${localStorage.getItem('fatal_fps') === '1' ? 'checked' : ''}> Mostrar FPS</label>
         <label class="settings-row"><input type="checkbox" id="setMap" ${minimap && minimap.enabled ? 'checked' : ''}> Minimapa</label>
-        <label class="settings-row"><input type="checkbox" id="setMus" ${getMusicWanted() ? 'checked' : ''}> Música de Fundo <span class="k">(M)</span></label>
+        <label class="settings-row"><input type="checkbox" id="setMus" ${getMusicWanted() ? 'checked' : ''}> Música de Fundo</label>
       </div>
 
       <div class="settings-section-title">Mira</div>
@@ -234,6 +247,12 @@ export function createSettingsManager(ctx, deps) {
 
     const sens = box.querySelector('#setSens'), out = box.querySelector('#setSensV');
     sens.addEventListener('input', () => { settings.sens = Number(sens.value); out.textContent = settings.sens + '%'; applySettings(); });
+    const vol = box.querySelector('#setVol'), volV = box.querySelector('#setVolV');
+    if (vol) vol.addEventListener('input', () => { settings.vol = Number(vol.value); if (volV) volV.textContent = settings.vol + '%'; applySettings(); });
+    const sfxVol = box.querySelector('#setSfxVol'), sfxVolV = box.querySelector('#setSfxVolV');
+    if (sfxVol) sfxVol.addEventListener('input', () => { settings.sfxVol = Number(sfxVol.value); if (sfxVolV) sfxVolV.textContent = settings.sfxVol + '%'; applySettings(); });
+    const musVol = box.querySelector('#setMusVol'), musVolV = box.querySelector('#setMusVolV');
+    if (musVol) musVol.addEventListener('input', () => { settings.musVol = Number(musVol.value); if (musVolV) musVolV.textContent = settings.musVol + '%'; applySettings(); });
     box.querySelector('#setInv').addEventListener('change', (e) => { settings.invert = e.target.checked; applySettings(); });
     box.querySelector('#setFps').addEventListener('change', (e) => {
       const perf = getPerf();

@@ -170,7 +170,7 @@ if (typeof window !== 'undefined' && window.__TAURI__?.core?.invoke) {
       onPeerJoin: (cb) => { listen('lan:peer-join', (e) => cb(e.payload)); },
       onPeerLeave: (cb) => { listen('lan:peer-leave', (e) => cb(e.payload)); },
       onPeerData: (cb) => { listen('lan:peer-data', (e) => cb(e.payload)); },
-      discover: async () => [],
+      discover: (ms) => inv('fe_lan_discover', { timeoutMs: Number(ms) || 350 }).catch(() => []),
     };
   }
 }

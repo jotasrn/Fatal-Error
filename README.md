@@ -1,7 +1,7 @@
 # Fatal Error
 
 <p align="center">
-  <b>Arena Shooter 3D em Primeira Pessoa desenhado a caneta esferográfica sobre folha de caderno — 100% procedural, com Multiplayer P2P sem servidor e Atualização Automática.</b>
+  <b>Arena Shooter 3D em Primeira Pessoa com estética Cel-Shaded + Contorno de Tinta — 100% procedural, com ciclo dia/noite, clima dinâmico, Multiplayer P2P/LAN sem servidor e Atualização Automática.</b>
 </p>
 
 <p align="center">
@@ -67,10 +67,10 @@
 
 **Fatal Error** é um *arena shooter* frenético em primeira pessoa onde todo o universo visual e sonoro é **gerado 100% via código** (Three.js + WebGL2 + Web Audio API), sem arquivos externos de modelos 3D, texturas ou MP3:
 
-- **Estética de Caderno Procedural**: o motor renderiza iluminação, IDs de tinta (azul, preta, vermelha, verde, laranja e rosa), normais e profundidade em ponto flutuante, aplicando contorno Laplaciano, hachuras que acompanham a curvatura das superfícies, pauta azul, margem vermelha e granulação de papel sem cintilação.
+- **Estética Cel-Shaded HD + Contorno de Tinta 100% Procedural**: o motor renderiza G-buffer (sombreamento, IDs de tinta, etiquetas de material, normais e profundidade em ponto flutuante), aplicando *cel-shading* em 3 bandas, contornos anti-serrilhados, oclusão de contato, texturas procedurais no espaço do mundo (asfalto, concreto, grama do cerrado, folhagem), ciclo dia/noite, postes iluminados e chuva com reflexos em poças.
 - **Movimentação Avançada**: corrida, deslize (*slide*), pulo duplo, corrida/pulo na parede (*wall-jump*), escalada automática de bordas (*mantle*), investida aérea (*air dash*), **Gancho de Escalada (`Q`/`E`)** e *Rocket Jump* de Bazuca.
 - **Combate de Katana & Deflexão**: bloqueie rajadas pela frente no tempo exato (*Aparada Perfeita*) para devolver as balas na cara de quem atirou e carregue a barra de **Foco** para fatiar múltiplos alvos em investida relâmpago.
-- **Trilha Sonora 8-Bit Procedural**: cada mapa possui um tema musical próprio sintetizado em tempo real (alterne com a tecla `M`).
+- **Áudio 8-Bit & Espacialização 3D Procedural**: trilha sonora sintetizada em tempo real com intensidade dinâmica e controle independente de volumes (Geral, SFX e Música) nas Configurações.
 
 ---
 
@@ -118,20 +118,24 @@ O mapa de Brasília recria de ponta a ponta os principais cartões-postais do Pl
 
 ## Arsenal, Slots e Economia da Loja
 
-Você inicia com o **Revólver (Slot 1)**, a **Katana (Slot 8)**, **3 Granadas** e **`$300`** no bolso. Pressione **`B`** (ou **D-Pad Baixo** no controle) a qualquer momento para abrir a **Loja de Armas**:
+Você inicia com o **Revólver .357 (Slot 1)**, a **Pistola Tática 9mm (Slot 2)**, a **Katana**, **3 Granadas** e **`$300`** no bolso. Pressione **`B`** (ou **D-Pad Baixo** no controle) a qualquer momento para abrir a **Loja de Armas**:
 
-### Armas e Slots (`1` a `8`)
+### Armas e Slots (`1`–`0`, `-` e Katana)
 
 | Tecla / Slot | Arma | Custo na Loja | Características |
 | :---: | --- | :---: | --- |
-| **`1`** | **Revólver** | *Inicial* | Preciso, dano confiável por disparo e saque rápido. |
-| **`2`** | **Escopeta** | **`$600`** | Dispara 10 balins de chumbo; devastadora em corredores e curta distância. |
-| **`3`** | **Submetralhadora (SMG)** | **`$750`** | Cadência altíssima (18 tiros/s), carregador de 45 balas e ótima mobilidade. |
-| **`4`** | **Rifle de Assalto** | **`$900`** | Automático equilibrado (35 balas), versátil a média e longa distância. |
-| **`5`** | **Sniper** | **`$1200`** | Mira telescópica de longo alcance e dano massivo de eliminação. |
-| **`6`** | **Fuzil de Plasma Laser** | **`$1500`** | Feixe energético contínuo de 50 células com precisão cirúrgica. |
-| **`7`** | **Bazuca** | **`$1800`** | Foguetes explosivos em área com empurrão físico e suporte a *Rocket Jump*. |
-| **`8`** / **`F`** | **Katana** | *Inicial* | Corte corpo a corpo, bloqueio/deflexão de tiros (`RMB`) e **Corte Foco** (`LMB+RMB` ou `X`). |
+| **`1`** | **Revólver .357** | *Inicial* | Preciso, dano confiável por disparo e saque rápido. |
+| **`2`** | **Pistola Tática 9mm** | *Inicial* | Semiautomática ágil, boa cadência e recarga rápida. |
+| **`3`** | **Punisher Five-SeveN** | **`$500`** | 20 tiros perfurantes; atravessa escudos e até 3 inimigos em linha. |
+| **`4`** | **Desert Eagle .50** | **`$700`** | Pistola pesada .50 AE com impacto brutal e alto poder de parada. |
+| **`5`** | **Requiem .500 Magnum** | **`$1600`** | Canhão Magnum capaz de destruir blindagens de Titãs e atravessar 4 alvos. |
+| **`6`** | **Escopeta** | **`$600`** | Dispara 10 balins de chumbo; devastadora em corredores e curta distância. |
+| **`7`** | **Submetralhadora (SMG)** | **`$750`** | Cadência altíssima (18 tiros/s), carregador de 45 balas e ótima mobilidade. |
+| **`8`** | **Rifle de Assalto** | **`$900`** | Automático equilibrado (35 balas), versátil a média e longa distância. |
+| **`9`** | **Sniper** | **`$1200`** | Mira telescópica de longo alcance e dano massivo de eliminação. |
+| **`0`** | **Fuzil de Plasma Laser** | **`$1500`** | Feixe energético contínuo de 50 cargas com precisão cirúrgica. |
+| **`-`** | **Bazuca** | **`$1800`** | Foguetes explosivos em área com empurrão físico e suporte a *Rocket Jump*. |
+| **`F`** / Scroll | **Katana** | *Inicial* | Corte corpo a corpo, bloqueio/deflexão de tiros (`RMB`) e **Corte Foco** (`LMB+RMB` ou `X`). |
 
 ### Blindagem, Suprimentos e Recompensas
 
@@ -163,9 +167,10 @@ Você inicia com o **Revólver (Slot 1)**, a **Katana (Slot 8)**, **3 Granadas**
 | **Recarregar Arma** | `R` | `□` / `X` |
 | **Arremessar Granada (segure p/ longe)** | `G` | `R3` ou `D-Pad Cima` |
 | **Abrir Loja de Armas e Coletes** | **`B`** | **`D-Pad Baixo`** |
-| **Trocar Arma Direta / Rolagem** | Teclas **`1` a `8`** ou `Scroll` | `△` / `Y` ou `D-Pad Esq./Dir.` |
-| **Ligar / Desligar Música 8-Bit** | `M` | Pelo menu de pausa |
+| **Trocar Arma Direta / Rolagem** | Teclas **`1`–`0`**, **`-`** ou `Scroll` | `△` / `Y` ou `D-Pad Esq./Dir.` |
+| **Mapa Tático Completo** | `M` | Pelo menu de pausa |
 | **Placar da Partida (Online)** | `Tab` | `Create` / `View` |
+| **Tela Cheia / Minimizar** | `F11` / `F9` (`Ctrl+M`) | — |
 | **Pausar / Menu** | `Esc` ou `P` | `Options` / `Menu` |
 
 ---
@@ -185,23 +190,28 @@ Você inicia com o **Revólver (Slot 1)**, a **Katana (Slot 8)**, **3 Granadas**
 ## Arquitetura, Desempenho e Segurança
 
 ```text
-electron/          Processo principal Electron (Node CJS), IPC seguro, Fuses, Auto-Updater e Hyperswarm P2P
-src/               Motor 3D (Three.js ESM), física, áudio 8-bit procedural, HUD, minimapa e rede híbrida
-  ├── enemies/     IA, tipos de bots, projéteis e BotBatcher (InstancedMesh de alto FPS)
-  ├── game/        Loop de ondas Solo, drops, modificadores e regras de partida
-  ├── levels/      Construtor geométrico + 6 mapas procedurais (incluindo Brasília 770 m)
-  ├── player/      Física em 1ª pessoa, loja, gancho, granadas e foguetes
-  └── weapons/     Modelos 3D procedurais em 1ª pessoa das 8 armas + Katana
+electron/          Processo principal Electron (Node CJS), IPC seguro, Fuses, Auto-Updater, LAN e Hyperswarm P2P
+src-tauri/         Runtime alternativo Tauri 2.0 (Rust) com transporte LAN TCP/UDP nativo
+rust-core/         Núcleo espacial em Rust/WASM (armazenamento plano de caixas/colisões)
+src/               Motor 3D (Three.js ESM) modularizado:
+  ├── core/        Renderer cel-shaded, shader pós-processado, física, NavGrid, áudio 3D, entrada e efeitos
+  ├── enemies/     IA tática/chefes, modelos procedurais, projéteis e BotBatcher (InstancedMesh + sombras)
+  ├── game/        Loop principal, ondas Solo, missões, clima/hora do dia, tráfego e eventos de Brasília
+  ├── levels/      Construtor geométrico, tráfego em grafo e mapas procedurais (incluindo Brasília 770 m)
+  ├── net/         Protocolo multiplayer híbrido (Hyperswarm P2P, LAN TCP/UDP e WebRTC)
+  ├── player/      Física em 1ª pessoa, jogadores remotos, loja, gancho, granadas e foguetes
+  ├── ui/          HUD, minimapa/mapa tático, telas de menu/lobby e configurações
+  └── weapons/     Modelos 3D procedurais em 1ª pessoa das 12 armas (incluindo Katana)
 scripts/           Verificador estático de sintaxe + integridade SHA-256 da Content-Security-Policy
-tests/             Suíte automatizada de testes de segurança, protocolo P2P, rate-limit e fuses
+tests/             Suíte automatizada de testes de segurança, protocolo P2P, LAN, rate-limit e fuses
 download/          Guia passo a passo de download, instalação e solução de problemas para jogadores
 docs/              Documentação técnica detalhada de Arquitetura e Atualização Automática
 ```
 
 - **Alto Desempenho (`60+ FPS` estáveis mesmo em mapas gigantes)**:
-  - **`BotBatcher` (`InstancedMesh`)**: agrupa dezenas de bots articulados em apenas ~3 *draw calls* WebGL, com *frustum culling* e *LOD* de animação por distância.
+  - **`BotBatcher` (`InstancedMesh`)**: agrupa dezenas de bots articulados e suas sombras de contato em poucas *draw calls* WebGL, com *frustum culling* e *LOD* de animação por distância.
   - **`NavGrid` Espacial & Zero-GC**: navegação e colisões sem alocações por quadro, eliminando engasgos de *Garbage Collector* em partidas longas.
-  - **Qualidade Gráfica Adaptativa**: ajuste dinâmico suave de resolução caso o hardware sofra quedas de quadros, preservando nitidez de contornos.
+  - **Qualidade Gráfica Configurável & Adaptativa**: modos *Alta*, *Equilibrada*, *Automática (FPS Dinâmico)* e *Desempenho*, com oclusão de contato leve e cache estático no Mapa Tático.
 - **Segurança em Profundidade (Padrão Concord)**:
   - Executável selado com **`@electron/fuses`** (`RunAsNode: false`, validação criptográfica de integridade do `app.asar`, cookies cifrados via DPAPI, inspeção CLI bloqueada).
   - Janela com `sandbox: true`, `contextIsolation: true`, `nodeIntegration: false`, DevTools desativado em produção e **CSP rigorosa** validada por hash SHA-256 no CI.
@@ -230,7 +240,9 @@ npm start
 | `npm run check` | Verifica sintaxe de todos os módulos (`.js`/`.cjs`) e confere o hash SHA-256 da CSP em `index.html` |
 | `npm test` | Executa a suíte automatizada de testes de segurança, IPC, P2P e autoridade de Host |
 | `npm run dist` | Empacota localmente o instalador `Fatal-Error-Setup-<versão>.exe` e `Fatal-Error-Portable-<versão>.zip` em `dist/` (com Electron Fuses aplicados) |
-| `python serve.py` | *(Opcional)* Inicia servidor HTTP/LAN local seguro na porta `8910` para testes rápidos em navegador |
+| `npm run tauri:dev` | Executa o jogo no runtime nativo Tauri 2.0 (requer Rust/Cargo) |
+| `npm run tauri:build` | Gera o instalador nativo via Tauri 2.0 |
+| `npm run wasm:build` | Compila o módulo espacial `rust-core` para WebAssembly (`wasm32-unknown-unknown`) |
 
 ---
 

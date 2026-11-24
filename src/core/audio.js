@@ -4,7 +4,9 @@ import { clamp, rand, choose } from './util.js';
 
 class Sfx {
   constructor() {
-    this.ctx = null; this.master = null; this.noiseBuf = null; this.volume = 0.55;
+    this.ctx = null; this.master = null; this.sfxGain = null; this.musicGain = null; this.noiseBuf = null;
+    this.volume = 0.55; this.sfxVolume = 1.0; this.musicVolume = 1.0;
+    this._voices = 0; this._maxVoices = 48;
     this.listenerPos = new THREE.Vector3(); this.listenerRight = new THREE.Vector3(1, 0, 0);
   }
   init() {
@@ -13,9 +15,23 @@ class Sfx {
     const ctx = this.ctx = new AC();
     this.comp = ctx.createDynamicsCompressor(); this.comp.threshold.value = -16; this.comp.ratio.value = 5;
     this.master = ctx.createGain(); this.master.gain.value = this.volume;
+    this.sfxGain = ctx.createGain(); this.sfxGain.gain.value = this.sfxVolume;
+    this.sfxGain.connect(this.master);
     this.master.connect(this.comp); this.comp.connect(ctx.destination);
     const len = ctx.sampleRate * 2; this.noiseBuf = ctx.createBuffer(1, len, ctx.sampleRate);
     const d = this.noiseBuf.getChannelData(0); for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  setVolume(v) {
+    this.volume = clamp(v, 0, 1);
+    if (this.master && this.ctx) this.master.gain.setTargetAtTime(this.volume, this.ctx.currentTime, 0.02);
+  }
+  setSfxVolume(v) {
+    this.sfxVolume = clamp(v, 0, 1);
+    if (this.sfxGain && this.ctx) this.sfxGain.gain.setTargetAtTime(this.sfxVolume, this.ctx.currentTime, 0.02);
+  }
+  setMusicVolume(v) {
+    this.musicVolume = clamp(v, 0, 1);
+    if (this.musicGain && this.ctx && this._mus) this.musicGain.gain.setTargetAtTime(0.05 * this.musicVolume, this.ctx.currentTime, 0.05);
   }
   resume() { if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); }
   setListener(pos, right) { this.listenerPos.copy(pos); this.listenerRight.copy(right); }
@@ -25,34 +41,45 @@ class Sfx {
       const dx = pos.x - this.listenerPos.x, dy = pos.y - this.listenerPos.y, dz = pos.z - this.listenerPos.z;
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
       vol *= 1 / (1 + dist * 0.09);
-      if (dist > 0.5 && ctx.createStereoPanner) {
-        const pan = clamp((dx * this.listenerRight.x + dz * this.listenerRight.z) / dist, -1, 1) * 0.75;
-        const p = ctx.createStereoPanner(); p.pan.value = pan; g.gain.value = vol; g.connect(p); p.connect(this.master); return g;
+      const hDist = Math.hypot(dx, dz);
+      if (hDist > 0.5 && ctx.createStereoPanner) {
+        const pan = clamp((dx * this.listenerRight.x + dz * this.listenerRight.z) / hDist, -1, 1) * 0.75;
+        const p = ctx.createStereoPanner(); p.pan.value = pan; g.gain.value = vol; g.connect(p); p.connect(this.sfxGain || this.master); return g;
       }
     }
-    g.gain.value = vol; g.connect(this.master); return g;
+    g.gain.value = vol; g.connect(this.sfxGain || this.master); return g;
   }
   noise({ dur = 0.1, gain = 0.5, type = 'lowpass', freq = 1000, freqEnd = null, q = 1, attack = 0.002, pos = null, delay = 0, hp = 0, at }) {
-    if (!this.ctx) return; const ctx = this.ctx; const t0 = at !== undefined ? at : ctx.currentTime + delay;
+    if (!this.ctx || this._voices >= this._maxVoices) return;
+    const ctx = this.ctx; const t0 = at !== undefined ? at : ctx.currentTime + delay;
+    this._voices++;
     const src = ctx.createBufferSource(); src.buffer = this.noiseBuf; src.loop = true; src.loopEnd = 2;
     const f = ctx.createBiquadFilter(); f.type = type; f.frequency.setValueAtTime(freq, t0);
     if (freqEnd) f.frequency.exponentialRampToValueAtTime(Math.max(20, freqEnd), t0 + dur); f.Q.value = q;
     const env = ctx.createGain(); env.gain.setValueAtTime(0.0001, t0); env.gain.linearRampToValueAtTime(gain, t0 + attack); env.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    src.connect(f); let last = f;
-    if (hp > 0) { const h = ctx.createBiquadFilter(); h.type = 'highpass'; h.frequency.value = hp; last.connect(h); last = h; }
+    src.connect(f); let last = f; let h = null;
+    if (hp > 0) { h = ctx.createBiquadFilter(); h.type = 'highpass'; h.frequency.value = hp; last.connect(h); last = h; }
     const outG = this._out(pos);
     last.connect(env); env.connect(outG);
-    src.onended = () => { try { src.disconnect(); f.disconnect(); env.disconnect(); outG.disconnect(); } catch (e) {} };
+    src.onended = () => {
+      this._voices = Math.max(0, this._voices - 1);
+      try { src.disconnect(); f.disconnect(); if (h) h.disconnect(); env.disconnect(); outG.disconnect(); } catch (e) {}
+    };
     src.start(t0, Math.random() * 1.5); src.stop(t0 + dur + 0.05);
   }
   tone({ freq = 440, freqEnd = null, dur = 0.2, gain = 0.3, type = 'sine', attack = 0.005, pos = null, delay = 0, at, out }) {
-    if (!this.ctx) return; const ctx = this.ctx; const t0 = at !== undefined ? at : ctx.currentTime + delay;
+    if (!this.ctx || (!out && this._voices >= this._maxVoices)) return;
+    const ctx = this.ctx; const t0 = at !== undefined ? at : ctx.currentTime + delay;
+    if (!out) this._voices++;
     const o = ctx.createOscillator(); o.type = type; o.frequency.setValueAtTime(freq, t0);
     if (freqEnd) o.frequency.exponentialRampToValueAtTime(Math.max(20, freqEnd), t0 + dur);
     const env = ctx.createGain(); env.gain.setValueAtTime(0.0001, t0); env.gain.linearRampToValueAtTime(gain, t0 + attack); env.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
     const dest = out || this._out(pos);
     o.connect(env); env.connect(dest);
-    o.onended = () => { try { o.disconnect(); env.disconnect(); if (!out) dest.disconnect(); } catch (e) {} }; o.start(t0); o.stop(t0 + dur + 0.05);
+    o.onended = () => {
+      if (!out) this._voices = Math.max(0, this._voices - 1);
+      try { o.disconnect(); env.disconnect(); if (!out) dest.disconnect(); } catch (e) {}
+    }; o.start(t0); o.stop(t0 + dur + 0.05);
   }
   // ---------- game sounds ----------
   shot() {
@@ -63,12 +90,12 @@ class Sfx {
   // another player's gun, heard from where they stand: a bit hotter than a bot's so it cuts through
   remoteShot(kind, pos) {
     if (kind === 'bazooka') { this.bazookaFire(pos); }
-    else if (kind === 'requiem') { this.requiemFire(); }
-    else if (kind === 'deagle') { this.deagleFire(); }
-    else if (kind === 'punisher') { this.punisherFire(); }
-    else if (kind === 'pistol9mm') { this.pistol9mmFire(); }
-    else if (kind === 'smg') { this.smgFire(); }
-    else if (kind === 'laser') { this.laserFire(); }
+    else if (kind === 'requiem') { this.requiemFire(pos); }
+    else if (kind === 'deagle') { this.deagleFire(pos); }
+    else if (kind === 'punisher') { this.punisherFire(pos); }
+    else if (kind === 'pistol9mm') { this.pistol9mmFire(pos); }
+    else if (kind === 'smg') { this.smgFire(pos); }
+    else if (kind === 'laser') { this.laserFire(pos); }
     else if (kind === 'shotgun') { this.noise({ dur: 0.32, gain: 1.0, type: 'lowpass', freq: 1600, freqEnd: 150, pos }); this.tone({ freq: 95, freqEnd: 30, dur: 0.26, gain: 0.7, type: 'triangle', pos }); }
     else if (kind === 'sniper') { this.noise({ dur: 0.4, gain: 1.0, type: 'bandpass', freq: 750, freqEnd: 120, q: 0.5, pos }); this.tone({ freq: 420, freqEnd: 50, dur: 0.32, gain: 0.5, type: 'sawtooth', pos }); }
     else { this.noise({ dur: 0.16, gain: 0.85, type: 'bandpass', freq: rand(1000, 1500), freqEnd: 220, q: 0.8, pos }); this.noise({ dur: 0.05, gain: 0.4, type: 'highpass', freq: 2600, pos }); this.tone({ freq: 200, freqEnd: 50, dur: 0.12, gain: 0.45, type: 'square', pos }); }
@@ -162,15 +189,15 @@ class Sfx {
   heartbeat() { this.tone({ freq: 55, dur: 0.15, gain: 0.35, type: 'sine' }); this.tone({ freq: 50, dur: 0.12, gain: 0.25, type: 'sine', delay: 0.18 }); }
 
   // ---------- more weapons / movement ----------
-  smgFire() {
-    this.noise({ dur: 0.11, gain: 0.65, type: 'bandpass', freq: 1600, freqEnd: 300, q: 0.8 });
-    this.noise({ dur: 0.04, gain: 0.4, type: 'highpass', freq: 3500 });
-    this.tone({ freq: 280, freqEnd: 70, dur: 0.09, gain: 0.35, type: 'square' });
+  smgFire(pos = null) {
+    this.noise({ dur: 0.11, gain: 0.65, type: 'bandpass', freq: 1600, freqEnd: 300, q: 0.8, pos });
+    this.noise({ dur: 0.04, gain: 0.4, type: 'highpass', freq: 3500, pos });
+    this.tone({ freq: 280, freqEnd: 70, dur: 0.09, gain: 0.35, type: 'square', pos });
   }
-  laserFire() {
-    this.tone({ freq: 920, freqEnd: 240, dur: 0.14, gain: 0.35, type: 'sawtooth' });
-    this.tone({ freq: 1840, freqEnd: 600, dur: 0.12, gain: 0.2, type: 'sine' });
-    this.noise({ dur: 0.06, gain: 0.25, type: 'highpass', freq: 4000 });
+  laserFire(pos = null) {
+    this.tone({ freq: 920, freqEnd: 240, dur: 0.14, gain: 0.35, type: 'sawtooth', pos });
+    this.tone({ freq: 1840, freqEnd: 600, dur: 0.12, gain: 0.2, type: 'sine', pos });
+    this.noise({ dur: 0.06, gain: 0.25, type: 'highpass', freq: 4000, pos });
   }
   shotgunFire() {
     this.noise({ dur: 0.32, gain: 0.9, type: 'lowpass', freq: 1800, freqEnd: 120 }); this.noise({ dur: 0.08, gain: 0.5, type: 'highpass', freq: 2500 });
@@ -180,27 +207,27 @@ class Sfx {
     this.noise({ dur: 0.22, gain: 0.85, type: 'bandpass', freq: 900, freqEnd: 180, q: 0.6 }); this.noise({ dur: 0.05, gain: 0.6, type: 'highpass', freq: 3000 });
     this.tone({ freq: 200, freqEnd: 35, dur: 0.22, gain: 0.7, type: 'sawtooth' }); this.tone({ freq: 2600, freqEnd: 900, dur: 0.12, gain: 0.12, type: 'sine' });
   }
-  pistol9mmFire() {
-    this.noise({ dur: 0.13, gain: 0.72, type: 'bandpass', freq: 1750, freqEnd: 340, q: 0.8 });
-    this.noise({ dur: 0.04, gain: 0.45, type: 'highpass', freq: 3400 });
-    this.tone({ freq: 290, freqEnd: 75, dur: 0.11, gain: 0.48, type: 'triangle' });
+  pistol9mmFire(pos = null) {
+    this.noise({ dur: 0.13, gain: 0.72, type: 'bandpass', freq: 1750, freqEnd: 340, q: 0.8, pos });
+    this.noise({ dur: 0.04, gain: 0.45, type: 'highpass', freq: 3400, pos });
+    this.tone({ freq: 290, freqEnd: 75, dur: 0.11, gain: 0.48, type: 'triangle', pos });
   }
-  punisherFire() {
-    this.noise({ dur: 0.16, gain: 0.8, type: 'bandpass', freq: 2100, freqEnd: 380, q: 0.9 });
-    this.noise({ dur: 0.05, gain: 0.55, type: 'highpass', freq: 4200 });
-    this.tone({ freq: 420, freqEnd: 95, dur: 0.13, gain: 0.52, type: 'sawtooth' });
-    this.tone({ freq: 3100, freqEnd: 1200, dur: 0.09, gain: 0.14, type: 'sine' });
+  punisherFire(pos = null) {
+    this.noise({ dur: 0.16, gain: 0.8, type: 'bandpass', freq: 2100, freqEnd: 380, q: 0.9, pos });
+    this.noise({ dur: 0.05, gain: 0.55, type: 'highpass', freq: 4200, pos });
+    this.tone({ freq: 420, freqEnd: 95, dur: 0.13, gain: 0.52, type: 'sawtooth', pos });
+    this.tone({ freq: 3100, freqEnd: 1200, dur: 0.09, gain: 0.14, type: 'sine', pos });
   }
-  deagleFire() {
-    this.noise({ dur: 0.28, gain: 0.92, type: 'bandpass', freq: 820, freqEnd: 130, q: 0.55 });
-    this.noise({ dur: 0.06, gain: 0.65, type: 'highpass', freq: 2900 });
-    this.tone({ freq: 175, freqEnd: 32, dur: 0.26, gain: 0.78, type: 'sawtooth' });
+  deagleFire(pos = null) {
+    this.noise({ dur: 0.28, gain: 0.92, type: 'bandpass', freq: 820, freqEnd: 130, q: 0.55, pos });
+    this.noise({ dur: 0.06, gain: 0.65, type: 'highpass', freq: 2900, pos });
+    this.tone({ freq: 175, freqEnd: 32, dur: 0.26, gain: 0.78, type: 'sawtooth', pos });
   }
-  requiemFire() {
-    this.noise({ dur: 0.48, gain: 1.0, type: 'lowpass', freq: 1400, freqEnd: 75 });
-    this.noise({ dur: 0.09, gain: 0.8, type: 'highpass', freq: 3200 });
-    this.tone({ freq: 155, freqEnd: 26, dur: 0.42, gain: 0.92, type: 'sawtooth' });
-    this.tone({ freq: 2400, freqEnd: 520, dur: 0.28, gain: 0.22, type: 'triangle', delay: 0.02 });
+  requiemFire(pos = null) {
+    this.noise({ dur: 0.48, gain: 1.0, type: 'lowpass', freq: 1400, freqEnd: 75, pos });
+    this.noise({ dur: 0.09, gain: 0.8, type: 'highpass', freq: 3200, pos });
+    this.tone({ freq: 155, freqEnd: 26, dur: 0.42, gain: 0.92, type: 'sawtooth', pos });
+    this.tone({ freq: 2400, freqEnd: 520, dur: 0.28, gain: 0.22, type: 'triangle', delay: 0.02, pos });
   }
   sniperFire() {
     this.noise({ dur: 0.45, gain: 0.95, type: 'bandpass', freq: 1400, freqEnd: 90, q: 0.5 });
@@ -230,8 +257,15 @@ class Sfx {
   // ---------- music: an 8-bit theme, two pulse voices, a triangle bass, an arpeggio and drums ----------
   musicOn(on) {
     if (!this.ctx) return;
-    if (on && !this._mus) { this.musicGain = this.ctx.createGain(); this.musicGain.gain.value = 0.05; this.musicGain.connect(this.master); this._mus = { step: 0, next: this.ctx.currentTime + 0.1, timer: setInterval(() => this._musicTick(), 100) }; }
-    else if (!on && this._mus) { clearInterval(this._mus.timer); this._mus = null; if (this.musicGain) this.musicGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.2); }
+    if (!this.musicGain) { this.musicGain = this.ctx.createGain(); this.musicGain.gain.value = 0; this.musicGain.connect(this.master); }
+    if (on && !this._mus) {
+      this.musicGain.gain.cancelScheduledValues(this.ctx.currentTime);
+      this.musicGain.gain.setTargetAtTime(0.05 * this.musicVolume, this.ctx.currentTime, 0.08);
+      this._mus = { step: 0, next: this.ctx.currentTime + 0.1, timer: setInterval(() => this._musicTick(), 100) };
+    } else if (!on && this._mus) {
+      clearInterval(this._mus.timer); this._mus = null;
+      this.musicGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.2);
+    }
   }
   get musicPlaying() { return !!this._mus; }
   setIntensity(v) { this._intensity = clamp(v, 0, 1); }
@@ -287,7 +321,9 @@ class Sfx {
     const ctx = this.ctx; const src = ctx.createBufferSource(); src.buffer = this.noiseBuf; src.loop = true; src.loopEnd = 2;
     const f = ctx.createBiquadFilter(); f.type = type; f.frequency.value = freq; const env = ctx.createGain();
     env.gain.setValueAtTime(0.0001, t0); env.gain.linearRampToValueAtTime(gain, t0 + 0.003); env.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    src.connect(f); f.connect(env); env.connect(out); src.start(t0, Math.random() * 1.5); src.stop(t0 + dur + 0.05);
+    src.connect(f); f.connect(env); env.connect(out);
+    src.onended = () => { try { src.disconnect(); f.disconnect(); env.disconnect(); } catch (e) {} };
+    src.start(t0, Math.random() * 1.5); src.stop(t0 + dur + 0.05);
   }
 }
 

@@ -424,6 +424,13 @@ void main() {
     // ---- neblina atmosférica (mais na chuva)
     float haze = smoothstep(160.0, 680.0, d) * (0.28 + 0.4 * uRain) + smoothstep(20.0, 260.0, d) * uRain * 0.35;
     col = mix(col, skyBase(rd), clamp(haze, 0.0, 0.85));
+
+    // ---- oclusão de contato leve (4 amostras de profundidade já lidas)
+    if (uDetail > 0.5 && d < 120.0) {
+      float occ = max(0.0, d - linDepth(zl)) + max(0.0, d - linDepth(zr)) + max(0.0, d - linDepth(zu)) + max(0.0, d - linDepth(zd));
+      float ao = 1.0 - clamp(occ * 0.14, 0.0, 0.18) * (1.0 - smoothstep(45.0, 120.0, d));
+      col *= ao;
+    }
   }
 
   // contorno de tinta (mais suave à noite)

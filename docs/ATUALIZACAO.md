@@ -25,13 +25,13 @@ Não é necessário configurar nenhuma chave secreta manual: o workflow [`.githu
 
 ### Pré-requisitos
 - O repositório `jotasrn/Fatal-Error` deve permanecer **público** no GitHub (para que os clientes baixem `latest.yml` e os instaladores direto do GitHub Releases sem precisar de token embutido).
-- A nova versão deve ser **maior** que a anterior segundo SemVer (ex.: `1.3.0` → `1.3.1` ou `1.4.0`).
+- A nova versão deve ser **maior** que a anterior segundo SemVer (ex.: `1.7.1` → `1.7.2` ou `1.8.0`).
 
 ### Comandos para Lançar
 
-1. Atualize o campo `"version"` em [`package.json`](../package.json) (opcional, pois a pipeline também sincroniza automaticamente com o nome da tag, mas mantém o repositório alinhado):
+1. Atualize o campo `"version"` em [`package.json`](../package.json) (e mantenha [`src-tauri/tauri.conf.json`](../src-tauri/tauri.conf.json) e [`src-tauri/Cargo.toml`](../src-tauri/Cargo.toml) alinhados):
    ```bash
-   npm version 1.3.1 --no-git-tag-version
+   npm version 1.7.2 --no-git-tag-version
    ```
 2. Valide localmente que a sintaxe, o hash da CSP e os testes de segurança estão 100% verdes:
    ```bash
@@ -41,12 +41,12 @@ Não é necessário configurar nenhuma chave secreta manual: o workflow [`.githu
 3. Faça o commit, crie a tag `v*` e envie para o GitHub:
    ```bash
    git add -A
-   git commit -m "chore: release v1.3.1"
-   git tag v1.3.1
+   git commit -m "chore: release v1.7.2"
+   git tag v1.7.2
    git push origin main --tags
    ```
 
-Assim que a tag `v1.3.1` chega ao GitHub, a action **`release`** executa automaticamente:
+Assim que a tag `v1.7.2` chega ao GitHub, a action **`release`** executa automaticamente:
 1. `npm ci` em ambiente Windows limpo (`windows-latest`);
 2. `npm run check`, `npm test` e `npm audit --audit-level=high`;
 3. Empacotamento `nsis` + `zip` com gravação dos **Electron Fuses** (`electron/afterPack.cjs`);

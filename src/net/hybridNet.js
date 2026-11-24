@@ -48,12 +48,15 @@ export class GdfHybridNet {
   }
   get conns() {
     if (this.isHost) {
-      const merged = new Map();
+      const merged = this._connsCache || (this._connsCache = new Map());
+      merged.clear();
       if (this.lan && this.lan.active) for (const [k, v] of this.lan.conns) merged.set(k, v);
       if (this.peer.active) for (const [k, v] of this.peer.conns) merged.set(k, v);
       return merged;
     }
-    return this.activeClient ? this.activeClient.conns : new Map();
+    if (this.activeClient) return this.activeClient.conns;
+    const empty = this._emptyConns || (this._emptyConns = new Map());
+    return empty;
   }
   get peerIds() { return [...this.conns.keys()]; }
   get id() {

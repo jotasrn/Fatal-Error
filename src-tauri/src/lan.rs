@@ -11,7 +11,7 @@ use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::{mpsc, Mutex};
 
 pub const LAN_PORT_BASE: u16 = 41230;
-pub const LAN_PORT_COUNT: u16 = 4;
+pub const LAN_PORT_COUNT: u16 = 8;
 pub const DISCOVERY_PORT: u16 = 41229;
 pub const MAX_FRAME_BYTES: usize = 256 * 1024;
 const LAN_ALPHABET: &[u8; 32] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -268,4 +268,29 @@ pub async fn stop_all(state: &LanState) {
         let _ = tx.send(true);
     }
     state.peers.lock().await.clear();
+}
+
+pub async fn discover_hosts(timeout_ms: u64) -> Vec<serde_json::Value> {
+    let mut found = Vec::new();
+    let Ok(udp) = UdpSocket::bind("0.0.0.0:0").await else {
+        return found;
+    };
+    let _ = udp.set_broadcast(true);
+    let _ = udp
+        .send_to(b"FATAL_ERROR_DISCOVER", ("255.255.255.255", DISCOVERY_PORT))
+        .await;
+    let deadline = tokio::time::Instant::now()
+        + std::time::Duration::from_millis(timeout_ms.clamp(80, 2000));
+    let mut buf = [0u8; 512];
+    let mut seen = std::collections::HashSet::new();
+    while let Ok(Ok((n, _from))) = tokio::time::timeout_at(deadline, udp.recv_from(&mut buf)).await {
+        if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&buf[..n]) {
+            if let Some(code) = v.get("code").and_then(|c| c.as_str()) {
+                if seen.insert(code.to_string()) {
+                    found.push(v);
+                }
+            }
+        }
+    }
+    found
 }

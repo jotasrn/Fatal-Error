@@ -11,6 +11,7 @@ import { makeInkMaterial } from '../core/render.js';
 
 const HIDDEN_LAYER = 1;
 const _frustum = new THREE.Frustum(), _pm = new THREE.Matrix4(), _sphere = new THREE.Sphere(), _v = new THREE.Vector3();
+const _shM = new THREE.Matrix4(), _shQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2), _shS = new THREE.Vector3();
 
 export class BotBatcher {
   constructor(scene) {
@@ -21,6 +22,15 @@ export class BotBatcher {
       double: makeInkMaterial({ ink: 0, shadeScale: 0, shadeBias: 1, side: THREE.DoubleSide }),
     };
     this.enabled = true;
+    // Contact shadow pool: 1 draw call for all grounded bots
+    const shGeo = new THREE.CircleGeometry(0.62, 12);
+    const shMat = makeInkMaterial({ ink: 2, fill: true, side: THREE.FrontSide });
+    shMat.polygonOffset = true; shMat.polygonOffsetFactor = -1; shMat.polygonOffsetUnits = -1;
+    this.shadowCap = 128;
+    this.shadows = new THREE.InstancedMesh(shGeo, shMat, this.shadowCap);
+    this.shadows.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.shadows.frustumCulled = false; this.shadows.count = 0; this.shadows.matrixAutoUpdate = false;
+    this.scene.add(this.shadows);
   }
   // call once per bot, right after it is built
   register(e) {
@@ -50,6 +60,7 @@ export class BotBatcher {
   // camera: the render camera (bots outside its view are skipped, the map itself is never culled here)
   update(enemies, camera) {
     for (const p of this.pools.values()) p.n = 0;
+    let shN = 0;
     _pm.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse); _frustum.setFromProjectionMatrix(_pm);
     for (const e of enemies) {
       const list = e.batched; if (!list || !list.length) continue;
@@ -57,6 +68,13 @@ export class BotBatcher {
       if (e.rootDetached || !root.parent || !root.visible) continue;
       _sphere.center.copy(root.position); _sphere.center.y += 1.0 * (e.T.scale || 1); _sphere.radius = 2.2 * (e.T.scale || 1) + 1;
       const onScreen = _frustum.intersectsSphere(_sphere);
+      if (onScreen && e.alive && !e.T.flying && shN < this.shadowCap) {
+        const sc = (e.T.isTank ? 1.9 : 1.0) * (e.T.scale || 1);
+        _v.set(root.position.x, root.position.y + 0.03, root.position.z);
+        _shS.set(sc, sc, 1);
+        _shM.compose(_v, _shQ, _shS);
+        this.shadows.setMatrixAt(shN++, _shM);
+      }
       for (let i = list.length - 1; i >= 0; i--) {
         const m = list[i];
         let o = m, vis = m.visible;
@@ -74,8 +92,10 @@ export class BotBatcher {
       p.mesh.count = p.n;
       if (p.n) { p.mesh.instanceMatrix.needsUpdate = true; p.mesh.instanceColor.needsUpdate = true; }
     }
+    this.shadows.count = shN;
+    if (shN) this.shadows.instanceMatrix.needsUpdate = true;
   }
   // drop the instanced copies of pieces nobody uses any more (e.g. after a map change)
-  clear() { for (const p of this.pools.values()) { p.n = 0; p.mesh.count = 0; } }
+  clear() { for (const p of this.pools.values()) { p.n = 0; p.mesh.count = 0; } this.shadows.count = 0; }
   get drawCalls() { let n = 0; for (const p of this.pools.values()) if (p.n) n++; return n; }
 }

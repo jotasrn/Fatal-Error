@@ -198,7 +198,7 @@ export class PeerNet {
   _incoming(conn) {
     const onOpen = () => {
       const total = this._totalPlayers();
-      if (!this.accepting || total > this.maxPlayers) {
+      if (!this.accepting || total >= this.maxPlayers) {
         conn.send({
           t: 'refused',
           d: {
@@ -295,27 +295,27 @@ export class PeerNet {
   }
 
   send(type, data, relay = false) {
-    this.stats.sent++;
     if (this.isHost) {
       const m = { t: type, d: data, from: this.effectiveId };
-      for (const c of this.conns.values()) if (c.open) c.send(m);
+      let any = false;
+      for (const c of this.conns.values()) if (c.open) { c.send(m); any = true; }
+      if (any) this.stats.sent++;
     } else {
       const c = this.conns.get(this._transportHostId || this.hostId);
-      if (c && c.open) c.send({ t: type, d: data, relay });
+      if (c && c.open) { c.send({ t: type, d: data, relay }); this.stats.sent++; }
     }
   }
 
   broadcast(type, data) { this.send(type, data, true); }
 
   sendTo(pid, type, data) {
-    this.stats.sent++;
     if (this.isHost) {
       const c = this.conns.get(pid);
-      if (c && c.open) { c.send({ t: type, d: data, from: this.effectiveId }); return true; }
+      if (c && c.open) { c.send({ t: type, d: data, from: this.effectiveId }); this.stats.sent++; return true; }
       return false;
     }
     const c = this.conns.get(this._transportHostId || this.hostId);
-    if (c && c.open) { c.send({ t: type, d: data, to: pid, from: this.id }); return true; }
+    if (c && c.open) { c.send({ t: type, d: data, to: pid, from: this.id }); this.stats.sent++; return true; }
     return false;
   }
 }

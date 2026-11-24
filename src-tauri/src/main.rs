@@ -70,6 +70,11 @@ async fn fe_lan_leave(state: State<'_, LanState>) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+async fn fe_lan_discover(timeout_ms: Option<u64>) -> Vec<serde_json::Value> {
+    lan::discover_hosts(timeout_ms.unwrap_or(350)).await
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(LanState::default())
@@ -82,6 +87,7 @@ fn main() {
             fe_lan_join,
             fe_lan_send,
             fe_lan_leave,
+            fe_lan_discover,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Fatal Error Tauri application");

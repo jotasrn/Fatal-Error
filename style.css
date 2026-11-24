@@ -19,15 +19,7 @@
   /* legacy names still used by the game code / minimap / scope */
   --ink: var(--ui-ink); --red: var(--ui-red); --paper: var(--ui-cream);
   --hud-scale: 1; --hud-opacity: 1;
-}
-html, body { margin: 0; height: 100%; overflow: hidden; background: #9fd2ff; font-family: 'Fredoka', 'Segoe UI', system-ui, sans-serif; }
-canvas#c { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
-#hud { position: fixed; inset: 0; pointer-events: none; color: var(--ui-ink); user-select: none; overflow: hidden; font-weight: 500; }
-#hud b { font-weight: 700; }
-kbd { display: inline-block; min-width: 1.2em; padding: 1px 7px 2px; font: 600 0.82em/1.25 'Fredoka', sans-serif; color: var(--ui-ink); background: var(--ui-card); border: 2px solid var(--ui-ink); border-bottom-width: 4px; border-radius: 8px; text-align: center; white-space: nowrap; }
-
-/* ---------- HUD tactical theme tokens ---------- */
-:root {
+  /* HUD tactical theme tokens */
   --hud-panel: rgba(13,17,25,.52);
   --hud-panel-solid: rgba(13,17,25,.74);
   --hud-stroke: rgba(255,255,255,.14);
@@ -39,6 +31,11 @@ kbd { display: inline-block; min-width: 1.2em; padding: 1px 7px 2px; font: 600 0
   --hud-cash: #ffc83a; --hud-danger: #ff485d; --hud-accent: #ffc83a;
   --hud-blur: saturate(1.1) blur(7px);
 }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #9fd2ff; font-family: 'Fredoka', 'Segoe UI', system-ui, sans-serif; }
+canvas#c { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+#hud { position: fixed; inset: 0; pointer-events: none; color: var(--ui-ink); user-select: none; overflow: hidden; font-weight: 500; }
+#hud b { font-weight: 700; }
+kbd { display: inline-block; min-width: 1.2em; padding: 1px 7px 2px; font: 600 0.82em/1.25 'Fredoka', sans-serif; color: var(--ui-ink); background: var(--ui-card); border: 2px solid var(--ui-ink); border-bottom-width: 4px; border-radius: 8px; text-align: center; white-space: nowrap; }
 
 /* ---------- shared building blocks ---------- */
 .card { background: var(--hud-panel); -webkit-backdrop-filter: var(--hud-blur); backdrop-filter: var(--hud-blur); border: 1px solid var(--hud-stroke); border-radius: 10px; box-shadow: 0 6px 22px rgba(0,0,0,.35); padding: 9px 13px; color: var(--hud-text); }
@@ -384,7 +381,7 @@ kbd { display: inline-block; min-width: 1.2em; padding: 1px 7px 2px; font: 600 0
 @media (max-width: 860px), (max-height: 640px) {
   .logo { font-size: 46px; } .btn-xl { min-width: 210px; } .btn-xl .bt { font-size: 22px; }
   .controls, .settings-grid, .bm-columns { grid-template-columns: 1fr; }
-  .msg-main { font-size: 56px; } .panel { padding: 14px 16px; gap: 9px; }
+  .msg-main { font-size: 38px; } .panel { padding: 14px 16px; gap: 9px; }
 }
 /* the shop footer (close button) stays visible while the cards scroll */
 .bm-box { padding-bottom: 0; }

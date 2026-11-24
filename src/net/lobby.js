@@ -282,6 +282,7 @@ export function createLobbyManager(ctx, deps) {
       else if (wasInMatch) { if (game.state !== 'play' && game.state !== 'dying') game.state = 'play'; refreshScoreHud(); }
       else { game.state = 'lobby'; deps.setScreen('lobby'); deps.showStart(); }
       broadcastLobby();
+      sendScores();
     } else {
       await sleep(1200);
       const deadline = performance.now() + 20000;
@@ -306,6 +307,7 @@ export function createLobbyManager(ctx, deps) {
     lobby.map = knownMap(getMapKey());
     setLevel(lobby.map, true); player.reset(ctx.level.playerStart);
     lobby.players.clear(); lobby.players.set(net.id, { name: getMyName() });
+    lobby.order = [net.id];
     lobby.hostId = net.id; lobby.status = '';
     game.state = 'lobby'; deps.setScreen('lobby'); deps.showStart();
   }

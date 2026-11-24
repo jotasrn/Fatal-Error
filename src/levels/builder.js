@@ -162,9 +162,12 @@ export function createBuilder(scene, world) {
     }
     if (nearTiles.length) {
       const LOD_DIST_SQ = 86 * 86; // ~80m de raio efetivo até o centro do bloco
+      let nearT = -1;
       L.animated.push({
         mesh: null,
-        update: () => {
+        update: (t) => {
+          if (nearT >= 0 && t - nearT < 0.15) return;
+          nearT = t;
           const cam = typeof window !== 'undefined' && window.__game && window.__game.ctx && window.__game.ctx.camera;
           if (!cam) return;
           const px = cam.position.x, pz = cam.position.z;
